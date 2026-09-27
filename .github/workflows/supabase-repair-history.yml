@@ -1,0 +1,79 @@
+name: Supabase Migration History Repair
+
+# Repairs supabase_migrations.schema_migrations — the table `supabase db push`
+# uses to decide what is already applied.
+#
+# Run this only when the local migration files and the remote history have
+# drifted, e.g. after renaming a file or applying SQL by hand. It is manual on
+# purpose: deleting history rows is not something a deploy pipeline should do
+# on its own.
+#
+#   reverted → delete these versions from the history table
+#               (use when the version no longer exists locally, or when you want
+#                the migration re-applied)
+#   applied  → insert these versions into the history table
+#               (use when the migration is already in the database)
+
+on:
+  workflow_dispatch:
+    inputs:
+      versions:
+        description: 'Versions, separated by spaces or commas (e.g. 001 002 003)'
+        required: true
+        type: string
+      status:
+        description: 'applied = record as done, reverted = forget them'
+        required: true
+        default: reverted
+        type: choice
+        options:
+          - reverted
+          - applied
+
+concurrency:
+  group: supabase-migrate
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Link Supabase project
+        run: supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+
+      - name: History before
+        if: always()
+        run: supabase migration list
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+
+      - name: Repair
+        run: |
+          set -euo pipefail
+          # Turn "001, 002  003" into "001 002 003"
+          versions="$(printf '%s' '${{ inputs.versions }}' | tr ',' ' ')"
+          versions="$(printf '%s' "$versions" | xargs -n1 | xargs)"
+          echo "Reconciling history: [$versions] => ${{ inputs.status }}"
+          supabase migration repair $versions --status ${{ inputs.status }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+
+      - name: History after
+        if: always()
+        run: supabase migration list
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}

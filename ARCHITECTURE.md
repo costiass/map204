@@ -471,6 +471,30 @@ Set in Vercel Dashboard → Project → Settings → Environment Variables:
    supabase migration repair <version> --status applied
    ```
 
+### When history and files disagree
+
+`db push` refuses to run if the remote history table holds a version with no
+matching file, reporting `Remote migration versions not found in local
+migrations directory`. That is not a fault in the migrations — it means a file
+was renamed, or a version was recorded by hand. Two ways out, both through the
+**Supabase Migration History Repair** workflow (manual, `workflow_dispatch`):
+
+| Goal | `status` | Effect |
+|------|----------|--------|
+| A file was renamed, or the migration should run again | `reverted` | deletes those versions from the history table, so `db push` applies them again |
+| The migration is already in the database | `applied` | inserts the versions, so `db push` skips them |
+
+For renamed files, `reverted` is the safe choice *provided the migrations are
+re-runnable* — as they are here, every statement is guarded, so applying one to
+a database that already has it changes nothing and simply records it. That is
+how this project's first two migrations, originally run by hand, get reconciled
+without a hand-written `INSERT`.
+
+`supabase db pull` is the third option the CLI suggests, and the wrong one here:
+it captures the *remote* schema into a new migration file, which then has to be
+reviewed and committed. It answers "what does the database look like now?", not
+"which of my files has already run?".
+
 ### Environment Variables for Vercel
 
 | Variable | Source |

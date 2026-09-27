@@ -87,15 +87,37 @@ export const DEFAULT_PAGE_POSITION: Position = {
 
 export const DEFAULT_PAGE_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** `position` was an integer before it became a JSON rect; old rows survive it. */
+function asPosition(value: unknown): Position {
+  return isRecord(value) ? (value as unknown as Position) : DEFAULT_PAGE_POSITION
+}
+
+function asViewport(value: unknown): Viewport {
+  if (!isRecord(value)) return DEFAULT_PAGE_VIEWPORT
+  return {
+    x: typeof value.x === 'number' ? value.x : 0,
+    y: typeof value.y === 'number' ? value.y : 0,
+    zoom: typeof value.zoom === 'number' && value.zoom > 0 ? value.zoom : 1,
+  }
+}
+
+function asArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : []
+}
+
 export function rowToPage(row: PageRow): Page {
   return {
     id: row.id,
-    title: row.title,
-    position: row.position ?? DEFAULT_PAGE_POSITION,
-    viewport: row.viewport ?? DEFAULT_PAGE_VIEWPORT,
-    cards: row.cards ?? [],
-    groups: row.groups ?? [],
-    connections: row.connections ?? [],
+    title: row.title || 'Untitled Page',
+    position: asPosition(row.position),
+    viewport: asViewport(row.viewport),
+    cards: asArray<Card>(row.cards),
+    groups: asArray<Group>(row.groups),
+    connections: asArray<Connection>(row.connections),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
