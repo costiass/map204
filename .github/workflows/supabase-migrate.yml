@@ -24,7 +24,18 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
 
-      - name: Push new migrations only
+      - name: Mark manually-applied migrations as done
+        run: |
+          supabase db execute --file - <<'SQL'
+          INSERT INTO supabase_migrations.schema_migrations (version, name) VALUES
+            ('20250101000001', '001_initial_schema'),
+            ('20250101000002', '002_user_settings')
+          ON CONFLICT (version) DO NOTHING;
+          SQL
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Push new migrations
         run: supabase db push
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
