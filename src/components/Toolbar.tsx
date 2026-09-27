@@ -9,6 +9,7 @@ import {
   IconKeyboard,
   IconMagnet,
   IconMoon,
+  IconMore,
   IconPlus,
   IconRedo,
   IconSave,
@@ -34,7 +35,7 @@ const SHORTCUTS: Array<[string, string]> = [
   ['Delete / Backspace', 'Delete selection'],
   ['Ctrl + Z', 'Undo'],
   ['Ctrl + Shift + Z', 'Redo'],
-  ['Ctrl + S', 'Save to the database now'],
+  ['Ctrl + S', 'Write the page now'],
   ['Ctrl + A', 'Select all cards'],
   ['Ctrl + D', 'Duplicate selection'],
   ['Space + drag', 'Pan canvas'],
@@ -47,22 +48,35 @@ const SHORTCUTS: Array<[string, string]> = [
 
 interface ToolbarProps {
   user: SupabaseUser | null
+  /** Non-null on the canvas route. The route decides the layout, not the store. */
+  documentId: string | null
   onOpenSettings?: () => void
   onOpenWorkspace?: () => void
   onOpenShare?: () => void
   onUserChange: (user: SupabaseUser | null) => void
 }
 
+/**
+ * The app chrome, in the two rows every editor uses: identity on top, tools
+ * below.
+ *
+ *   row 1  [sidebar] [logo] [document name] ……… [people] [share] [theme] [⋯] [avatar]
+ *   row 2  add · history · zoom · grid · search        (canvas route only)
+ *
+ * Row 1 is the same height and the same arrangement on every route, so nothing
+ * shifts when you open a workspace. Row 2 appears only on the canvas, and
+ * scrolls sideways rather than wrapping, so it can never change the height.
+ */
 export function Toolbar({
   user,
+  documentId,
   onOpenSettings,
   onOpenWorkspace,
   onOpenShare,
   onUserChange,
 }: ToolbarProps) {
-  const activePageId = useCanvasStore((s) => s.activePageId)
+  const isCanvas = Boolean(documentId)
   const page = useCanvasStore((s) => s.doc.pages.find((p) => p.id === s.activePageId))
-  const renamePage = useCanvasStore((s) => s.renamePage)
   const addCard = useCanvasStore((s) => s.addCard)
   const addGroup = useCanvasStore((s) => s.addGroup)
   const undo = useCanvasStore((s) => s.undo)
@@ -84,10 +98,14 @@ export function Toolbar({
   const flushCommit = useCanvasStore((s) => s.flushCommit)
   const requestFitView = useCanvasStore((s) => s.requestFitView)
   const darkMode = useCanvasStore((s) => s.darkMode)
+  const documentTitle = useCanvasStore((s) => s.documentTitle)
+  const setDocumentTitle = useCanvasStore((s) => s.setDocumentTitle)
   const [showAuth, setShowAuth] = useState(false)
   const [showUserMenu, setShowUserMenu] = useState(false)
+  const [showMore, setShowMore] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
   const userMenuRef = useRef<HTMLDivElement>(null)
+  const moreRef = useRef<HTMLDivElement>(null)
 
   // The dark-mode button and the settings panel are the same preference: the
   // store writes the change to `user_settings`.
@@ -132,241 +150,210 @@ export function Toolbar({
     pushToast('Signed out.', 'info')
   }
 
-  // Close user menu on outside click.
+  // Close the popovers on outside click.
   useEffect(() => {
-    if (!showUserMenu) return
+    if (!showUserMenu && !showMore) return
     const onPointerDown = (event: PointerEvent) => {
-      if (!userMenuRef.current?.contains(event.target as Node)) setShowUserMenu(false)
+      const target = event.target as Node
+      if (showUserMenu && !userMenuRef.current?.contains(target)) setShowUserMenu(false)
+      if (showMore && !moreRef.current?.contains(target)) setShowMore(false)
     }
     window.addEventListener('pointerdown', onPointerDown)
     return () => window.removeEventListener('pointerdown', onPointerDown)
-  }, [showUserMenu])
+  }, [showUserMenu, showMore])
 
-  const isCanvas = Boolean(page)
+  const zoomBy = (factor: number) => {
+    if (!page) return
+    const centre = { x: viewportSize.width / 2, y: viewportSize.height / 2 }
+    setViewport(zoomAtPoint(page.viewport, centre, (page.viewport.zoom ?? 1) * factor))
+  }
+
+  const saveNow = () => {
+    flushCommit()
+    void flushPageNow().then(() => pushToast('Saved', 'success'))
+  }
 
   return (
-    <header className="z-30 flex flex-wrap items-center gap-2 border-b border-line bg-white/85 px-3 py-2 backdrop-blur dark:bg-slate-900/85">
-      {/* Sidebar toggle (canvas only) */}
-      {isCanvas ? (
+    <header className="cc-topbar z-30 flex-none border-b border-line bg-white/90 backdrop-blur dark:bg-[#0d0d0d]/90">
+      {/* ---------------------------------------------------------------- */}
+      {/* Row 1 — identity, present on every route                        */}
+      {/* ---------------------------------------------------------------- */}
+      <div className="flex h-12 items-center gap-2 px-2 sm:px-3">
+        {isCanvas ? (
+          <button
+            type="button"
+            className="cc-icon"
+            title={sidebarOpen ? 'Hide pages' : 'Show pages'}
+            aria-label="Toggle page sidebar"
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+          >
+            <IconSidebar size={16} />
+          </button>
+        ) : null}
+
         <button
           type="button"
-          className="cc-btn px-2"
-          title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
-          onClick={() => setSidebarOpen(!sidebarOpen)}
-        >
-          <IconSidebar size={15} />
-        </button>
-      ) : null}
-
-      {/* Logo / home */}
-      <div className="flex min-w-0 items-center gap-2">
-        <img
-          src="/favicon.svg"
-          alt="Logo"
-          width="22"
-          height="22"
-          className="shrink-0 cursor-pointer"
+          className="flex min-w-0 items-center gap-2 rounded-lg px-1 py-1 hover:bg-slate-100 dark:hover:bg-[#1e1e1e]"
           onClick={() => onOpenWorkspace?.()}
-        />
-        <button
-          type="button"
-          className="hidden cursor-pointer text-sm font-bold tracking-tight text-slate-800 sm:inline dark:text-slate-100"
-          onClick={() => onOpenWorkspace?.()}
+          title="All workspaces"
         >
-          ClassCards
+          <img src="/favicon.svg" alt="" width="22" height="22" className="shrink-0" />
+          <span className="hidden shrink-0 text-sm font-bold tracking-tight text-slate-800 dark:text-slate-100 sm:inline">
+            ClassCards
+          </span>
         </button>
-      </div>
 
-      {/* Page title (canvas only) */}
-      {isCanvas && page ? (
-        <input
-          key={activePageId}
-          defaultValue={page.title}
-          aria-label="Page title"
-          className="cc-input max-w-[10rem] font-semibold sm:max-w-[16rem]"
-          onChange={(event) => renamePage(activePageId, event.target.value)}
-        />
-      ) : null}
-
-      {/* Canvas toolbar (only on canvas route) */}
-      {isCanvas ? (
-        <div className="ml-auto flex flex-wrap items-center gap-1.5">
-          <button type="button" className="cc-btn" data-variant="primary" onClick={() => addCard()}>
-            <IconPlus size={14} />
-            <span className="hidden sm:inline">Card</span>
-            <span className="cc-kbd ml-1 hidden lg:inline">C</span>
-          </button>
-          <button type="button" className="cc-btn" onClick={() => addGroup()}>
-            <IconPlus size={14} />
-            <span className="hidden sm:inline">Group</span>
-            <span className="cc-kbd ml-1 hidden lg:inline">G</span>
-          </button>
-
-          <span className="mx-1 h-6 w-px bg-line" />
-
-          <button type="button" className="cc-btn px-2" title="Undo (Ctrl+Z)" disabled={!canUndo} onClick={undo}>
-            <IconUndo size={15} />
-          </button>
-          <button type="button" className="cc-btn px-2" title="Redo (Ctrl+Shift+Z)" disabled={!canRedo} onClick={redo}>
-            <IconRedo size={15} />
-          </button>
-
-          <span className="mx-1 h-6 w-px bg-line" />
-
-          <button type="button" className="cc-btn px-2" title="Zoom out" onClick={() => {
-            if (!page) return
-            const zoom = page.viewport.zoom ?? 1
-            setViewport(zoomAtPoint(page.viewport, { x: viewportSize.width / 2, y: viewportSize.height / 2 }, zoom / 1.2))
-          }}>
-            <IconZoomOut size={15} />
-          </button>
-          <button
-            type="button"
-            className="cc-btn min-w-[3.1rem] tabular-nums"
-            title="Reset zoom to 100%"
-            onClick={() => {
-              if (!page) return
-              setViewport(zoomAtPoint(page.viewport, { x: viewportSize.width / 2, y: viewportSize.height / 2 }, 1))
-            }}
-          >
-            {page ? Math.round(page.viewport.zoom * 100) : 100}%
-          </button>
-          <button type="button" className="cc-btn px-2" title="Zoom in" onClick={() => {
-            if (!page) return
-            const zoom = page.viewport.zoom ?? 1
-            setViewport(zoomAtPoint(page.viewport, { x: viewportSize.width / 2, y: viewportSize.height / 2 }, zoom * 1.2))
-          }}>
-            <IconZoomIn size={15} />
-          </button>
-          <button
-            type="button"
-            className="cc-btn px-2"
-            title="Fit all cards in view (F)"
-            onClick={requestFitView}
-          >
-            <IconFit size={15} />
-          </button>
-
-          <span className="mx-1 h-6 w-px bg-line" />
-
-          <button
-            type="button"
-            className="cc-btn px-2"
-            title="Snap to grid"
-            data-active={snapToGrid}
-            onClick={toggleSnapToGrid}
-          >
-            <IconMagnet size={15} />
-          </button>
-          <div className="cc-seg">
-            <button type="button" data-active={gridPattern === 'none'} onClick={() => setGridPattern('none')}>
-              Off
-            </button>
-            <button type="button" data-active={gridPattern === 'dots'} onClick={() => setGridPattern('dots')}>
-              Dots
-            </button>
-            <button type="button" data-active={gridPattern === 'lines'} onClick={() => setGridPattern('lines')}>
-              Lines
-            </button>
-          </div>
-
-          <span className="mx-1 h-6 w-px bg-line" />
-
-          <button
-            type="button"
-            className="cc-btn px-2"
-            title="Search cards"
-            data-active={searchOpen}
-            onClick={() => setSearchOpen(!searchOpen)}
-          >
-            <IconSearch size={15} />
-          </button>
-
-          <span className="mx-1 h-6 w-px bg-line" />
-
-          <button type="button" className="cc-btn px-2" title="Import JSON" onClick={() => setDialog('import')}>
-            <IconUpload size={15} />
-          </button>
-          <button type="button" className="cc-btn px-2" title="Export JSON" onClick={() => setDialog('export')}>
-            <IconDownload size={15} />
-          </button>
-          <button
-            type="button"
-            className="cc-btn"
-            title={
-              others.length > 0
-                ? `Also here: ${others.map((entry) => entry.name).join(', ')}`
-                : 'Share this workspace'
-            }
-            onClick={() => onOpenShare?.()}
-          >
-            <IconShare size={15} />
-            <span className="hidden sm:inline">Share</span>
-            {others.length > 0 ? (
-              <span className="ml-1 rounded-full bg-indigo-100 px-1.5 text-[11px] font-bold text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-200">
-                {others.length + 1}
-              </span>
-            ) : null}
-          </button>
-
-          <button type="button" className="cc-btn px-2" title="Save now (Ctrl+S)" onClick={() => {
-            flushCommit()
-            void flushPageNow().then(() => {
-              pushToast('Saved', 'success')
-            })
-          }}>
-            <IconSave size={15} />
-          </button>
-        </div>
-      ) : (
-        <div className="ml-auto" />
-      )}
-
-      {/* Right side: dark mode + shortcuts + account */}
-      <div className="flex items-center gap-1.5">
-        <button
-          type="button"
-          className="cc-btn px-2"
-          title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-          onClick={toggleTheme}
-        >
-          {darkMode ? <IconSun size={15} /> : <IconMoon size={15} />}
-        </button>
+        <span className="h-5 w-px shrink-0 bg-line" />
 
         {isCanvas ? (
-          <div className="relative">
-            <button
-              type="button"
-              className="cc-btn px-2"
-              title="Keyboard shortcuts"
-              onClick={() => setShowShortcuts((v) => !v)}
-            >
-              <IconKeyboard size={15} />
-            </button>
-            {showShortcuts ? (
-              <div className="cc-panel absolute right-0 top-[2.4rem] z-50 w-[19rem] p-3">
-                <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">
-                  Shortcuts
-                </h3>
-                <ul className="grid gap-1.5 text-xs">
-                  {SHORTCUTS.map(([keys, description]) => (
-                    <li key={keys} className="grid grid-cols-[7.5rem_1fr] items-center gap-2">
-                      <span className="cc-kbd">{keys}</span>
-                      <span className="text-slate-600 dark:text-slate-300">{description}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+          <input
+            key={documentId}
+            defaultValue={documentTitle}
+            aria-label="Workspace name"
+            placeholder="Untitled workspace"
+            className="min-w-0 flex-1 truncate rounded-md border border-transparent bg-transparent px-1.5 py-1 text-sm font-semibold text-slate-700 outline-none hover:border-line focus:border-brand focus:bg-white dark:text-slate-200 dark:hover:bg-[#1e1e1e] dark:focus:bg-[#1a1a1a]"
+            onChange={(event) => setDocumentTitle(event.target.value)}
+            onBlur={(event) => {
+              const clean = event.target.value.trim()
+              if (clean) setDocumentTitle(clean)
+              else setDocumentTitle('Untitled')
+            }}
+          />
+        ) : (
+          <h1 className="min-w-0 flex-1 truncate px-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200">
+            All workspaces
+          </h1>
+        )}
+
+        {isCanvas && others.length > 0 ? (
+          <div
+            className="hidden shrink-0 items-center sm:flex"
+            title={`Also here: ${others.map((entry) => entry.name).join(', ')}`}
+          >
+            {others.slice(0, 3).map((entry) => (
+              <span
+                key={entry.userId}
+                className="-ml-1.5 flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border-2 border-white text-[10px] font-bold text-white first:ml-0 dark:border-[#0d0d0d]"
+                style={{ background: entry.color }}
+              >
+                {entry.avatarUrl ? (
+                  <img src={entry.avatarUrl} alt={entry.name} className="h-full w-full object-cover" />
+                ) : (
+                  entry.name.charAt(0).toUpperCase()
+                )}
+              </span>
+            ))}
+            {others.length > 3 ? (
+              <span className="-ml-1.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-slate-400 text-[10px] font-bold text-white dark:border-[#0d0d0d]">
+                +{others.length - 3}
+              </span>
             ) : null}
           </div>
         ) : null}
 
-        {/* Account */}
+        {isCanvas ? (
+          <button
+            type="button"
+            className="cc-btn shrink-0"
+            data-variant="primary"
+            onClick={() => onOpenShare?.()}
+          >
+            <IconShare size={14} />
+            <span className="hidden sm:inline">Share</span>
+          </button>
+        ) : null}
+
+        <button
+          type="button"
+          className="cc-icon shrink-0"
+          title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+          aria-label="Toggle theme"
+          onClick={toggleTheme}
+        >
+          {darkMode ? <IconSun size={16} /> : <IconMoon size={16} />}
+        </button>
+
+        <div ref={moreRef} className="relative shrink-0">
+          <button
+            type="button"
+            className="cc-icon"
+            title="More"
+            aria-label="More actions"
+            onClick={() => setShowMore((v) => !v)}
+          >
+            <IconMore size={16} />
+          </button>
+          {showMore ? (
+            <div className="cc-menu absolute right-0 top-10 z-50 w-56">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowMore(false)
+                  setShowShortcuts((v) => !v)
+                }}
+              >
+                <IconKeyboard size={15} /> Keyboard shortcuts
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowMore(false)
+                  setSearchOpen(true)
+                }}
+              >
+                <IconSearch size={15} /> Search cards
+                <span className="ml-auto text-[11px] text-slate-400">⌘K</span>
+              </button>
+              <hr />
+              <button
+                type="button"
+                onClick={() => {
+                  setShowMore(false)
+                  setDialog('import')
+                }}
+              >
+                <IconUpload size={15} /> Import JSON
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowMore(false)
+                  setDialog('export')
+                }}
+              >
+                <IconDownload size={15} /> Export JSON
+              </button>
+              {isCanvas ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowMore(false)
+                    saveNow()
+                  }}
+                >
+                  <IconSave size={15} /> Save now
+                  <span className="ml-auto text-[11px] text-slate-400">⌘S</span>
+                </button>
+              ) : null}
+              <hr />
+              <button
+                type="button"
+                onClick={() => {
+                  setShowMore(false)
+                  onOpenSettings?.()
+                }}
+              >
+                Settings
+              </button>
+            </div>
+          ) : null}
+        </div>
+
         {user ? (
-          <div ref={userMenuRef} className="relative">
+          <div ref={userMenuRef} className="relative shrink-0">
             <button
               type="button"
-              className="flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold text-white"
+              className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-full text-xs font-bold text-white"
               style={{ background: 'var(--color-brand)' }}
               title={user.email}
               onClick={() => setShowUserMenu((v) => !v)}
@@ -374,16 +361,16 @@ export function Toolbar({
               {user.user_metadata?.avatar_url || user.user_metadata?.picture ? (
                 <img
                   src={user.user_metadata.avatar_url ?? user.user_metadata.picture}
-                  alt="Profile"
-                  className="h-8 w-8 rounded-full object-cover"
+                  alt=""
+                  className="h-full w-full object-cover"
                 />
               ) : (
-                <span>{user.email.charAt(0).toUpperCase()}</span>
+                user.email.charAt(0).toUpperCase()
               )}
             </button>
             {showUserMenu ? (
-              <div className="cc-panel absolute right-0 top-[2.4rem] z-50 w-48 p-1.5">
-                <div className="border-b border-line px-2 py-1.5 dark:border-slate-700">
+              <div className="cc-menu absolute right-0 top-10 z-50 w-52">
+                <div className="border-b border-line px-2 py-1.5 dark:border-[#2a2a2a]">
                   <p className="truncate text-xs font-semibold text-slate-700 dark:text-slate-200">
                     {user.user_metadata?.name ?? user.email}
                   </p>
@@ -391,7 +378,7 @@ export function Toolbar({
                 </div>
                 <button
                   type="button"
-                  className="mt-1 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-slate-100 dark:hover:bg-slate-700"
+                  className="mt-1"
                   onClick={() => {
                     setShowUserMenu(false)
                     onOpenSettings?.()
@@ -401,7 +388,6 @@ export function Toolbar({
                 </button>
                 <button
                   type="button"
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-slate-100 dark:hover:bg-slate-700"
                   onClick={() => {
                     setShowUserMenu(false)
                     onOpenWorkspace?.()
@@ -409,9 +395,10 @@ export function Toolbar({
                 >
                   Workspaces
                 </button>
+                <hr />
                 <button
                   type="button"
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                  data-danger="true"
                   onClick={() => {
                     setShowUserMenu(false)
                     void handleSignOut()
@@ -423,16 +410,143 @@ export function Toolbar({
             ) : null}
           </div>
         ) : (
-          <button
-            type="button"
-            className="cc-btn px-2"
-            title="Sign in"
-            onClick={() => setShowAuth(true)}
-          >
+          <button type="button" className="cc-btn shrink-0" onClick={() => setShowAuth(true)}>
             Sign in
           </button>
         )}
       </div>
+
+      {/* ---------------------------------------------------------------- */}
+      {/* Row 2 — canvas tools                                             */}
+      {/* ---------------------------------------------------------------- */}
+      {isCanvas ? (
+        <div className="cc-scroll flex h-10 items-center gap-1 overflow-x-auto border-t border-line px-2 sm:px-3">
+          <button type="button" className="cc-btn shrink-0" data-variant="primary" onClick={() => addCard()}>
+            <IconPlus size={14} />
+            Card
+            <span className="cc-kbd ml-0.5 hidden lg:inline">C</span>
+          </button>
+          <button type="button" className="cc-btn shrink-0" onClick={() => addGroup()}>
+            <IconPlus size={14} />
+            Group
+            <span className="cc-kbd ml-0.5 hidden lg:inline">G</span>
+          </button>
+
+          <span className="mx-0.5 h-5 w-px shrink-0 bg-line" />
+
+          <button type="button" className="cc-icon shrink-0" title="Undo (Ctrl+Z)" disabled={!canUndo} onClick={undo}>
+            <IconUndo size={16} />
+          </button>
+          <button type="button" className="cc-icon shrink-0" title="Redo (Ctrl+Shift+Z)" disabled={!canRedo} onClick={redo}>
+            <IconRedo size={16} />
+          </button>
+
+          <span className="mx-0.5 h-5 w-px shrink-0 bg-line" />
+
+          <button type="button" className="cc-icon shrink-0" title="Zoom out" onClick={() => zoomBy(1 / 1.2)}>
+            <IconZoomOut size={16} />
+          </button>
+          <button
+            type="button"
+            className="cc-btn min-w-[3.4rem] shrink-0 tabular-nums"
+            title="Reset zoom to 100%"
+            onClick={() => {
+              if (!page) return
+              setViewport(
+                zoomAtPoint(page.viewport, { x: viewportSize.width / 2, y: viewportSize.height / 2 }, 1),
+              )
+            }}
+          >
+            {page ? Math.round((page.viewport.zoom ?? 1) * 100) : 100}%
+          </button>
+          <button type="button" className="cc-icon shrink-0" title="Zoom in" onClick={() => zoomBy(1.2)}>
+            <IconZoomIn size={16} />
+          </button>
+          <button
+            type="button"
+            className="cc-icon shrink-0"
+            title="Fit all cards in view (F)"
+            onClick={requestFitView}
+          >
+            <IconFit size={16} />
+          </button>
+
+          <span className="mx-0.5 h-5 w-px shrink-0 bg-line" />
+
+          <button
+            type="button"
+            className="cc-icon shrink-0"
+            title="Snap to grid"
+            data-active={snapToGrid}
+            onClick={toggleSnapToGrid}
+          >
+            <IconMagnet size={16} />
+          </button>
+          <div className="cc-seg shrink-0">
+            <button type="button" data-active={gridPattern === 'none'} onClick={() => setGridPattern('none')}>
+              Off
+            </button>
+            <button type="button" data-active={gridPattern === 'dots'} onClick={() => setGridPattern('dots')}>
+              Dots
+            </button>
+            <button type="button" data-active={gridPattern === 'lines'} onClick={() => setGridPattern('lines')}>
+              Lines
+            </button>
+          </div>
+
+          <span className="mx-0.5 h-5 w-px shrink-0 bg-line" />
+
+          <button
+            type="button"
+            className="cc-icon shrink-0"
+            title="Search cards"
+            data-active={searchOpen}
+            onClick={() => setSearchOpen(!searchOpen)}
+          >
+            <IconSearch size={16} />
+          </button>
+          <button
+            type="button"
+            className="cc-icon shrink-0"
+            title="Write the page now (Ctrl+S)"
+            onClick={saveNow}
+          >
+            <IconSave size={16} />
+          </button>
+        </div>
+      ) : null}
+
+      {/* Shortcuts sheet, opened from the overflow menu. */}
+      {showShortcuts ? (
+        <div
+          className="fixed inset-0 z-[70] grid place-items-center bg-slate-900/40 p-4"
+          onClick={() => setShowShortcuts(false)}
+        >
+          <div
+            className="cc-panel w-full max-w-md p-4"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-label="Keyboard shortcuts"
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-sm font-bold text-slate-700 dark:text-slate-100">
+                Keyboard shortcuts
+              </h2>
+              <button type="button" className="cc-btn px-1.5 py-1" onClick={() => setShowShortcuts(false)}>
+                ✕
+              </button>
+            </div>
+            <ul className="grid gap-1.5 text-xs">
+              {SHORTCUTS.map(([keys, description]) => (
+                <li key={keys} className="grid grid-cols-[7.5rem_1fr] items-center gap-2">
+                  <span className="cc-kbd">{keys}</span>
+                  <span className="text-slate-600 dark:text-slate-300">{description}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      ) : null}
 
       {showAuth ? (
         <LoginPage

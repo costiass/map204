@@ -956,6 +956,55 @@ body {
 /* Chrome                                                            */
 /* ---------------------------------------------------------------- */
 
+/* The app chrome. Row 1 (identity) is fixed height; row 2 (canvas tools) scrolls
+   sideways rather than wrapping, so the bar never changes height by route. */
+.cc-topbar {
+  background: rgba(255, 255, 255, 0.9);
+  border-bottom: 1px solid var(--color-line);
+  backdrop-filter: blur(8px);
+}
+
+.cc-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-ink);
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+.cc-icon:hover:not(:disabled) {
+  background: #f1f5f9;
+  border-color: var(--color-line);
+}
+
+.cc-icon:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.dark .cc-icon {
+  color: #e5e5e5;
+}
+
+.dark .cc-icon:hover:not(:disabled) {
+  background: #262626;
+  border-color: #2a2a2a;
+}
+
+.dark .cc-icon[data-active='true'] {
+  background: #1e1e1e;
+  border-color: #818cf8;
+  color: #a5b4fc;
+}
+
 .cc-panel {
   background: #ffffff;
   border: 1px solid var(--color-line);

@@ -97,79 +97,12 @@ REVOKE ALL ON FUNCTION find_profile_by_email(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION find_profile_by_email(text) TO authenticated;
 
 -- ============================================================
--- Access helpers used by RLS (and by the Realtime policies)
+-- Access helpers
 -- ============================================================
-CREATE OR REPLACE FUNCTION can_view_document(p_document_id text)
-RETURNS BOOLEAN
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM documents d WHERE d.id = p_document_id AND d.owner_id = auth.uid()
-  ) OR EXISTS (
-    SELECT 1 FROM document_collaborators dc
-    WHERE dc.document_id = p_document_id AND dc.user_id = auth.uid()
-  );
-$$;
-
-CREATE OR REPLACE FUNCTION can_edit_document(p_document_id text)
-RETURNS BOOLEAN
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM documents d WHERE d.id = p_document_id AND d.owner_id = auth.uid()
-  ) OR EXISTS (
-    SELECT 1 FROM document_collaborators dc
-    WHERE dc.document_id = p_document_id
-      AND dc.user_id = auth.uid()
-      AND dc.role IN ('owner', 'editor')
-  );
-$$;
-
-CREATE OR REPLACE FUNCTION can_view_page(p_page_id text)
-RETURNS BOOLEAN
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM pages pg
-    JOIN documents d ON d.id = pg.document_id
-    WHERE pg.id = p_page_id AND d.owner_id = auth.uid()
-  ) OR EXISTS (
-    SELECT 1
-    FROM pages pg
-    JOIN document_collaborators dc ON dc.document_id = pg.document_id
-    WHERE pg.id = p_page_id AND dc.user_id = auth.uid()
-  );
-$$;
-
-CREATE OR REPLACE FUNCTION can_edit_page(p_page_id text)
-RETURNS BOOLEAN
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM pages pg
-    JOIN documents d ON d.id = pg.document_id
-    WHERE pg.id = p_page_id AND d.owner_id = auth.uid()
-  ) OR EXISTS (
-    SELECT 1
-    FROM pages pg
-    JOIN document_collaborators dc ON dc.document_id = pg.document_id
-    WHERE pg.id = p_page_id
-      AND dc.user_id = auth.uid()
-      AND dc.role IN ('owner', 'editor')
-  );
-$$;
+-- can_view_document / can_edit_document / can_view_page / can_edit_page were
+-- introduced in 20260921091500_fix_rls_recursion.sql, at the first migration
+-- that needs them, so that no partial push can leave the database in a state
+-- where its policies recurse. They are reused here, not redefined.
 
 -- ============================================================
 -- Collaborators can edit the documents shared with them
@@ -182,14 +115,8 @@ CREATE POLICY "Collaborators can update shared documents"
 DROP POLICY IF EXISTS "Collaborators can insert pages in shared documents" ON pages;
 CREATE POLICY "Collaborators can insert pages in shared documents"
   ON pages FOR INSERT
-  WITH CHECK (can_edit_page(pages.id) OR (
-    EXISTS (
-      SELECT 1 FROM document_collaborators dc
-      WHERE dc.document_id = pages.document_id
-        AND dc.user_id = auth.uid()
-        AND dc.role IN ('owner', 'editor')
-    )
-  ));
+  -- A brand new page has no id yet, so this asks about the document instead.
+  WITH CHECK (can_edit_document(pages.document_id));
 
 DROP POLICY IF EXISTS "Collaborators can update pages in shared documents" ON pages;
 CREATE POLICY "Collaborators can update pages in shared documents"
@@ -232,7 +159,3 @@ $$;
 REVOKE ALL ON FUNCTION add_document_owner_collaborator(text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION add_document_owner_collaborator(text, text) TO service_role;
 
-GRANT EXECUTE ON FUNCTION can_view_document(text) TO authenticated;
-GRANT EXECUTE ON FUNCTION can_edit_document(text) TO authenticated;
-GRANT EXECUTE ON FUNCTION can_view_page(text) TO authenticated;
-GRANT EXECUTE ON FUNCTION can_edit_page(text) TO authenticated;

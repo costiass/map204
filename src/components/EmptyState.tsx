@@ -15,8 +15,9 @@ export function EmptyState({ onFit }: { onFit: () => void }) {
           {cards === 0 ? 'This page is empty' : 'Nothing to show'}
         </h2>
         <p className="mt-1 text-sm text-slate-500">
-          Press <span className="cc-kbd">N</span> or double-click the canvas to drop a card. Drag a card by its
-          header, and drag from a dot on a card edge to connect two cards.
+          Press <span className="cc-kbd">C</span> or double-click the canvas to drop a card.{' '}
+          <span className="cc-kbd">G</span> adds a group. Drag a card by its header, and drag from
+          a dot on a card edge to connect two things.
         </p>
         <div className="mt-4 flex justify-center gap-2">
           <button type="button" className="cc-btn" data-variant="primary" onClick={() => addCard()}>

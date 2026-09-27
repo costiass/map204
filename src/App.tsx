@@ -146,8 +146,10 @@ export default function App() {
           settings.theme === 'dark' ? 'dark' : ''
         }`}
       >
+        {/* The route — not the store — decides what the chrome shows. */}
         <Toolbar
           user={user}
+          documentId={currentDocId}
           onOpenSettings={() => {
             window.location.hash = 'settings'
           }}
@@ -163,10 +165,11 @@ export default function App() {
     </AuthGuard>
   )
 
-  // Settings (full page, hash route).
+  // Settings (full page, hash route). The panel is a fixed overlay, so this
+  // branch only needs a mount point that does not scroll.
   if (window.location.hash === '#settings') {
     return shell(
-      <div className="flex-1 overflow-auto">
+      <div className="min-h-0 flex-1 overflow-hidden">
         {user ? (
           <UserSettingsPage user={user} onClose={openWorkspace} />
         ) : (
@@ -178,10 +181,10 @@ export default function App() {
     )
   }
 
-  // Workspace list.
+  // Workspace list. The page owns the scroll; the shell just gives it a height.
   if (!currentDocId) {
     return shell(
-      <div className="flex-1 overflow-auto">
+      <div className="min-h-0 flex-1 overflow-hidden">
         <WorkspacePage userId={user?.id ?? ''} onOpenDocument={openDocument} />
       </div>,
     )
