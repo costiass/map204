@@ -19,8 +19,6 @@ import { bootError, bootWarnings, useCanvasStore } from '@/store/useCanvasStore'
 import { useUserSettings } from '@/store/userSettings'
 import type { SupabaseUser } from '@/lib/supabase'
 
-type Route = 'workspace' | 'canvas' | 'settings'
-
 export default function App() {
   useKeyboardShortcuts()
   useAutosave()
@@ -29,11 +27,11 @@ export default function App() {
   const sidebarOpen = useCanvasStore((s) => s.sidebarOpen)
   const setSidebarOpen = useCanvasStore((s) => s.setSidebarOpen)
   const pushToast = useCanvasStore((s) => s.pushToast)
-
   const reportedBoot = useRef(false)
 
-  const [route, setRoute] = useState<Route>('workspace')
+  const [currentDocId, setCurrentDocId] = useState<string | null>(null)
   const [user, setUser] = useState<SupabaseUser | null>(null)
+  const [showSettingsOverlay, setShowSettingsOverlay] = useState(false)
   const { settings } = useUserSettings()
 
   // Sync user settings to canvas store.
@@ -59,98 +57,66 @@ export default function App() {
   }, [pushToast])
 
   const openDocument = (docId: string, _title: string) => {
+    setCurrentDocId(docId)
     useCanvasStore.getState().setDocumentId(docId)
-    setRoute('canvas')
   }
 
   const openWorkspace = () => {
-    setRoute('workspace')
+    setCurrentDocId(null)
+    useCanvasStore.getState().setDocumentId(null)
   }
 
-  // Settings page
-  if (route === 'settings') {
-    return (
-      <AuthGuard>
-        <div className={`flex h-full w-full flex-col overflow-hidden bg-canvas ${settings.theme === 'dark' ? 'dark' : ''}`}>
-          <Toolbar
-            route={route}
-            user={user}
-            onNavigate={setRoute}
-            onUserChange={setUser}
-          />
-          <div className="flex-1 overflow-auto">
-            {user ? (
-              <UserSettingsPage user={user} onBack={openWorkspace} />
-            ) : (
-              <div className="flex h-full items-center justify-center text-sm text-slate-400">
-                Please sign in to access settings.
-              </div>
-            )}
-          </div>
-          <ContextMenu />
-          <ImportExportDialog />
-          <Toasts />
-        </div>
-      </AuthGuard>
-    )
-  }
-
-  // Workspace page (document list)
-  if (route === 'workspace') {
-    return (
-      <AuthGuard>
-        <div className={`flex h-full w-full flex-col overflow-hidden bg-canvas ${settings.theme === 'dark' ? 'dark' : ''}`}>
-          <Toolbar
-            route={route}
-            user={user}
-            onNavigate={setRoute}
-            onUserChange={setUser}
-          />
-          <div className="flex-1 overflow-auto">
-            <WorkspacePage
-              userId={user?.id ?? ''}
-              onOpenDocument={openDocument}
-            />
-          </div>
-          <ContextMenu />
-          <ImportExportDialog />
-          <Toasts />
-        </div>
-      </AuthGuard>
-    )
-  }
-
-  // Canvas page (main editor)
+  // Wrap AuthGuard to expose user via context-like pattern
   return (
-    <AuthGuard>
+    <AuthGuard onUserChange={setUser}>
       <div className={`flex h-full w-full flex-col overflow-hidden bg-canvas ${settings.theme === 'dark' ? 'dark' : ''}`}>
         <Toolbar
-          route={route}
           user={user}
-          onNavigate={setRoute}
+          onOpenSettings={() => setShowSettingsOverlay(true)}
+          onOpenWorkspace={openWorkspace}
           onUserChange={setUser}
         />
+
         <div className="flex min-h-0 flex-1">
-          {sidebarOpen ? (
-            <>
-              <div
-                className="fixed inset-0 z-30 bg-slate-900/25 lg:hidden"
-                onPointerDown={() => setSidebarOpen(false)}
+          {!currentDocId ? (
+            <div className="flex-1 overflow-auto">
+              <WorkspacePage
+                userId={user?.id ?? ''}
+                onOpenDocument={openDocument}
               />
-              <div className="fixed inset-y-0 left-0 z-40 lg:static lg:z-auto">
-                <PageSidebar onClose={() => setSidebarOpen(false)} />
+            </div>
+          ) : (
+            <>
+              {sidebarOpen ? (
+                <>
+                  <div
+                    className="fixed inset-0 z-30 bg-slate-900/25 lg:hidden"
+                    onPointerDown={() => setSidebarOpen(false)}
+                  />
+                  <div className="fixed inset-y-0 left-0 z-40 lg:static lg:z-auto">
+                    <PageSidebar onClose={() => setSidebarOpen(false)} />
+                  </div>
+                </>
+              ) : null}
+
+              <div className="relative flex min-w-0 flex-1">
+                <Canvas />
+                <SearchPanel />
+                <ConnectionTree />
               </div>
+
+              <Inspector />
             </>
-          ) : null}
-
-          <div className="relative flex min-w-0 flex-1">
-            <Canvas />
-            <SearchPanel />
-            <ConnectionTree />
-          </div>
-
-          <Inspector />
+          )}
         </div>
+
+        {/* Settings overlay (same style as inspector) */}
+        {showSettingsOverlay ? (
+          <UserSettingsPage
+            user={user ?? { id: '', email: '', user_metadata: {} }}
+            onClose={() => setShowSettingsOverlay(false)}
+          />
+        ) : null}
 
         <ContextMenu />
         <ImportExportDialog />

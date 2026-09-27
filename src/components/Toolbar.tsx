@@ -347,9 +347,9 @@ export function Toolbar({ route, user, onNavigate, onUserChange }: ToolbarProps)
               title={user.email}
               onClick={() => setShowUserMenu((v) => !v)}
             >
-              {user.user_metadata?.avatar_url ? (
+              {user.user_metadata?.avatar_url || user.user_metadata?.picture ? (
                 <img
-                  src={user.user_metadata.avatar_url}
+                  src={user.user_metadata.avatar_url ?? user.user_metadata.picture}
                   alt="Profile"
                   className="h-8 w-8 rounded-full object-cover"
                 />

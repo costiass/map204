@@ -3,8 +3,24 @@ name: Deploy to Vercel
 on:
   push:
     branches: [main]
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vite.config.ts'
+      - 'vercel.json'
+      - 'index.html'
+      - 'public/**'
   pull_request:
     branches: [main]
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vite.config.ts'
+      - 'vercel.json'
+      - 'index.html'
+      - 'public/**'
 
 jobs:
   deploy:

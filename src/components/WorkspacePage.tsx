@@ -16,7 +16,6 @@ interface WorkspacePageProps {
 
 /**
  * Landing page — lists all user's documents (Google Docs style).
- * URL: / or /workspace
  */
 export function WorkspacePage({ userId, onOpenDocument }: WorkspacePageProps) {
   const [documents, setDocuments] = useState<DocumentInfo[]>([])
@@ -99,9 +98,10 @@ export function WorkspacePage({ userId, onOpenDocument }: WorkspacePageProps) {
         ) : (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
             {documents.map((doc) => (
-              <div
+              <button
                 key={doc.id}
-                className="group relative cursor-pointer rounded-xl border border-line bg-white p-4 shadow-sm transition hover:shadow-md dark:bg-slate-800"
+                type="button"
+                className="group relative cursor-pointer rounded-xl border border-line bg-white p-4 text-left shadow-sm transition hover:shadow-md dark:bg-slate-800"
                 onClick={() => onOpenDocument(doc.id, doc.title)}
               >
                 <div className="mb-2 flex items-center justify-between">
@@ -113,8 +113,7 @@ export function WorkspacePage({ userId, onOpenDocument }: WorkspacePageProps) {
                       <rect x="14" y="14" width="7" height="7" rx="1" />
                     </svg>
                   </div>
-                  <button
-                    type="button"
+                  <span
                     className="cursor-pointer rounded p-1 text-slate-400 opacity-0 hover:bg-red-50 hover:text-red-600 group-hover:opacity-100 dark:hover:bg-red-900/30"
                     title="Delete workspace"
                     onClick={(e) => {
@@ -123,7 +122,7 @@ export function WorkspacePage({ userId, onOpenDocument }: WorkspacePageProps) {
                     }}
                   >
                     <IconTrash size={14} />
-                  </button>
+                  </span>
                 </div>
                 <p className="truncate text-sm font-semibold text-slate-700 dark:text-slate-200">
                   {doc.title}
@@ -131,7 +130,7 @@ export function WorkspacePage({ userId, onOpenDocument }: WorkspacePageProps) {
                 <p className="mt-1 text-xs text-slate-400">
                   {new Date(doc.updated_at).toLocaleDateString()}
                 </p>
-              </div>
+              </button>
             ))}
           </div>
         )}

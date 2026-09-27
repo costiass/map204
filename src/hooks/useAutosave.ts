@@ -6,12 +6,13 @@ import type { Page } from '@/types'
 
 /**
  * Autosave: subscribes to store changes and persists pages to Supabase.
- * Debounced — one write per burst of edits, not per keystroke.
+ * Uses WebSocket (Realtime) for sync instead of HTTP PATCH.
  *
- * Conflict resolution:
- * - Each page has a version number that increments on every save
- * - The realtime hook only accepts remote changes with a higher version
- * - This prevents an older write from overwriting a newer one
+ * Flow:
+ * 1. Local change → Zustand store updates
+ * 2. Debounced 500ms → broadcast via WebSocket channel
+ * 3. Other clients receive via WebSocket → update their store
+ * 4. The client that made the change also writes to Postgres (persistent backup)
  */
 export function useAutosave() {
   const doc = useCanvasStore((s) => s.doc)
@@ -38,6 +39,21 @@ export function useAutosave() {
     const currentVersion = (versions.current[page.id] ?? 0) + 1
     versions.current[page.id] = currentVersion
 
+    // Broadcast via WebSocket (Realtime) — instant for other clients
+    const channel = supabase.channel(`page:${page.id}`)
+    channel.send({
+      type: 'broadcast',
+      event: 'page-update',
+      payload: {
+        cards: page.cards,
+        groups: page.groups,
+        connections: page.connections,
+        viewport: page.viewport,
+        version: currentVersion,
+      },
+    })
+
+    // Also write to Postgres for persistence (debounced, less frequent)
     const { error } = await supabase
       .from('pages')
       .update({

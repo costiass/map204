@@ -6,9 +6,10 @@ import type { SupabaseUser } from '@/lib/supabase'
 
 interface AuthGuardProps {
   children: React.ReactNode
+  onUserChange?: (user: SupabaseUser | null) => void
 }
 
-export function AuthGuard({ children }: AuthGuardProps) {
+export function AuthGuard({ children, onUserChange }: AuthGuardProps) {
   const [user, setUser] = useState<SupabaseUser | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -20,29 +21,34 @@ export function AuthGuard({ children }: AuthGuardProps) {
 
     supabase!.auth.getSession().then(({ data }) => {
       if (data.session?.user) {
-        setUser({
+        const u = {
           id: data.session.user.id,
           email: data.session.user.email ?? '',
           user_metadata: data.session.user.user_metadata,
-        })
+        }
+        setUser(u)
+        onUserChange?.(u)
       }
       setLoading(false)
     })
 
     const { data: { subscription } } = supabase!.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
-        setUser({
+        const u = {
           id: session.user.id,
           email: session.user.email ?? '',
           user_metadata: session.user.user_metadata,
-        })
+        }
+        setUser(u)
+        onUserChange?.(u)
       } else {
         setUser(null)
+        onUserChange?.(null)
       }
     })
 
     return () => subscription.unsubscribe()
-  }, [])
+  }, [onUserChange])
 
   // If Supabase is not configured, allow access (local-only mode).
   if (!isSupabaseConfigured()) {
