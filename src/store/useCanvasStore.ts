@@ -2,7 +2,6 @@ import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
 
 import { createSampleDoc } from '@/data/sample'
-import { loadStoredDoc } from '@/store/persistence'
 import {
   COLLAPSED_HEADER_HEIGHT,
   createDefaultSettings,
@@ -54,7 +53,10 @@ export interface CanvasStore {
   activePageId: string
   /** The Supabase document ID (for saving). */
   documentId: string | null
+  /** The Supabase document title, kept in step with `documents.title`. */
+  documentTitle: string
   setDocumentId: (id: string | null) => void
+  setDocumentTitle: (title: string) => void
   setDarkMode: (enabled: boolean) => void
   setGridSize: (size: number) => void
 
@@ -92,6 +94,11 @@ export interface CanvasStore {
    * back to a state they never saw.
    */
   hydrateDocument: (doc: CanvasDoc) => void
+  /**
+   * Applies a page state that arrived from another user. History is left
+   * untouched: an undo should not be able to revert somebody else's edit.
+   */
+  applyRemotePage: (pageId: string, page: Page) => void
 
   /* --- pages ------------------------------------------------------- */
   activePage: () => Page | undefined
@@ -218,16 +225,11 @@ export interface CanvasStore {
 let commitTimer: ReturnType<typeof setTimeout> | null = null
 
 /**
- * The store boots from localStorage when a saved document exists, otherwise from
- * the bundled sample. Any repairs made while parsing are surfaced in the UI.
+ * There is no browser storage any more: Supabase is the only home for the
+ * document. Until the signed-in user has loaded a document (or created one) the
+ * canvas shows the bundled sample, so the first paint is never blank.
  */
-const initialLoad = loadStoredDoc()
-const initialDoc = initialLoad.doc ?? createSampleDoc()
-
-/** Non-fatal notes from the boot-time parse (e.g. repaired duplicate ids). */
-export const bootWarnings: string[] = initialLoad.warnings
-/** Set when a stored document existed but could not be read. */
-export const bootError: string | undefined = initialLoad.error
+const initialDoc = createSampleDoc()
 
 function nextZIndex(page: Page): number {
   return page.cards.reduce((max, card) => Math.max(max, card.position.zIndex), 0) + 1
@@ -295,6 +297,7 @@ export const useCanvasStore = create<CanvasStore>()(
       doc: initialDoc,
       activePageId: initialDoc.pages[0]?.id ?? '',
       documentId: null,
+      documentTitle: '',
 
       selectedCardIds: [],
       selectedConnectionIds: [],
@@ -336,7 +339,31 @@ export const useCanvasStore = create<CanvasStore>()(
         })
       },
 
+      applyRemotePage: (pageId, page) => {
+        set((state) => {
+          const existing = state.doc.pages.find((p) => p.id === pageId)
+          if (!existing) return
+          existing.title = page.title
+          existing.position = page.position
+          existing.viewport = page.viewport
+          existing.cards = page.cards
+          existing.groups = page.groups
+          existing.connections = page.connections
+          existing.updatedAt = page.updatedAt
+          // Selections may point at objects that no longer exist.
+          const cardIds = new Set(page.cards.map((c) => c.id))
+          const groupIds = new Set(page.groups.map((g) => g.id))
+          state.selectedCardIds = state.selectedCardIds.filter((id) => cardIds.has(id))
+          if (state.selectedGroupId && !groupIds.has(state.selectedGroupId)) {
+            state.selectedGroupId = null
+          }
+          state.selectedConnectionIds = []
+        })
+      },
+
       setDocumentId: (id) => set({ documentId: id }),
+
+      setDocumentTitle: (title) => set({ documentTitle: title }),
 
       setDarkMode: (enabled) => set({ darkMode: enabled }),
 
@@ -1131,6 +1158,10 @@ export const useCanvasStore = create<CanvasStore>()(
       },
 
       pushToast: (message, tone = 'info') => {
+        // Repeating the same message means a retry loop, not new information:
+        // refresh the existing toast instead of stacking copies of it.
+        const existing = get().toasts.find((t) => t.message === message)
+        if (existing) return
         const id = uid('toast')
         set((state) => {
           state.toasts = [...state.toasts.slice(-3), { id, message, tone }]

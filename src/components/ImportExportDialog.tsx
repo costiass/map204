@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { IconDownload, IconUpload, IconX } from '@/components/Icons'
+import { primePageSync } from '@/hooks/usePageSync'
+import { loadDocument, replaceDocumentPages } from '@/store/supabase-sync'
 import { useCanvasStore } from '@/store/useCanvasStore'
 import { downloadDoc, parseDoc, serializeDoc } from '@/utils/serialize'
 import { formatBytes } from '@/utils/image'
@@ -85,14 +87,42 @@ function ImportExportBody({ initialTab }: { initialTab: Tab }) {
     }
   }
 
-  const doImport = () => {
+  const doImport = async () => {
     if (!parsed) return
-    if (mode === 'replace') replaceDoc(parsed)
-    else mergeDoc(parsed)
+    const store = useCanvasStore.getState()
+    const documentId = store.documentId
+
+    if (mode === 'replace' && documentId) {
+      // The server must end up holding exactly these pages, so it is rewritten
+      // first and the page-list diff is re-primed before the canvas swaps.
+      const written = await replaceDocumentPages(documentId, parsed.pages)
+      if (!written) {
+        pushToast('The import could not be saved.', 'error')
+        return
+      }
+      // The page list the server now holds is exactly what was written, so the
+      // diff must not treat it as a set of new pages.
+      const refreshed = await loadDocument(documentId)
+      if (refreshed) primePageSync(documentId, refreshed)
+      replaceDoc(parsed)
+      pushToast(`Imported ${parsed.pages.length} page(s).`, 'success')
+      setDialog(null)
+      return
+    }
+
+    if (mode === 'replace') {
+      replaceDoc(parsed)
+      pushToast(
+        `Imported ${parsed.pages.length} page(s) — open a workspace to keep them.`,
+        'info',
+      )
+      setDialog(null)
+      return
+    }
+
+    mergeDoc(parsed)
     pushToast(
-      mode === 'replace'
-        ? `Imported ${parsed.pages.length} page(s).`
-        : `Merged ${parsed.pages.length} page(s) into the document.`,
+      `Merged ${parsed.pages.length} page(s) into the document.`,
       'success',
     )
     setDialog(null)
@@ -260,7 +290,7 @@ function ImportExportBody({ initialTab }: { initialTab: Tab }) {
               <button type="button" className="cc-btn" onClick={() => setDialog(null)}>
                 Cancel
               </button>
-              <button type="button" className="cc-btn" data-variant="primary" disabled={!parsed} onClick={doImport}>
+              <button type="button" className="cc-btn" data-variant="primary" disabled={!parsed} onClick={() => void doImport()}>
                 Import JSON
               </button>
             </div>

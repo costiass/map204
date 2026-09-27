@@ -100,54 +100,91 @@ interface Page {
 ```sql
 -- Documents (workspaces)
 documents (
-  id uuid PRIMARY KEY,
-  owner_id uuid REFERENCES auth.users(id),
-  title text,
-  created_at timestamptz,
-  updated_at timestamptz
+  id text PRIMARY KEY,
+  owner_id text REFERENCES auth.users(id) ON DELETE CASCADE,
+  title text NOT NULL DEFAULT 'Untitled',
+  settings jsonb NOT NULL DEFAULT '{}',   -- DocSettings: default card/link styles
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()     -- kept fresh by trg_documents_touch
 )
 
 -- Pages within documents
 pages (
-  id text PRIMARY KEY,
-  document_id uuid REFERENCES documents(id),
-  title text,
-  position jsonb NOT NULL,      -- Position (x, y, width, height, zIndex)
-  viewport jsonb NOT NULL,      -- Viewport { x, y, zoom }
+  id text PRIMARY KEY,                    -- generated in the app, e.g. page_1737…_a1b2c3
+  document_id text REFERENCES documents(id) ON DELETE CASCADE,
+  title text NOT NULL DEFAULT 'Untitled Page',
+  ordinal integer NOT NULL DEFAULT 0,     -- position in the page list
+  position jsonb NOT NULL,                -- Position (x, y, width, height, zIndex)
+  viewport jsonb NOT NULL,                -- Viewport { x, y, zoom }
   cards jsonb NOT NULL DEFAULT '[]',
   groups jsonb NOT NULL DEFAULT '[]',
   connections jsonb NOT NULL DEFAULT '[]',
-  version integer DEFAULT 0,    -- For conflict resolution
-  created_at timestamptz,
-  updated_at timestamptz
+  version integer NOT NULL DEFAULT 0,     -- optimistic concurrency
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()     -- kept fresh by trg_pages_touch
 )
 
--- User preferences
+-- User preferences — one row, created by trg_create_user_settings on signup
 user_settings (
-  user_id uuid PRIMARY KEY REFERENCES auth.users(id),
+  user_id text PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   theme text CHECK (theme IN ('light', 'dark')),
   default_snap_to_grid boolean DEFAULT true,
-  default_grid_pattern text CHECK (pattern IN ('none', 'dots', 'lines')),
+  default_grid_pattern text CHECK (default_grid_pattern IN ('none', 'dots', 'lines')),
   default_grid_size integer DEFAULT 20,
-  updated_at timestamptz
+  updated_at timestamptz DEFAULT now()
 )
 
--- Collaboration
+-- Sharing
 document_collaborators (
-  document_id uuid REFERENCES documents(id),
-  user_id uuid REFERENCES auth.users(id),
+  document_id text REFERENCES documents(id) ON DELETE CASCADE,
+  user_id text REFERENCES auth.users(id) ON DELETE CASCADE,
   role text CHECK (role IN ('owner', 'editor', 'viewer')),
   PRIMARY KEY (document_id, user_id)
 )
+
+-- A safe mirror of auth.users for the share list
+profiles (
+  id text PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  email text,
+  full_name text,
+  avatar_url text,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+)
 ```
+
+### Triggers
+
+| Trigger | Table | What it does |
+| --- | --- | --- |
+| `trg_create_default_page` | `documents` | `AFTER INSERT` — creates page #1, so a workspace is never empty |
+| `trg_prevent_last_page_delete` | `pages` | `BEFORE DELETE` — refuses to remove the last page of a document |
+| `trg_documents_touch` | `documents` | `BEFORE UPDATE` — refreshes `updated_at` |
+| `trg_pages_touch` | `pages` | `BEFORE UPDATE` — refreshes `updated_at` |
+| `trg_create_user_settings` | `auth.users` | `AFTER INSERT` — creates the one settings row |
+| `trg_sync_profile` | `auth.users` | `AFTER INSERT/UPDATE` — mirrors name, email, avatar into `profiles` |
+
+The first two are `SECURITY DEFINER`, so a client's own RLS policies cannot
+block a write the database itself is required to make.
 
 ### Row Level Security (RLS)
 
-All tables have RLS enabled with policies ensuring:
-- Users can only access their own documents
-- Collaborators can access shared documents
-- Users can only modify their own settings
-- No cross-user data leakage
+Every table has RLS enabled. The interesting part is the recursion trap: a
+`documents` policy that reads `document_collaborators` whose own policy reads
+`documents` makes Postgres reject every query. Migration 008 breaks the cycle
+with four `SECURITY DEFINER` helpers — `can_view_document`, `can_edit_document`,
+`can_view_page`, `can_edit_page` — which run with the table owner's rights, so
+the policies never nest.
+
+The rules:
+
+- an owner can do anything with their own document and its pages
+- a collaborator can read, and can write only with the `editor` role
+- a `viewer` is refused every write (the app shows a 403 toast)
+- `user_settings` is readable and writable only by its owner
+- `profiles` is readable for yourself and for people you share a document with;
+  finding somebody by email goes through `find_profile_by_email`, an exact-match
+  `SECURITY DEFINER` function, so accounts cannot be enumerated
 
 ## Realtime Architecture
 
@@ -159,49 +196,52 @@ User A edits card
        ▼
 ┌───────────────────────┐
 │  Zustand Store        │  (local state update)
-│  mergeDoc()           │
 └───────────┬───────────┘
             │
-            ▼
-┌───────────────────────┐
-│  WebSocket Broadcast  │  (supabase.channel().send())
-│  channel.send({       │
-│   event: 'page-update',│
-│   payload: { cards,    │
-│     groups,            │
-│     connections,       │
-│     viewport,          │
-│     version }          │
-│ })                    │
-└───────────┬───────────┘
+            ├──► WebSocket broadcast  (private channel page:<id>, immediate)
+            │       payload: { title, position, viewport, cards, groups,
+            │                  connections, sentAt, origin }
+            │            │
+            │     ┌──────┴──────┐
+            │     ▼             ▼
+            │   User B       User C
+            │     │             │
+            │     ▼             ▼
+            │   applySnapshot() — newer → replace, overlapping → union
             │
-    ┌───────┴───────┐
-    ▼               ▼
-User B          User C
-(Realtime)    (Realtime)
-  │               │
-  ▼               ▼
-┌───────────────────────┐
-│  Channel.on()         │  (receive broadcast)
-│  mergeDoc()           │  (merge remote state)
-└───────────────────────┘
+            └──► 1.2 s idle (max 4 s) → PATCH /pages?id=eq.<id>&version=eq.<n>
 ```
 
 ### Conflict Resolution
 
-- Each page has a `version` integer that increments on every save
-- Realtime broadcasts include the version number
-- Remote changes only applied if `remote.version > local.version`
-- Prevents stale writes from overwriting newer changes
+Server-side, via optimistic concurrency:
+
+- `pages.version` increments on every accepted write
+- `PATCH …?version=eq.<n>` only lands while the stored version is still `n`
+- 0 rows updated means somebody else won the race: refetch, union the two
+  states, write again against the fresh version
+
+Client-side, for live edits:
+
+- every broadcast carries the sender's `sentAt` clock and its `origin` id
+- a snapshot newer than the local edit replaces the page, so deletions stick
+- a snapshot that overlaps a local edit is unioned, so nothing is lost
+- `origin` stops a client from echoing a snapshot back to the sender
 
 ### Data Persistence Strategy
 
 | Operation | Transport | Timing |
 |-----------|-----------|--------|
-| Card/Group/Connection edits | WebSocket broadcast | Immediate |
-| Auto-save to Postgres | REST (PATCH) | 500ms debounce |
-| Document creation | REST (POST) | Immediate |
-| Settings change | REST (UPSERT) | Immediate |
+| Card/Group/Connection edits (live) | WebSocket broadcast | immediate |
+| Page content → Postgres | REST PATCH | 1.2 s idle, 4 s ceiling |
+| Leaving / hiding the tab | REST PATCH (`keepalive`) | on `pagehide` |
+| Ctrl+S / toolbar Save | REST PATCH | immediate |
+| Page create/rename/delete | REST POST / PATCH / DELETE | 250 ms after the change |
+| Document create/rename/delete | REST | immediate |
+| Settings change | REST UPSERT | 400 ms after the change |
+
+The 1.2 s idle / 4 s ceiling is what keeps a long typing burst to a handful of
+row writes instead of one per keystroke.
 
 ## Frontend Architecture
 
@@ -226,17 +266,20 @@ useCanvasStore
 │   selectCards, selectConnection, selectGroup
 │   setViewport, centerSelection
 │   setDocumentId, setDocumentTitle
-│   mergeDoc (for realtime sync)
+│   hydrateDocument (load from Supabase)
+│   applyRemotePage (realtime sync, no undo entry)
 }
 ```
 
-### Routing (Client-side)
+### Routing (hash-based)
+
+Hash routing, so no server rewrite is needed on Vercel.
 
 | Route | Component | Description |
 |-------|-----------|-------------|
-| `/` | WorkspacePage | Document list (Google Docs style) |
-| `/canvas/:docId` | Canvas | Main editor with inspector |
-| `/settings` | UserSettingsPage | User preferences overlay |
+| `#` | `WorkspacePage` | Document list — owned and shared |
+| `#workspace/<docId>` | `Canvas` | The editor for one workspace |
+| `#settings` | `UserSettingsPage` | User preferences |
 
 ### Component Hierarchy
 
@@ -248,20 +291,24 @@ App
 │   │   ├── Page Title (canvas)
 │   │   ├── Canvas Actions (Card, Group, Undo, Zoom)
 │   │   ├── Search, Import/Export, Save
+│   │   ├── Share (head count + share dialog)
 │   │   ├── Dark Mode Toggle
 │   │   ├── Shortcuts
 │   │   └── User Avatar Menu (Settings, Workspaces, Sign Out)
-│   ├── WorkspacePage (route: /)
-│   ├── Canvas (route: /canvas/:docId)
+│   ├── WorkspacePage (route: #)
+│   ├── Canvas (route: #workspace/:docId)
 │   │   ├── ConnectionLayer (SVG edges)
 │   │   ├── Card Nodes (draggable, resizable)
 │   │   ├── Group Nodes (containers)
 │   │   └── Connection Handles
+│   ├── PageSidebar (pages + filters)
 │   ├── Inspector (right sidebar)
 │   │   ├── Content Tab (Markdown editor)
 │   │   └── Settings Tab (styles, layout)
 │   ├── SearchPanel (Cmd+K)
-│   ├── UserSettingsPage (overlay, inspector-style)
+│   ├── ConnectionTree
+│   ├── ShareDialog
+│   ├── UserSettingsPage
 │   ├── ContextMenu (right-click)
 │   ├── ImportExportDialog
 │   └── Toasts
@@ -269,19 +316,25 @@ App
 
 ## API Endpoints (Auto-generated by PostgREST)
 
-All database operations use Supabase's auto-generated REST API:
+All database operations use Supabase's auto-generated REST API. `API.md` has the
+full list with bodies, triggers and call sites; the short version:
 
 | Operation | Endpoint | Method |
 |-----------|----------|--------|
-| List documents | `GET /rest/v1/documents?owner_id=eq.{uid}` | GET |
+| List owned + shared documents | `GET /rest/v1/documents?owner_id=eq.{uid}` and `GET /rest/v1/document_collaborators?user_id=eq.{uid}` | GET |
 | Create document | `POST /rest/v1/documents` | POST |
 | Get document | `GET /rest/v1/documents?id=eq.{id}` | GET |
-| Update document | `PATCH /rest/v1/documents?id=eq.{id}` | PATCH |
-| List pages | `GET /rest/v1/pages?document_id=eq.{id}` | GET |
+| Rename / doc settings | `PATCH /rest/v1/documents?id=eq.{id}` | PATCH |
+| Delete document | `DELETE /rest/v1/documents?id=eq.{id}` | DELETE |
+| List pages | `GET /rest/v1/pages?document_id=eq.{id}&order=ordinal.asc` | GET |
 | Create page | `POST /rest/v1/pages` | POST |
-| Update page | `PATCH /rest/v1/pages?id=eq.{id}` | PATCH |
+| Rename / reorder page | `PATCH /rest/v1/pages?id=eq.{id}` | PATCH |
+| Save page content | `PATCH /rest/v1/pages?id=eq.{id}&version=eq.{n}` | PATCH |
+| Delete page | `DELETE /rest/v1/pages?id=eq.{id}` | DELETE |
 | Get user settings | `GET /rest/v1/user_settings?user_id=eq.{uid}` | GET |
 | Update settings | `UPSERT /rest/v1/user_settings` | POST |
+| Share list / add / role / remove | `/rest/v1/document_collaborators` | GET, POST, PATCH, DELETE |
+| Find a user by email | `POST /rest/v1/rpc/find_profile_by_email` | POST |
 
 ## Authentication Flow
 
@@ -374,11 +427,37 @@ Set in Vercel Dashboard → Project → Settings → Environment Variables:
 ### One-time Setup
 
 1. **Create Project** at supabase.com
-2. **Enable Google OAuth**: Authentication → Providers → Google
-   - Add redirect URL: `https://<project-ref>.supabase.co/auth/v1/callback`
-2. **Run Migrations**: Execute `supabase/migrations/001_initial_schema.sql` through `005_cleanup_and_realtime.sql` in SQL Editor
-3. **Enable Realtime**: Database → Replication → Enable for `documents`, `pages`, `user_settings`
-3. **Configure Auth**: Set Site URL in Authentication → URL Configuration
+2. **Enable Google OAuth**: Authentication → Providers → Google, with the
+   client id and secret Google gives you
+3. **Set redirect URLs**: Authentication → URL Configuration
+   - Site URL: your app (e.g. `https://your-app.vercel.app`)
+   - Redirect URL: `https://<project-ref>.supabase.co/auth/v1/callback`
+4. **Run the migrations** in order in the SQL Editor (Dashboard → SQL Editor):
+
+   | File | What it does |
+   | ---- | ------------ |
+   | `001_initial_schema.sql` | tables, RLS, indexes |
+   | `002_user_settings.sql` | `user_settings` (idempotent; 001 already has it) |
+   | `003_fix_rls_recursion.sql` | drops the mutually-recursive policies |
+   | `004_fix_id_types.sql` | ids become `text` to match the app's ids |
+   | `005_cleanup_and_realtime.sql` | `text` everywhere, `version`, Realtime, sane policies |
+   | `006_enforce_business_rules.sql` | `position` jsonb, `ordinal`, default page trigger, last-page guard, `updated_at` triggers |
+   | `007_user_settings_trigger.sql` | settings row created on signup (+ backfill) |
+   | `008_sharing.sql` | `profiles`, email lookup, the `can_view_*` / `can_edit_*` helpers, collaborator write access |
+   | `009_realtime_private_channels.sql` | `realtime.messages` policies so private channels are access-checked |
+
+   If migrations 001 and 002 were run by hand earlier, record them so the CLI
+   does not try to apply them again:
+
+   ```sql
+   INSERT INTO supabase_migrations.schema_migrations (version, name)
+   VALUES ('20250101000001', '001_initial_schema'),
+          ('20250101000002', '002_user_settings')
+   ON CONFLICT (version) DO NOTHING;
+   ```
+
+5. **Check Realtime**: Database → Replication should list `documents`, `pages`
+   and `user_settings` (migration 009 adds them; verify in the dashboard)
 
 ### Environment Variables for Vercel
 
@@ -390,31 +469,37 @@ Set in Vercel Dashboard → Project → Settings → Environment Variables:
 ## Testing Checklist
 
 - [ ] Sign in with Google works
-- [ ] Workspace list loads
-- [ ] Create new workspace
-- [ ] Open workspace → canvas loads
+- [ ] Workspace list loads (owned + shared)
+- [ ] Create workspace → one page exists (created by the trigger, not the client)
+- [ ] Open workspace → canvas loads with the right pages in order
 - [ ] Create card, group, connection
-- [ ] Drag card → position persists
-- [ ] Open in second browser → realtime sync
-- [ ] Edit settings → persists
-- [ ] Dark mode toggle works
-- [ ] Grid snap works
-- [ ] Import/Export JSON works
+- [ ] Wait 2 s → reload → the edit is still there
+- [ ] Second browser, same workspace → the card appears without a reload
+- [ ] Both browsers type at once → both sets of cards survive
+- [ ] Share dialog: invite by email, change role, remove
+- [ ] Viewer opens the workspace → read works, writes are refused
+- [ ] Delete the only page → the error toast explains why
+- [ ] Edit settings → persists across reload
+- [ ] Dark mode toggle in the toolbar → persists
+- [ ] Rename a page and a workspace → persists
+- [ ] Import JSON (replace) → reload shows the imported pages
 
 ## Troubleshooting
 
 | Issue | Solution |
 |-------|----------|
 | "Supabase not configured" | Check `.env` has VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY |
-| "Infinite recursion in policy" | Run migration `003_fix_rls_recursion.sql` |
+| "Infinite recursion in policy" | Migrations `003` and `008` replace those policies with the `can_view_*` / `can_edit_*` helpers |
 | "Invalid UUID" | Run migration `004_fix_id_types.sql` |
+| Broadcast never arrives | Private channels need the `realtime.messages` policies from `009_realtime_private_channels.sql` |
+| "row-level security" on a write | The account is a `viewer`: change the role in the share dialog |
 | "User not found" (Vercel) | Re-create `VERCEL_TOKEN` |
-| Realtime not working | Enable tables in Supabase → Replication |
+| Realtime not working | Enable tables in Supabase → Replication (migration 009 also does it) |
 | Build fails | Run `npm ci` then `npm run build` |
 
 ## Future Enhancements
 
-- [ ] Offline support with IndexedDB sync
+- [ ] Offline support (queue writes, replay on reconnect)
 - [ ] Collaborative cursors
 - [ ] Comments on cards
 - [ ] Version history / time travel

@@ -1,6 +1,9 @@
--- Add user_settings table (added after initial migration)
+-- Migration 002: user_settings
+--
+-- 001 already creates this table (the app was written table-first). This file is
+-- kept for accounts where only 001 ran, so every statement is idempotent.
 
-create table user_settings (
+create table if not exists user_settings (
   user_id uuid references auth.users(id) on delete cascade primary key,
   theme text not null default 'light' check (theme in ('light', 'dark')),
   default_snap_to_grid boolean not null default true,
@@ -11,14 +14,17 @@ create table user_settings (
 
 alter table user_settings enable row level security;
 
+drop policy if exists "Users can view own settings" on user_settings;
 create policy "Users can view own settings"
   on user_settings for select
   using (user_id = auth.uid());
 
+drop policy if exists "Users can update own settings" on user_settings;
 create policy "Users can update own settings"
   on user_settings for update
   using (user_id = auth.uid());
 
+drop policy if exists "Users can insert own settings" on user_settings;
 create policy "Users can insert own settings"
   on user_settings for insert
   with check (user_id = auth.uid());

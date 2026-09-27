@@ -36,6 +36,9 @@ import {
   Code,
   Moon,
   Sun,
+  UserPlus,
+  Share2,
+  Pencil,
 } from 'lucide-react'
 
 export const IconPlus = Plus
@@ -75,3 +78,6 @@ export const IconQuote = Quote
 export const IconCode = Code
 export const IconMoon = Moon
 export const IconSun = Sun
+export const IconUserPlus = UserPlus
+export const IconShare = Share2
+export const IconPencil = Pencil

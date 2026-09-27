@@ -1,8 +1,7 @@
 import { useEffect } from 'react'
 
-import { saveDocumentNow } from '@/store/database'
+import { flushPageNow } from '@/hooks/usePageSync'
 import { useCanvasStore } from '@/store/useCanvasStore'
-import { formatBytes } from '@/utils/image'
 
 function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false
@@ -37,21 +36,9 @@ export function useKeyboardShortcuts() {
           case 's':
             event.preventDefault()
             store.flushCommit()
-            {
-              const doc = useCanvasStore.getState().doc
-              void saveDocumentNow(doc).then((result) => {
-                if (result.ok) {
-                  useCanvasStore
-                    .getState()
-                    .pushToast(
-                      `Saved${result.bytes ? ` · ${formatBytes(result.bytes)}` : ''}`,
-                      'success',
-                    )
-                } else {
-                  useCanvasStore.getState().pushToast(result.error ?? 'Could not save', 'error')
-                }
-              })
-            }
+            void flushPageNow().then(() => {
+              useCanvasStore.getState().pushToast('Saved', 'success')
+            })
             return
           case 'a':
             if (typing) return

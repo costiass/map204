@@ -13,6 +13,7 @@ import {
   IconRedo,
   IconSave,
   IconSearch,
+  IconShare,
   IconSidebar,
   IconSun,
   IconUndo,
@@ -20,9 +21,10 @@ import {
   IconZoomIn,
   IconZoomOut,
 } from '@/components/Icons'
-import { saveDocumentNow } from '@/store/database'
+import { flushPageNow } from '@/hooks/usePageSync'
+import { usePresence } from '@/store/presence'
 import { useCanvasStore } from '@/store/useCanvasStore'
-import { formatBytes } from '@/utils/image'
+import { useUserSettings } from '@/store/userSettings'
 import { zoomAtPoint } from '@/utils/geometry'
 
 const SHORTCUTS: Array<[string, string]> = [
@@ -47,10 +49,17 @@ interface ToolbarProps {
   user: SupabaseUser | null
   onOpenSettings?: () => void
   onOpenWorkspace?: () => void
+  onOpenShare?: () => void
   onUserChange: (user: SupabaseUser | null) => void
 }
 
-export function Toolbar({ user, onOpenSettings, onOpenWorkspace, onUserChange }: ToolbarProps) {
+export function Toolbar({
+  user,
+  onOpenSettings,
+  onOpenWorkspace,
+  onOpenShare,
+  onUserChange,
+}: ToolbarProps) {
   const activePageId = useCanvasStore((s) => s.activePageId)
   const page = useCanvasStore((s) => s.doc.pages.find((p) => p.id === s.activePageId))
   const renamePage = useCanvasStore((s) => s.renamePage)
@@ -75,11 +84,21 @@ export function Toolbar({ user, onOpenSettings, onOpenWorkspace, onUserChange }:
   const flushCommit = useCanvasStore((s) => s.flushCommit)
   const requestFitView = useCanvasStore((s) => s.requestFitView)
   const darkMode = useCanvasStore((s) => s.darkMode)
-  const toggleDarkMode = useCanvasStore((s) => s.toggleDarkMode)
   const [showAuth, setShowAuth] = useState(false)
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
   const userMenuRef = useRef<HTMLDivElement>(null)
+
+  // The dark-mode button and the settings panel are the same preference: the
+  // store writes the change to `user_settings`.
+  const setTheme = useUserSettings((s) => s.setTheme)
+  const presence = usePresence((s) => s.entries)
+
+  const others = presence.filter((entry) => entry.userId !== user?.id)
+
+  const toggleTheme = () => {
+    setTheme(darkMode ? 'light' : 'dark')
+  }
 
   useEffect(() => {
     if (!supabase) return
@@ -271,15 +290,29 @@ export function Toolbar({ user, onOpenSettings, onOpenWorkspace, onUserChange }:
           <button type="button" className="cc-btn px-2" title="Export JSON" onClick={() => setDialog('export')}>
             <IconDownload size={15} />
           </button>
+          <button
+            type="button"
+            className="cc-btn"
+            title={
+              others.length > 0
+                ? `Also here: ${others.map((entry) => entry.name).join(', ')}`
+                : 'Share this workspace'
+            }
+            onClick={() => onOpenShare?.()}
+          >
+            <IconShare size={15} />
+            <span className="hidden sm:inline">Share</span>
+            {others.length > 0 ? (
+              <span className="ml-1 rounded-full bg-indigo-100 px-1.5 text-[11px] font-bold text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-200">
+                {others.length + 1}
+              </span>
+            ) : null}
+          </button>
+
           <button type="button" className="cc-btn px-2" title="Save now (Ctrl+S)" onClick={() => {
             flushCommit()
-            const doc = useCanvasStore.getState().doc
-            void saveDocumentNow(doc).then((result) => {
-              if (result.ok) {
-                pushToast(`Saved${result.bytes ? ` · ${formatBytes(result.bytes)}` : ''}`, 'success')
-              } else {
-                pushToast(result.error ?? 'Could not save', 'error')
-              }
+            void flushPageNow().then(() => {
+              pushToast('Saved', 'success')
             })
           }}>
             <IconSave size={15} />
@@ -295,7 +328,7 @@ export function Toolbar({ user, onOpenSettings, onOpenWorkspace, onUserChange }:
           type="button"
           className="cc-btn px-2"
           title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-          onClick={toggleDarkMode}
+          onClick={toggleTheme}
         >
           {darkMode ? <IconSun size={15} /> : <IconMoon size={15} />}
         </button>

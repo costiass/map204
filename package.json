@@ -8,7 +8,6 @@
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b",
     "lint": "oxlint",
-    "smoke": "vite build --ssr src/smoke.tsx --outDir dist-ssr --logLevel error && node smoke/run.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

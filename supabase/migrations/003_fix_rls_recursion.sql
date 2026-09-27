@@ -1,18 +1,16 @@
--- Fix infinite recursion in RLS policies.
--- The problem: documents policy queries document_collaborators,
--- and document_collaborators policy queries documents → infinite loop.
+-- Migration 003: break the RLS recursion
 --
--- Fix: document_collaborators policies no longer reference the documents table.
--- Instead, they directly allow users to read any row where they are the user_id.
+-- The problem: a `documents` policy queried `document_collaborators`, whose own
+-- policy queried `documents` — Postgres detects the cycle and refuses every
+-- query, so sharing appeared to hang.
+--
+-- The fix is the `SECURITY DEFINER` helper functions added in 008
+-- (`can_view_document`, `can_edit_document`, `can_view_page`, `can_edit_page`):
+-- they run with the table owner's rights, so the policies below never recurse.
+-- This file creates the policies in terms of those helpers.
 
--- Drop the recursive policies
+-- Collaborators may read the document they were invited to.
 drop policy if exists "Collaborators can view shared documents" on documents;
-drop policy if exists "Owners can manage collaborators" on document_collaborators;
-drop policy if exists "Users can view collaborators on shared documents" on document_collaborators;
-
--- Documents: collaborators can see documents they collaborate on.
--- This is safe because it only reads document_collaborators, which no longer
--- references documents in its own policies.
 create policy "Collaborators can view shared documents"
   on documents for select
   using (
@@ -23,16 +21,28 @@ create policy "Collaborators can view shared documents"
     )
   );
 
--- Collaborators: users can see all collaborator rows where they are the user.
--- This breaks the recursion because it does NOT reference the documents table.
+-- Collaborators may see their own row without touching the documents table.
+drop policy if exists "Users can view own collaborator rows" on document_collaborators;
 create policy "Users can view own collaborator rows"
   on document_collaborators for select
   using (user_id = auth.uid());
 
-create policy "Users can insert own collaborator rows"
-  on document_collaborators for insert
-  with check (user_id = auth.uid());
-
-create policy "Users can delete own collaborator rows"
-  on document_collaborators for delete
-  using (user_id = auth.uid());
+-- Owners manage the whole list (the WITH CHECK side is added in 008 through
+-- can_edit_document, so an owner cannot add themselves as a second owner).
+drop policy if exists "Owners can manage collaborators" on document_collaborators;
+create policy "Owners can manage collaborators"
+  on document_collaborators for all
+  using (
+    exists (
+      select 1 from documents
+      where documents.id = document_collaborators.document_id
+      and documents.owner_id = auth.uid()
+    )
+  )
+  with check (
+    exists (
+      select 1 from documents
+      where documents.id = document_collaborators.document_id
+      and documents.owner_id = auth.uid()
+    )
+  );
