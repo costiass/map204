@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 
+import { AuthGuard } from '@/components/AuthGuard'
 import { Canvas } from '@/components/Canvas'
 import { ConnectionTree } from '@/components/ConnectionTree'
 import { ContextMenu } from '@/components/ContextMenu'
@@ -37,33 +38,35 @@ export default function App() {
   }, [pushToast])
 
   return (
-    <div className={`flex h-full w-full flex-col overflow-hidden bg-canvas ${darkMode ? 'dark' : ''}`}>
-      <Toolbar />
-      <div className="flex min-h-0 flex-1">
-        {sidebarOpen ? (
-          <>
-            <div
-              className="fixed inset-0 z-30 bg-slate-900/25 lg:hidden"
-              onPointerDown={() => setSidebarOpen(false)}
-            />
-            <div className="fixed inset-y-0 left-0 z-40 lg:static lg:z-auto">
-              <PageSidebar onClose={() => setSidebarOpen(false)} />
-            </div>
-          </>
-        ) : null}
+    <AuthGuard>
+      <div className={`flex h-full w-full flex-col overflow-hidden bg-canvas ${darkMode ? 'dark' : ''}`}>
+        <Toolbar />
+        <div className="flex min-h-0 flex-1">
+          {sidebarOpen ? (
+            <>
+              <div
+                className="fixed inset-0 z-30 bg-slate-900/25 lg:hidden"
+                onPointerDown={() => setSidebarOpen(false)}
+              />
+              <div className="fixed inset-y-0 left-0 z-40 lg:static lg:z-auto">
+                <PageSidebar onClose={() => setSidebarOpen(false)} />
+              </div>
+            </>
+          ) : null}
 
-        <div className="relative flex min-w-0 flex-1">
-          <Canvas />
-          <SearchPanel />
-          <ConnectionTree />
+          <div className="relative flex min-w-0 flex-1">
+            <Canvas />
+            <SearchPanel />
+            <ConnectionTree />
+          </div>
+
+          <Inspector />
         </div>
 
-        <Inspector />
+        <ContextMenu />
+        <ImportExportDialog />
+        <Toasts />
       </div>
-
-      <ContextMenu />
-      <ImportExportDialog />
-      <Toasts />
-    </div>
+    </AuthGuard>
   )
 }
