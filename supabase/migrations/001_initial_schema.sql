@@ -19,6 +19,7 @@ create table pages (
   cards jsonb not null default '[]',
   groups jsonb not null default '[]',
   connections jsonb not null default '[]',
+  version integer not null default 0,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { AuthGuard } from '@/components/AuthGuard'
 import { Canvas } from '@/components/Canvas'
@@ -10,6 +10,7 @@ import { PageSidebar } from '@/components/PageSidebar'
 import { SearchPanel } from '@/components/SearchPanel'
 import { Toasts } from '@/components/Toasts'
 import { Toolbar } from '@/components/Toolbar'
+import { WorkspacePage } from '@/components/WorkspacePage'
 import { useAutosave } from '@/hooks/useAutosave'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 import { useRealtime } from '@/hooks/useRealtime'
@@ -24,7 +25,17 @@ export default function App() {
   const setSidebarOpen = useCanvasStore((s) => s.setSidebarOpen)
   const pushToast = useCanvasStore((s) => s.pushToast)
   const darkMode = useCanvasStore((s) => s.darkMode)
+  const documentId = useCanvasStore((s) => s.documentId)
   const reportedBoot = useRef(false)
+
+  // Simple routing: if no documentId, show workspace list.
+  const [currentDocId, setCurrentDocId] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (documentId) {
+      setCurrentDocId(documentId)
+    }
+  }, [documentId])
 
   // Report anything that had to be repaired while loading saved data.
   useEffect(() => {
@@ -38,6 +49,31 @@ export default function App() {
       pushToast(warning, 'info')
     }
   }, [pushToast])
+
+  const openDocument = (docId: string, _title: string) => {
+    setCurrentDocId(docId)
+    useCanvasStore.getState().setDocumentId(docId)
+  }
+
+  // Show workspace page if no document is open.
+  if (!currentDocId) {
+    return (
+      <AuthGuard>
+        <div className={`flex h-full w-full flex-col overflow-hidden bg-canvas ${darkMode ? 'dark' : ''}`}>
+          <Toolbar />
+          <div className="flex-1 overflow-auto">
+            <WorkspacePage
+              userId={useCanvasStore.getState().doc?.pages[0]?.id ?? ''}
+              onOpenDocument={openDocument}
+            />
+          </div>
+          <ContextMenu />
+          <ImportExportDialog />
+          <Toasts />
+        </div>
+      </AuthGuard>
+    )
+  }
 
   return (
     <AuthGuard>

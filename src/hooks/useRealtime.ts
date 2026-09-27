@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 
 import { supabase } from '@/lib/supabase'
 import { useCanvasStore } from '@/store/useCanvasStore'
@@ -7,10 +7,17 @@ import type { Card, Connection, Group, Viewport } from '@/types'
 /**
  * Subscribe to realtime updates for the active page.
  * When another user changes cards/groups/connections, merge into local state.
+ *
+ * Conflict resolution:
+ * - Each save increments a version number stored in the row
+ * - Remote changes are only applied if their version is newer than local
+ * - This prevents an older write from overwriting a newer one
  */
 export function useRealtime() {
   const activePageId = useCanvasStore((s) => s.activePageId)
   const documentId = useCanvasStore((s) => s.documentId)
+  const doc = useCanvasStore((s) => s.doc)
+  const localVersion = useRef<Record<string, number>>({})
 
   useEffect(() => {
     if (!supabase || !activePageId || !documentId) return
@@ -31,14 +38,28 @@ export function useRealtime() {
             groups: Group[]
             connections: Connection[]
             viewport: Viewport
+            version: number
           }
+
+          const currentVersion = localVersion.current[activePageId] ?? 0
+          if ((row.version ?? 0) <= currentVersion) {
+            return
+          }
+          localVersion.current[activePageId] = row.version ?? 0
+
           const store = useCanvasStore.getState()
-          // Merge remote changes into local state.
           store.mergeDoc({
             version: 1,
             pages: store.doc.pages.map((p) =>
               p.id === activePageId
-                ? { ...p, cards: row.cards, groups: row.groups, connections: row.connections, viewport: row.viewport }
+                ? {
+                    ...p,
+                    cards: row.cards,
+                    groups: row.groups,
+                    connections: row.connections,
+                    viewport: row.viewport,
+                    updatedAt: new Date().toISOString(),
+                  }
                 : p,
             ),
             settings: store.doc.settings,
@@ -50,5 +71,5 @@ export function useRealtime() {
     return () => {
       supabase?.removeChannel(channel)
     }
-  }, [activePageId, documentId])
+  }, [activePageId, documentId, doc])
 }

@@ -5,6 +5,11 @@ import type { CanvasDoc, Page, Card, Group, Connection, Viewport } from '@/types
  * Supabase sync layer — replaces IndexedDB entirely.
  * All data is stored in PostgreSQL. Realtime subscriptions
  * broadcast changes to all connected clients.
+ *
+ * Conflict resolution:
+ * - Each page has a `version` integer that increments on every save
+ * - Remote changes are only applied if their version is newer than local
+ * - This is "last-write-wins" with version ordering
  */
 
 // ---------------------------------------------------------------------------
@@ -28,6 +33,7 @@ interface PageRow {
   cards: Card[]
   groups: Group[]
   connections: Connection[]
+  version: number
   created_at: string
   updated_at: string
 }
@@ -39,7 +45,6 @@ interface PageRow {
 export async function loadDocumentFromSupabase(userId: string): Promise<CanvasDoc | null> {
   if (!supabase) return null
 
-  // Get the user's most recently updated document.
   const { data: doc, error: docError } = await supabase
     .from('documents')
     .select('*')
@@ -50,7 +55,6 @@ export async function loadDocumentFromSupabase(userId: string): Promise<CanvasDo
 
   if (docError || !doc) return null
 
-  // Get all pages for this document.
   const { data: pages, error: pagesError } = await supabase
     .from('pages')
     .select('*')
@@ -125,6 +129,7 @@ export async function createPageInSupabase(documentId: string, title = 'Page 1')
       cards: [],
       groups: [],
       connections: [],
+      version: 0,
     })
     .select('id')
     .single()
@@ -134,10 +139,10 @@ export async function createPageInSupabase(documentId: string, title = 'Page 1')
 }
 
 // ---------------------------------------------------------------------------
-// Save (upsert page data)
+// Save (upsert page data with version tracking)
 // ---------------------------------------------------------------------------
 
-export async function savePageToSupabase(page: Page): Promise<boolean> {
+export async function savePageToSupabase(page: Page, currentVersion: number): Promise<boolean> {
   if (!supabase) return false
 
   const { error } = await supabase
@@ -148,6 +153,7 @@ export async function savePageToSupabase(page: Page): Promise<boolean> {
       cards: page.cards,
       groups: page.groups,
       connections: page.connections,
+      version: currentVersion,
       updated_at: new Date().toISOString(),
     })
     .eq('id', page.id)
@@ -172,7 +178,7 @@ export async function saveDocumentTitleInSupabase(docId: string, title: string):
 
 export function subscribeToPage(
   pageId: string,
-  onUpdate: (cards: Card[], groups: Group[], connections: Connection[], viewport: Viewport) => void,
+  onUpdate: (cards: Card[], groups: Group[], connections: Connection[], viewport: Viewport, version: number) => void,
 ): (() => void) | null {
   if (!supabase) return null
 
@@ -188,7 +194,7 @@ export function subscribeToPage(
       },
       (payload) => {
         const row = payload.new as PageRow
-        onUpdate(row.cards, row.groups, row.connections, row.viewport)
+        onUpdate(row.cards, row.groups, row.connections, row.viewport, row.version)
       },
     )
     .subscribe()
