@@ -55,6 +55,8 @@ export interface CardPosition {
   zIndex: number
 }
 
+export type Position = CardPosition
+
 export interface CardStyle {
   backgroundColor: string
   accentColor: string
@@ -97,7 +99,7 @@ export interface GroupPosition {
 export interface Group {
   id: string
   title: string
-  position: GroupPosition
+  position: Position
   color: string
   memberCardIds: string[]
   memberGroupIds: string[]
@@ -135,6 +137,7 @@ export interface Connection {
 export interface Page {
   id: string
   title: string
+  position: Position
   viewport: Viewport
   cards: Card[]
   groups: Group[]

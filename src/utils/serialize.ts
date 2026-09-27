@@ -28,6 +28,7 @@ import {
   type GroupPosition,
   type LineStyle,
   type Page,
+  type Position,
   type Routing,
   type Viewport,
 } from '@/types'
@@ -97,7 +98,7 @@ function normalizePosition(raw: unknown, fallbackZ: number): CardPosition {
   }
 }
 
-function normalizeGroupPosition(raw: unknown, fallbackZ: number): GroupPosition {
+function normalizeGroupPosition(raw: unknown, fallbackZ: number): Position {
   const value = isRecord(raw) ? raw : {}
   return {
     x: num(value.x, 0),
@@ -384,6 +385,7 @@ export function normalizeDoc(raw: unknown): NormalizeResult {
     return {
       id: pageId,
       title: str(page.title, `Page ${pageIndex + 1}`) || `Page ${pageIndex + 1}`,
+      position: normalizeGroupPosition(page.position, pageIndex + 1) as Position,
       viewport: normalizeViewport(page.viewport),
       cards,
       groups,

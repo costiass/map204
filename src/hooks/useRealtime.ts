@@ -5,7 +5,7 @@ import { useCanvasStore } from '@/store/useCanvasStore'
 import type { Card, Connection, Group, Viewport } from '@/types'
 
 /**
- * Subscribe to realtime updates for the active page.
+ * Subscribe to realtime broadcasts for the active page.
  * Listens for broadcast events (WebSocket) from other clients.
  *
  * Conflict resolution:
@@ -22,8 +22,10 @@ export function useRealtime() {
   useEffect(() => {
     if (!supabase || !activePageId || !documentId) return
 
-    const channel = supabase
-      .channel(`page:${activePageId}`)
+    const channel = supabase!
+      .channel(`page:${activePageId}`, {
+        config: { broadcast: { ack: true } }
+      })
       .on('broadcast', { event: 'page-update' }, (payload) => {
         const data = payload.payload as {
           cards: Card[]
@@ -58,7 +60,7 @@ export function useRealtime() {
       .subscribe()
 
     return () => {
-      supabase?.removeChannel(channel)
+      supabase!.removeChannel(channel)
     }
   }, [activePageId, documentId, doc])
 }

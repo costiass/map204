@@ -4,7 +4,7 @@ import './index.css'
 import App from './App.tsx'
 import { supabase } from './lib/supabase'
 import { useCanvasStore } from './store/useCanvasStore'
-import { loadDocumentFromSupabase, createDocumentInSupabase, createPageInSupabase } from './store/supabase-sync'
+import { loadDocumentFromSupabase, createDocumentInSupabase } from './store/supabase-sync'
 import { createSampleDoc } from './data/sample'
 import { normalizeDoc } from './utils/serialize'
 
@@ -21,23 +21,22 @@ async function bootstrap() {
       if (docId) {
         const sample = normalizeDoc(createSampleDoc()).doc
         for (const page of sample.pages) {
-          await createPageInSupabase(docId, page.title)
+          await supabase.from('pages').insert({
+            document_id: docId,
+            title: page.title,
+            position: page.position,
+            viewport: page.viewport,
+            cards: page.cards,
+            groups: page.groups,
+            connections: page.connections,
+            version: 0,
+          })
         }
         doc = await loadDocumentFromSupabase(session.user.id)
         if (doc) {
           store.setDocumentId(docId)
         }
       }
-    } else {
-      // Get the document ID for this user's most recent document.
-      const { data: docRow } = await supabase
-        .from('documents')
-        .select('id')
-        .eq('owner_id', session.user.id)
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      if (docRow) store.setDocumentId(docRow.id)
     }
 
     if (doc) {

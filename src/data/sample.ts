@@ -1,4 +1,4 @@
-import { createDefaultSettings, type CanvasDoc, type Card, type Connection, type Group, type Page } from '@/types'
+import { createDefaultSettings, type CanvasDoc, type Card, type Connection, type Group, type Page, type Position } from '@/types'
 
 function svgDataUri(svg: string): string {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg.replace(/\s+/g, ' ').trim())}`
@@ -372,6 +372,7 @@ const pages: Page[] = [
   {
     id: 'page_01',
     title: 'Photosynthesis',
+    position: { x: 0, y: 0, width: 1920, height: 1080, zIndex: 0 } satisfies Position,
     viewport: { x: 40, y: 20, zoom: 0.9 },
     cards,
     groups,
@@ -382,6 +383,7 @@ const pages: Page[] = [
   {
     id: 'page_02',
     title: 'Cell Respiration',
+    position: { x: 0, y: 0, width: 1920, height: 1080, zIndex: 0 } satisfies Position,
     viewport: { x: 0, y: 0, zoom: 1 },
     cards: respirationCards,
     groups: [],

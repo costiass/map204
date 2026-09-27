@@ -1,20 +1,10 @@
 import { supabase } from '@/lib/supabase'
-import type { CanvasDoc, Page, Card, Group, Connection, Viewport } from '@/types'
+import type { Card, Group, Connection, Viewport, LineStyle, Routing, ArrowStyle, Position } from '@/types'
 
 /**
- * Supabase sync layer — replaces IndexedDB entirely.
- * All data is stored in PostgreSQL. Realtime subscriptions
- * broadcast changes to all connected clients.
- *
- * Conflict resolution:
- * - Each page has a `version` integer that increments on every save
- * - Remote changes are only applied if their version is newer than local
- * - This is "last-write-wins" with version ordering
+ * Supabase sync layer — all data operations via REST API (PostgREST).
+ * Realtime subscriptions handled by useRealtime hook.
  */
-
-// ---------------------------------------------------------------------------
-// Types matching the database schema
-// ---------------------------------------------------------------------------
 
 interface DocumentRow {
   id: string
@@ -28,7 +18,7 @@ interface PageRow {
   id: string
   document_id: string
   title: string
-  position: number
+  position: Position
   viewport: Viewport
   cards: Card[]
   groups: Group[]
@@ -38,11 +28,7 @@ interface PageRow {
   updated_at: string
 }
 
-// ---------------------------------------------------------------------------
-// Load
-// ---------------------------------------------------------------------------
-
-export async function loadDocumentFromSupabase(userId: string): Promise<CanvasDoc | null> {
+export async function loadDocumentFromSupabase(userId: string) {
   if (!supabase) return null
 
   const { data: doc, error: docError } = await supabase
@@ -68,10 +54,11 @@ export async function loadDocumentFromSupabase(userId: string): Promise<CanvasDo
     pages: (pages as PageRow[]).map((p) => ({
       id: p.id,
       title: p.title,
+      position: p.position,
       viewport: p.viewport,
-      cards: p.cards,
-      groups: p.groups,
-      connections: p.connections,
+      cards: p.cards ?? [],
+      groups: p.groups ?? [],
+      connections: p.connections ?? [],
       createdAt: p.created_at,
       updatedAt: p.updated_at,
     })),
@@ -88,20 +75,16 @@ export async function loadDocumentFromSupabase(userId: string): Promise<CanvasDo
       defaultConnectionStyle: {
         color: '#6366F1',
         width: 2,
-        lineStyle: 'solid',
-        routing: 'curved',
-        arrowStart: 'none',
-        arrowEnd: 'arrow',
+        lineStyle: 'solid' as LineStyle,
+        routing: 'curved' as Routing,
+        arrowStart: 'none' as ArrowStyle,
+        arrowEnd: 'arrow' as ArrowStyle,
         animated: false,
       },
       defaultRelationshipType: 'related to',
     },
   }
 }
-
-// ---------------------------------------------------------------------------
-// Create
-// ---------------------------------------------------------------------------
 
 export async function createDocumentInSupabase(userId: string, title = 'Untitled'): Promise<string | null> {
   if (!supabase) return null
@@ -138,11 +121,7 @@ export async function createPageInSupabase(documentId: string, title = 'Page 1')
   return (data as PageRow).id
 }
 
-// ---------------------------------------------------------------------------
-// Save (upsert page data with version tracking)
-// ---------------------------------------------------------------------------
-
-export async function savePageToSupabase(page: Page, currentVersion: number): Promise<boolean> {
+export async function savePageToSupabase(page: { id: string; title: string; viewport: Viewport; cards: Card[]; groups: Group[]; connections: Connection[]; version: number }): Promise<boolean> {
   if (!supabase) return false
 
   const { error } = await supabase
@@ -153,7 +132,7 @@ export async function savePageToSupabase(page: Page, currentVersion: number): Pr
       cards: page.cards,
       groups: page.groups,
       connections: page.connections,
-      version: currentVersion,
+      version: page.version,
       updated_at: new Date().toISOString(),
     })
     .eq('id', page.id)
@@ -172,48 +151,11 @@ export async function saveDocumentTitleInSupabase(docId: string, title: string):
   return !error
 }
 
-// ---------------------------------------------------------------------------
-// Realtime subscription
-// ---------------------------------------------------------------------------
-
-export function subscribeToPage(
-  pageId: string,
-  onUpdate: (cards: Card[], groups: Group[], connections: Connection[], viewport: Viewport, version: number) => void,
-): (() => void) | null {
-  if (!supabase) return null
-
-  const channel = supabase
-    .channel(`page:${pageId}`)
-    .on(
-      'postgres_changes',
-      {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'pages',
-        filter: `id=eq.${pageId}`,
-      },
-      (payload) => {
-        const row = payload.new as PageRow
-        onUpdate(row.cards, row.groups, row.connections, row.viewport, row.version)
-      },
-    )
-    .subscribe()
-
-  return () => {
-    supabase?.removeChannel(channel)
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+const documentPageMap = new Map<string, string>()
 
 export function getDocumentIdForPage(pageId: string): string | null {
   return documentPageMap.get(pageId) ?? null
 }
-
-// Module-level map: pageId -> documentId
-const documentPageMap = new Map<string, string>()
 
 export function registerPageDocument(pageId: string, documentId: string): void {
   documentPageMap.set(pageId, documentId)

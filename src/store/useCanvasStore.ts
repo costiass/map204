@@ -365,6 +365,7 @@ export const useCanvasStore = create<CanvasStore>()(
         const page: Page = {
           id: pageId,
           title: title?.trim() || `Page ${get().doc.pages.length + 1}`,
+          position: { x: 0, y: 0, width: 1920, height: 1080, zIndex: 0 },
           viewport: { x: 0, y: 0, zoom: 1 },
           cards: [],
           groups: [],

@@ -5,14 +5,11 @@ import { useCanvasStore } from '@/store/useCanvasStore'
 import type { Page } from '@/types'
 
 /**
- * Autosave: subscribes to store changes and persists pages to Supabase.
- * Uses WebSocket (Realtime) for sync instead of HTTP PATCH.
- *
- * Flow:
- * 1. Local change → Zustand store updates
- * 2. Debounced 500ms → broadcast via WebSocket channel
+ * Autosave with WebSocket sync:
+ * 1. Local changes → Zustand store
+ * 2. Debounced → broadcast via Supabase Realtime (WebSocket)
  * 3. Other clients receive via WebSocket → update their store
- * 4. The client that made the change also writes to Postgres (persistent backup)
+ * 4. Periodic persistence to Postgres via REST (backup)
  */
 export function useAutosave() {
   const doc = useCanvasStore((s) => s.doc)
@@ -20,6 +17,22 @@ export function useAutosave() {
   const documentId = useCanvasStore((s) => s.documentId)
   const versions = useRef<Record<string, number>>({})
 
+  // Initialize Realtime channel for this page
+  useEffect(() => {
+    if (!supabase || !activePageId) return
+
+    const channel = supabase!.channel(`page:${activePageId}`, {
+      config: { broadcast: { ack: true } }
+    })
+
+    channel.subscribe()
+
+    return () => {
+      supabase!.removeChannel(channel)
+    }
+  }, [activePageId])
+
+  // Autosave with WebSocket broadcast
   useEffect(() => {
     if (!supabase || !documentId) return
 
@@ -39,9 +52,9 @@ export function useAutosave() {
     const currentVersion = (versions.current[page.id] ?? 0) + 1
     versions.current[page.id] = currentVersion
 
-    // Broadcast via WebSocket (Realtime) — instant for other clients
-    const channel = supabase.channel(`page:${page.id}`)
-    channel.send({
+    // 1. Broadcast via WebSocket (instant for other clients)
+    const channel = supabase!.channel(`page:${page.id}`)
+    await channel.send({
       type: 'broadcast',
       event: 'page-update',
       payload: {
@@ -50,11 +63,12 @@ export function useAutosave() {
         connections: page.connections,
         viewport: page.viewport,
         version: currentVersion,
-      },
+        timestamp: Date.now(),
+      }
     })
 
-    // Also write to Postgres for persistence (debounced, less frequent)
-    const { error } = await supabase
+    // 2. Persist to Postgres (async, non-blocking)
+    const { error } = await supabase!
       .from('pages')
       .update({
         title: page.title,
@@ -72,3 +86,5 @@ export function useAutosave() {
     }
   }
 }
+
+export const versions = { current: {} as Record<string, number> }
