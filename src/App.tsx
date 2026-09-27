@@ -12,11 +12,13 @@ import { Toasts } from '@/components/Toasts'
 import { Toolbar } from '@/components/Toolbar'
 import { useAutosave } from '@/hooks/useAutosave'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
+import { useRealtime } from '@/hooks/useRealtime'
 import { bootError, bootWarnings, useCanvasStore } from '@/store/useCanvasStore'
 
 export default function App() {
   useKeyboardShortcuts()
   useAutosave()
+  useRealtime()
 
   const sidebarOpen = useCanvasStore((s) => s.sidebarOpen)
   const setSidebarOpen = useCanvasStore((s) => s.setSidebarOpen)

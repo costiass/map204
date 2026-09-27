@@ -2,25 +2,47 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
-import { loadDocument, saveDocumentNow, storageWarning } from './store/database'
+import { supabase } from './lib/supabase'
 import { useCanvasStore } from './store/useCanvasStore'
+import { loadDocumentFromSupabase, createDocumentInSupabase, createPageInSupabase } from './store/supabase-sync'
+import { createSampleDoc } from './data/sample'
+import { normalizeDoc } from './utils/serialize'
 
-/**
- * Reads the saved document from IndexedDB before the first paint, so the app
- * never flashes the sample document and then swaps it for the real one.
- */
 async function bootstrap() {
-  const result = await loadDocument()
-  if (result.doc) {
-    useCanvasStore.getState().hydrateDocument(result.doc)
-    // Writes the document back once, which normalises the records and repairs
-    // anything the parse had to fix. It happens before the app is interactive
-    // and is a single transaction.
-    void saveDocumentNow(result.doc).then((saved) => {
-      if (!saved.ok) useCanvasStore.getState().pushToast(saved.error ?? 'Could not save', 'error')
-    })
-  } else if (result.error) {
-    useCanvasStore.getState().pushToast(`${result.error} Showing the sample document.`, 'error')
+  const store = useCanvasStore.getState()
+
+  const { data: { session } } = await supabase?.auth.getSession() ?? { data: { session: null } }
+
+  if (session?.user && supabase) {
+    let doc = await loadDocumentFromSupabase(session.user.id)
+
+    if (!doc) {
+      const docId = await createDocumentInSupabase(session.user.id)
+      if (docId) {
+        const sample = normalizeDoc(createSampleDoc()).doc
+        for (const page of sample.pages) {
+          await createPageInSupabase(docId, page.title)
+        }
+        doc = await loadDocumentFromSupabase(session.user.id)
+        if (doc) {
+          store.setDocumentId(docId)
+        }
+      }
+    } else {
+      // Get the document ID for this user's most recent document.
+      const { data: docRow } = await supabase
+        .from('documents')
+        .select('id')
+        .eq('owner_id', session.user.id)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (docRow) store.setDocumentId(docRow.id)
+    }
+
+    if (doc) {
+      store.hydrateDocument(doc)
+    }
   }
 
   const root = createRoot(document.getElementById('root')!)
@@ -29,12 +51,6 @@ async function bootstrap() {
       <App />
     </StrictMode>,
   )
-
-  if (storageWarning()) {
-    useCanvasStore
-      .getState()
-      .pushToast(`${storageWarning()} Falling back to local storage — export to keep your work safe.`, 'info')
-  }
 }
 
 void bootstrap()

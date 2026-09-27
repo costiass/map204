@@ -52,6 +52,9 @@ export interface CanvasStore {
   /* --- document ---------------------------------------------------- */
   doc: CanvasDoc
   activePageId: string
+  /** The Supabase document ID (for saving). */
+  documentId: string | null
+  setDocumentId: (id: string | null) => void
 
   /* --- selection --------------------------------------------------- */
   selectedCardIds: string[]
@@ -289,6 +292,7 @@ export const useCanvasStore = create<CanvasStore>()(
     return {
       doc: initialDoc,
       activePageId: initialDoc.pages[0]?.id ?? '',
+      documentId: null,
 
       selectedCardIds: [],
       selectedConnectionIds: [],
@@ -329,6 +333,8 @@ export const useCanvasStore = create<CanvasStore>()(
           }
         })
       },
+
+      setDocumentId: (id) => set({ documentId: id }),
 
       /* ------------------------------------------------------------ */
       /* pages                                                        */
