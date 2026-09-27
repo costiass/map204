@@ -160,7 +160,7 @@ enumerate accounts by probing for near-misses.
 ## Realtime
 
 Channels are **private** (`config: { private: true }`), so every message passes
-through the policies in `009_realtime_private_channels.sql`: listening requires
+through the policies in `20260928090100_realtime_private_channels.sql`: listening requires
 `can_view_page` / `can_view_document`, publishing requires the editor role.
 
 | Channel | Purpose | Events |

@@ -432,32 +432,44 @@ Set in Vercel Dashboard → Project → Settings → Environment Variables:
 3. **Set redirect URLs**: Authentication → URL Configuration
    - Site URL: your app (e.g. `https://your-app.vercel.app`)
    - Redirect URL: `https://<project-ref>.supabase.co/auth/v1/callback`
-4. **Run the migrations** in order in the SQL Editor (Dashboard → SQL Editor):
+4. **Run the migrations** in order in the SQL Editor (Dashboard → SQL Editor),
+   or push them with the CLI: `supabase link --project-ref <ref>` then
+   `supabase db push`.
+
+   Migrations are named `<timestamp>_<name>.sql` because the CLI takes the
+   version from the filename prefix — that is what
+   `supabase_migrations.schema_migrations` records and what `db push` compares
+   against.
 
    | File | What it does |
    | ---- | ------------ |
-   | `001_initial_schema.sql` | tables, RLS, indexes |
-   | `002_user_settings.sql` | `user_settings` (idempotent; 001 already has it) |
-   | `003_fix_rls_recursion.sql` | drops the mutually-recursive policies |
-   | `004_fix_id_types.sql` | ids become `text` to match the app's ids |
-   | `005_cleanup_and_realtime.sql` | `text` everywhere, `version`, Realtime, sane policies |
-   | `006_enforce_business_rules.sql` | `position` jsonb, `ordinal`, default page trigger, last-page guard, `updated_at` triggers |
-   | `007_user_settings_trigger.sql` | settings row created on signup (+ backfill) |
-   | `008_sharing.sql` | `profiles`, email lookup, the `can_view_*` / `can_edit_*` helpers, collaborator write access |
-   | `009_realtime_private_channels.sql` | `realtime.messages` policies so private channels are access-checked |
+   | `20260920090000_initial_schema.sql` | tables, RLS, indexes |
+   | `20260920090100_user_settings.sql` | `user_settings` (idempotent; 001 already has it) |
+   | `20260921091500_fix_rls_recursion.sql` | drops the mutually-recursive policies |
+   | `20260921091600_fix_id_types.sql` | ids become `text` to match the app's ids |
+   | `20260922093000_cleanup_and_realtime.sql` | `text` everywhere, `version`, Realtime, sane policies |
+   | `20260927081500_enforce_business_rules.sql` | `position` jsonb, `ordinal`, default page trigger, last-page guard, `updated_at` triggers |
+   | `20260927081600_user_settings_trigger.sql` | settings row created on signup (+ backfill) |
+   | `20260928090000_sharing.sql` | `profiles`, email lookup, the `can_view_*` / `can_edit_*` helpers, collaborator write access |
+   | `20260928090100_realtime_private_channels.sql` | `realtime.messages` policies so private channels are access-checked |
 
-   If migrations 001 and 002 were run by hand earlier, record them so the CLI
-   does not try to apply them again:
-
-   ```sql
-   INSERT INTO supabase_migrations.schema_migrations (version, name)
-   VALUES ('20250101000001', '001_initial_schema'),
-          ('20250101000002', '002_user_settings')
-   ON CONFLICT (version) DO NOTHING;
-   ```
+   Every file is written to be re-runnable (`IF EXISTS` / `IF NOT EXISTS` /
+   `DROP POLICY IF EXISTS`), so applying one to a database that already has it
+   is a no-op rather than an error. That matters here: the first two were
+   originally run by hand in the SQL Editor, so they exist in the database but
+   not in the history table. `db push` applies them again — harmlessly — and
+   records them, so no repair step is needed.
 
 5. **Check Realtime**: Database → Replication should list `documents`, `pages`
-   and `user_settings` (migration 009 adds them; verify in the dashboard)
+   and `user_settings` (the last migration adds them; verify in the dashboard)
+
+6. **Stop applying migrations by hand.** Once the history table is populated,
+   anything changed in the SQL Editor is invisible to `db push` and will be
+   clobbered by the next migration. If you must edit by hand, record it:
+
+   ```bash
+   supabase migration repair <version> --status applied
+   ```
 
 ### Environment Variables for Vercel
 
@@ -490,8 +502,8 @@ Set in Vercel Dashboard → Project → Settings → Environment Variables:
 |-------|----------|
 | "Supabase not configured" | Check `.env` has VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY |
 | "Infinite recursion in policy" | Migrations `003` and `008` replace those policies with the `can_view_*` / `can_edit_*` helpers |
-| "Invalid UUID" | Run migration `004_fix_id_types.sql` |
-| Broadcast never arrives | Private channels need the `realtime.messages` policies from `009_realtime_private_channels.sql` |
+| "Invalid UUID" | Run `20260921091600_fix_id_types.sql` |
+| Broadcast never arrives | Private channels need the `realtime.messages` policies from `20260928090100_realtime_private_channels.sql` |
 | "row-level security" on a write | The account is a `viewer`: change the role in the share dialog |
 | "User not found" (Vercel) | Re-create `VERCEL_TOKEN` |
 | Realtime not working | Enable tables in Supabase → Replication (migration 009 also does it) |

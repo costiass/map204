@@ -7,6 +7,11 @@ on:
       - 'supabase/migrations/**'
   workflow_dispatch:
 
+concurrency:
+  # One migration run at a time — two pushes must not race on the history table.
+  group: supabase-migrate
+  cancel-in-progress: false
+
 jobs:
   migrate:
     runs-on: ubuntu-latest
@@ -20,29 +25,30 @@ jobs:
           version: latest
 
       - name: Link Supabase project
+        # SUPABASE_DB_PASSWORD keeps this non-interactive: without it the CLI
+        # prompts for the database password and the job hangs.
         run: supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
 
-      # Every migration is written to be re-runnable (IF EXISTS / IF NOT EXISTS /
-      # DROP POLICY IF EXISTS), so they are applied one by one in order rather
-      # than through `supabase db push` — which refuses to run at all when a
-      # relation from an earlier run already exists.
-      - name: Apply migrations
-        run: |
-          set -euo pipefail
-          for file in $(ls -1 supabase/migrations/*.sql | sort); do
-            echo "::group::$file"
-            supabase db query --linked --file "$file"
-            echo "::endgroup::"
-            # Record it, so the Supabase dashboard history matches the files.
-            version="$(basename "$file" | cut -d_ -f1)"
-            name="$(basename "$file" .sql | cut -d_ -f2-)"
-            supabase db query --linked \
-              "insert into supabase_migrations.schema_migrations (version, name)
-               values ('${version}', '${name}')
-               on conflict (version) do nothing;"
-          done
-
+      - name: What will be applied
+        run: supabase db push --dry-run
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+
+      - name: Push migrations
+        # Applies every migration whose version is not yet in
+        # supabase_migrations.schema_migrations, in order, and records each one.
+        run: supabase db push
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+
+      - name: Migration history
+        if: always()
+        run: supabase migration list
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
