@@ -10,11 +10,16 @@ import { PageSidebar } from '@/components/PageSidebar'
 import { SearchPanel } from '@/components/SearchPanel'
 import { Toasts } from '@/components/Toasts'
 import { Toolbar } from '@/components/Toolbar'
+import { UserSettingsPage } from '@/components/UserSettingsPage'
 import { WorkspacePage } from '@/components/WorkspacePage'
 import { useAutosave } from '@/hooks/useAutosave'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 import { useRealtime } from '@/hooks/useRealtime'
 import { bootError, bootWarnings, useCanvasStore } from '@/store/useCanvasStore'
+import { useUserSettings } from '@/store/userSettings'
+import type { SupabaseUser } from '@/lib/supabase'
+
+type Route = 'workspace' | 'canvas' | 'settings'
 
 export default function App() {
   useKeyboardShortcuts()
@@ -24,18 +29,21 @@ export default function App() {
   const sidebarOpen = useCanvasStore((s) => s.sidebarOpen)
   const setSidebarOpen = useCanvasStore((s) => s.setSidebarOpen)
   const pushToast = useCanvasStore((s) => s.pushToast)
-  const darkMode = useCanvasStore((s) => s.darkMode)
-  const documentId = useCanvasStore((s) => s.documentId)
+
   const reportedBoot = useRef(false)
 
-  // Simple routing: if no documentId, show workspace list.
-  const [currentDocId, setCurrentDocId] = useState<string | null>(null)
+  const [route, setRoute] = useState<Route>('workspace')
+  const [user, setUser] = useState<SupabaseUser | null>(null)
+  const { settings } = useUserSettings()
 
+  // Sync user settings to canvas store.
   useEffect(() => {
-    if (documentId) {
-      setCurrentDocId(documentId)
-    }
-  }, [documentId])
+    const store = useCanvasStore.getState()
+    store.setDarkMode(settings.theme === 'dark')
+    store.setSnapToGrid(settings.defaultSnapToGrid)
+    store.setGridPattern(settings.defaultGridPattern)
+    store.setGridSize(settings.defaultGridSize)
+  }, [settings])
 
   // Report anything that had to be repaired while loading saved data.
   useEffect(() => {
@@ -51,19 +59,56 @@ export default function App() {
   }, [pushToast])
 
   const openDocument = (docId: string, _title: string) => {
-    setCurrentDocId(docId)
     useCanvasStore.getState().setDocumentId(docId)
+    setRoute('canvas')
   }
 
-  // Show workspace page if no document is open.
-  if (!currentDocId) {
+  const openWorkspace = () => {
+    setRoute('workspace')
+  }
+
+  // Settings page
+  if (route === 'settings') {
     return (
       <AuthGuard>
-        <div className={`flex h-full w-full flex-col overflow-hidden bg-canvas ${darkMode ? 'dark' : ''}`}>
-          <Toolbar />
+        <div className={`flex h-full w-full flex-col overflow-hidden bg-canvas ${settings.theme === 'dark' ? 'dark' : ''}`}>
+          <Toolbar
+            route={route}
+            user={user}
+            onNavigate={setRoute}
+            onUserChange={setUser}
+          />
+          <div className="flex-1 overflow-auto">
+            {user ? (
+              <UserSettingsPage user={user} onBack={openWorkspace} />
+            ) : (
+              <div className="flex h-full items-center justify-center text-sm text-slate-400">
+                Please sign in to access settings.
+              </div>
+            )}
+          </div>
+          <ContextMenu />
+          <ImportExportDialog />
+          <Toasts />
+        </div>
+      </AuthGuard>
+    )
+  }
+
+  // Workspace page (document list)
+  if (route === 'workspace') {
+    return (
+      <AuthGuard>
+        <div className={`flex h-full w-full flex-col overflow-hidden bg-canvas ${settings.theme === 'dark' ? 'dark' : ''}`}>
+          <Toolbar
+            route={route}
+            user={user}
+            onNavigate={setRoute}
+            onUserChange={setUser}
+          />
           <div className="flex-1 overflow-auto">
             <WorkspacePage
-              userId={useCanvasStore.getState().doc?.pages[0]?.id ?? ''}
+              userId={user?.id ?? ''}
               onOpenDocument={openDocument}
             />
           </div>
@@ -75,10 +120,16 @@ export default function App() {
     )
   }
 
+  // Canvas page (main editor)
   return (
     <AuthGuard>
-      <div className={`flex h-full w-full flex-col overflow-hidden bg-canvas ${darkMode ? 'dark' : ''}`}>
-        <Toolbar />
+      <div className={`flex h-full w-full flex-col overflow-hidden bg-canvas ${settings.theme === 'dark' ? 'dark' : ''}`}>
+        <Toolbar
+          route={route}
+          user={user}
+          onNavigate={setRoute}
+          onUserChange={setUser}
+        />
         <div className="flex min-h-0 flex-1">
           {sidebarOpen ? (
             <>

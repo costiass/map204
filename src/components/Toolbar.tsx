@@ -43,7 +43,16 @@ const SHORTCUTS: Array<[string, string]> = [
   ['F', 'Fit all cards'],
 ]
 
-export function Toolbar() {
+type Route = 'workspace' | 'canvas' | 'settings'
+
+interface ToolbarProps {
+  route: Route
+  user: SupabaseUser | null
+  onNavigate: (route: Route) => void
+  onUserChange: (user: SupabaseUser | null) => void
+}
+
+export function Toolbar({ route, user, onNavigate, onUserChange }: ToolbarProps) {
   const activePageId = useCanvasStore((s) => s.activePageId)
   const page = useCanvasStore((s) => s.doc.pages.find((p) => p.id === s.activePageId))
   const renamePage = useCanvasStore((s) => s.renamePage)
@@ -70,13 +79,16 @@ export function Toolbar() {
   const darkMode = useCanvasStore((s) => s.darkMode)
   const toggleDarkMode = useCanvasStore((s) => s.toggleDarkMode)
   const [showAuth, setShowAuth] = useState(false)
-  const [user, setUser] = useState<SupabaseUser | null>(null)
+  const [showUserMenu, setShowUserMenu] = useState(false)
+  const [showShortcuts, setShowShortcuts] = useState(false)
+
+  const userMenuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!supabase) return
     supabase.auth.getSession().then(({ data }) => {
       if (data.session?.user) {
-        setUser({
+        onUserChange({
           id: data.session.user.id,
           email: data.session.user.email ?? '',
           user_metadata: data.session.user.user_metadata,
@@ -85,77 +97,78 @@ export function Toolbar() {
     })
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
-        setUser({
+        onUserChange({
           id: session.user.id,
           email: session.user.email ?? '',
           user_metadata: session.user.user_metadata,
         })
       } else {
-        setUser(null)
+        onUserChange(null)
       }
     })
     return () => subscription.unsubscribe()
-  }, [])
+  }, [onUserChange])
 
   const handleSignOut = async () => {
     if (!supabase) return
     await supabase.auth.signOut()
-    setUser(null)
+    onUserChange(null)
     pushToast('Signed out.', 'info')
   }
 
-  const [showShortcuts, setShowShortcuts] = useState(false)
-  const shortcutsRef = useRef<HTMLDivElement>(null)
-
+  // Close user menu on outside click.
   useEffect(() => {
-    if (!showShortcuts) return
+    if (!showUserMenu) return
     const onPointerDown = (event: PointerEvent) => {
-      if (!shortcutsRef.current?.contains(event.target as Node)) setShowShortcuts(false)
+      if (!userMenuRef.current?.contains(event.target as Node)) setShowUserMenu(false)
     }
     window.addEventListener('pointerdown', onPointerDown)
     return () => window.removeEventListener('pointerdown', onPointerDown)
-  }, [showShortcuts])
+  }, [showUserMenu])
 
-  if (!page) return null
-
-  const zoom = page.viewport.zoom
-  const setZoom = (next: number) => {
-    setViewport(
-      zoomAtPoint(page.viewport, { x: viewportSize.width / 2, y: viewportSize.height / 2 }, next),
-    )
-  }
-
-  const handleSave = () => {
-    flushCommit()
-    const doc = useCanvasStore.getState().doc
-    void saveDocumentNow(doc).then((result) => {
-      if (result.ok) {
-        pushToast(
-          `Saved to ${result.storage === 'database' ? 'this browser’s database' : 'local storage'}${
-            result.bytes ? ` · ${formatBytes(result.bytes)}` : ''
-          }`,
-          'success',
-        )
-      } else {
-        pushToast(result.error ?? 'Could not save', 'error')
-      }
-    })
-  }
+  const isCanvas = route === 'canvas'
 
   return (
-    <header className="z-30 flex flex-wrap items-center gap-2 border-b border-line bg-white/85 px-3 py-2 backdrop-blur">
-      <button
-        type="button"
-        className="cc-btn px-2"
-        title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
-        onClick={() => setSidebarOpen(!sidebarOpen)}
-      >
-        <IconSidebar size={15} />
-      </button>
+    <header className="z-30 flex flex-wrap items-center gap-2 border-b border-line bg-white/85 px-3 py-2 backdrop-blur dark:bg-slate-900/85">
+      {/* Sidebar toggle (canvas only) */}
+      {isCanvas ? (
+        <button
+          type="button"
+          className="cc-btn px-2"
+          title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+        >
+          <IconSidebar size={15} />
+        </button>
+      ) : null}
 
+      {/* Logo / home */}
       <div className="flex min-w-0 items-center gap-2">
-        <img src="/favicon.svg" alt="Logo" width="22" height="22" className="shrink-0" />
-        <span className="hidden text-sm font-bold tracking-tight text-slate-800 sm:inline">CardCanvas</span>
+        <img
+          src="/favicon.svg"
+          alt="Logo"
+          width="22"
+          height="22"
+          className="shrink-0 cursor-pointer"
+          onClick={() => onNavigate('workspace')}
+        />
+        {isCanvas ? (
+          <span className="hidden text-sm font-bold tracking-tight text-slate-800 sm:inline dark:text-slate-100">
+            ClassCards
+          </span>
+        ) : (
+          <button
+            type="button"
+            className="hidden cursor-pointer text-sm font-bold tracking-tight text-slate-800 sm:inline dark:text-slate-100"
+            onClick={() => onNavigate('workspace')}
+          >
+            ClassCards
+          </button>
+        )}
+      </div>
+
+      {/* Page title (canvas only) */}
+      {isCanvas && page ? (
         <input
           key={activePageId}
           defaultValue={page.title}
@@ -163,98 +176,130 @@ export function Toolbar() {
           className="cc-input max-w-[10rem] font-semibold sm:max-w-[16rem]"
           onChange={(event) => renamePage(activePageId, event.target.value)}
         />
-      </div>
+      ) : null}
 
-      <div className="ml-auto flex flex-wrap items-center gap-1.5">
-        <button type="button" className="cc-btn" data-variant="primary" onClick={() => addCard()}>
-          <IconPlus size={14} />
-          <span className="hidden sm:inline">Card</span>
-          <span className="cc-kbd ml-1 hidden lg:inline">C</span>
-        </button>
-        <button type="button" className="cc-btn" onClick={() => addGroup()}>
-          <IconPlus size={14} />
-          <span className="hidden sm:inline">Group</span>
-          <span className="cc-kbd ml-1 hidden lg:inline">G</span>
-        </button>
-
-        <span className="mx-1 h-6 w-px bg-line" />
-
-        <button type="button" className="cc-btn px-2" title="Undo (Ctrl+Z)" disabled={!canUndo} onClick={undo}>
-          <IconUndo size={15} />
-        </button>
-        <button type="button" className="cc-btn px-2" title="Redo (Ctrl+Shift+Z)" disabled={!canRedo} onClick={redo}>
-          <IconRedo size={15} />
-        </button>
-
-        <span className="mx-1 h-6 w-px bg-line" />
-
-        <button type="button" className="cc-btn px-2" title="Zoom out" onClick={() => setZoom(zoom / 1.2)}>
-          <IconZoomOut size={15} />
-        </button>
-        <button
-          type="button"
-          className="cc-btn min-w-[3.1rem] tabular-nums"
-          title="Reset zoom to 100%"
-          onClick={() => setZoom(1)}
-        >
-          {Math.round(zoom * 100)}%
-        </button>
-        <button type="button" className="cc-btn px-2" title="Zoom in" onClick={() => setZoom(zoom * 1.2)}>
-          <IconZoomIn size={15} />
-        </button>
-        <button
-          type="button"
-          className="cc-btn px-2"
-          title="Fit all cards in view (F)"
-          onClick={requestFitView}
-        >
-          <IconFit size={15} />
-        </button>
-
-        <span className="mx-1 h-6 w-px bg-line" />
-
-        <button
-          type="button"
-          className="cc-btn px-2"
-          title="Snap to grid"
-          data-active={snapToGrid}
-          onClick={toggleSnapToGrid}
-        >
-          <IconMagnet size={15} />
-        </button>
-        <div className="cc-seg">
-          <button type="button" data-active={gridPattern === 'none'} onClick={() => setGridPattern('none')}>
-            Off
+      {/* Canvas toolbar (only on canvas route) */}
+      {isCanvas ? (
+        <div className="ml-auto flex flex-wrap items-center gap-1.5">
+          <button type="button" className="cc-btn" data-variant="primary" onClick={() => addCard()}>
+            <IconPlus size={14} />
+            <span className="hidden sm:inline">Card</span>
+            <span className="cc-kbd ml-1 hidden lg:inline">C</span>
           </button>
-          <button type="button" data-active={gridPattern === 'dots'} onClick={() => setGridPattern('dots')}>
-            Dots
+          <button type="button" className="cc-btn" onClick={() => addGroup()}>
+            <IconPlus size={14} />
+            <span className="hidden sm:inline">Group</span>
+            <span className="cc-kbd ml-1 hidden lg:inline">G</span>
           </button>
-          <button type="button" data-active={gridPattern === 'lines'} onClick={() => setGridPattern('lines')}>
-            Lines
+
+          <span className="mx-1 h-6 w-px bg-line" />
+
+          <button type="button" className="cc-btn px-2" title="Undo (Ctrl+Z)" disabled={!canUndo} onClick={undo}>
+            <IconUndo size={15} />
+          </button>
+          <button type="button" className="cc-btn px-2" title="Redo (Ctrl+Shift+Z)" disabled={!canRedo} onClick={redo}>
+            <IconRedo size={15} />
+          </button>
+
+          <span className="mx-1 h-6 w-px bg-line" />
+
+          <button type="button" className="cc-btn px-2" title="Zoom out" onClick={() => {
+            if (!page) return
+            const zoom = page.viewport.zoom ?? 1
+            setViewport(zoomAtPoint(page.viewport, { x: viewportSize.width / 2, y: viewportSize.height / 2 }, zoom / 1.2))
+          }}>
+            <IconZoomOut size={15} />
+          </button>
+          <button
+            type="button"
+            className="cc-btn min-w-[3.1rem] tabular-nums"
+            title="Reset zoom to 100%"
+            onClick={() => {
+              if (!page) return
+              setViewport(zoomAtPoint(page.viewport, { x: viewportSize.width / 2, y: viewportSize.height / 2 }, 1))
+            }}
+          >
+            {page ? Math.round(page.viewport.zoom * 100) : 100}%
+          </button>
+          <button type="button" className="cc-btn px-2" title="Zoom in" onClick={() => {
+            if (!page) return
+            const zoom = page.viewport.zoom ?? 1
+            setViewport(zoomAtPoint(page.viewport, { x: viewportSize.width / 2, y: viewportSize.height / 2 }, zoom * 1.2))
+          }}>
+            <IconZoomIn size={15} />
+          </button>
+          <button
+            type="button"
+            className="cc-btn px-2"
+            title="Fit all cards in view (F)"
+            onClick={requestFitView}
+          >
+            <IconFit size={15} />
+          </button>
+
+          <span className="mx-1 h-6 w-px bg-line" />
+
+          <button
+            type="button"
+            className="cc-btn px-2"
+            title="Snap to grid"
+            data-active={snapToGrid}
+            onClick={toggleSnapToGrid}
+          >
+            <IconMagnet size={15} />
+          </button>
+          <div className="cc-seg">
+            <button type="button" data-active={gridPattern === 'none'} onClick={() => setGridPattern('none')}>
+              Off
+            </button>
+            <button type="button" data-active={gridPattern === 'dots'} onClick={() => setGridPattern('dots')}>
+              Dots
+            </button>
+            <button type="button" data-active={gridPattern === 'lines'} onClick={() => setGridPattern('lines')}>
+              Lines
+            </button>
+          </div>
+
+          <span className="mx-1 h-6 w-px bg-line" />
+
+          <button
+            type="button"
+            className="cc-btn px-2"
+            title="Search cards"
+            data-active={searchOpen}
+            onClick={() => setSearchOpen(!searchOpen)}
+          >
+            <IconSearch size={15} />
+          </button>
+
+          <span className="mx-1 h-6 w-px bg-line" />
+
+          <button type="button" className="cc-btn px-2" title="Import JSON" onClick={() => setDialog('import')}>
+            <IconUpload size={15} />
+          </button>
+          <button type="button" className="cc-btn px-2" title="Export JSON" onClick={() => setDialog('export')}>
+            <IconDownload size={15} />
+          </button>
+          <button type="button" className="cc-btn px-2" title="Save now (Ctrl+S)" onClick={() => {
+            flushCommit()
+            const doc = useCanvasStore.getState().doc
+            void saveDocumentNow(doc).then((result) => {
+              if (result.ok) {
+                pushToast(`Saved${result.bytes ? ` · ${formatBytes(result.bytes)}` : ''}`, 'success')
+              } else {
+                pushToast(result.error ?? 'Could not save', 'error')
+              }
+            })
+          }}>
+            <IconSave size={15} />
           </button>
         </div>
+      ) : (
+        <div className="ml-auto" />
+      )}
 
-        <span className="mx-1 h-6 w-px bg-line" />
-
-        <button
-          type="button"
-          className="cc-btn px-2"
-          title="Search cards"
-          data-active={searchOpen}
-          onClick={() => setSearchOpen(!searchOpen)}
-        >
-          <IconSearch size={15} />
-        </button>
-        <button type="button" className="cc-btn px-2" title="Import JSON" onClick={() => setDialog('import')}>
-          <IconUpload size={15} />
-        </button>
-        <button type="button" className="cc-btn px-2" title="Export JSON" onClick={() => setDialog('export')}>
-          <IconDownload size={15} />
-        </button>
-        <button type="button" className="cc-btn px-2" title="Save now (Ctrl+S)" onClick={handleSave}>
-          <IconSave size={15} />
-        </button>
-
+      {/* Right side: dark mode + shortcuts + account */}
+      <div className="flex items-center gap-1.5">
         <button
           type="button"
           className="cc-btn px-2"
@@ -264,19 +309,94 @@ export function Toolbar() {
           {darkMode ? <IconSun size={15} /> : <IconMoon size={15} />}
         </button>
 
-        {user ? (
+        {isCanvas ? (
           <div className="relative">
+            <button
+              type="button"
+              className="cc-btn px-2"
+              title="Keyboard shortcuts"
+              onClick={() => setShowShortcuts((v) => !v)}
+            >
+              <IconKeyboard size={15} />
+            </button>
+            {showShortcuts ? (
+              <div className="cc-panel absolute right-0 top-[2.4rem] z-50 w-[19rem] p-3">
+                <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">
+                  Shortcuts
+                </h3>
+                <ul className="grid gap-1.5 text-xs">
+                  {SHORTCUTS.map(([keys, description]) => (
+                    <li key={keys} className="grid grid-cols-[7.5rem_1fr] items-center gap-2">
+                      <span className="cc-kbd">{keys}</span>
+                      <span className="text-slate-600 dark:text-slate-300">{description}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {/* Account */}
+        {user ? (
+          <div ref={userMenuRef} className="relative">
             <button
               type="button"
               className="flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold text-white"
               style={{ background: 'var(--color-brand)' }}
               title={user.email}
-              onClick={() => {
-                if (confirm('Sign out?')) handleSignOut()
-              }}
+              onClick={() => setShowUserMenu((v) => !v)}
             >
-              {user.email.charAt(0).toUpperCase()}
+              {user.user_metadata?.avatar_url ? (
+                <img
+                  src={user.user_metadata.avatar_url}
+                  alt="Profile"
+                  className="h-8 w-8 rounded-full object-cover"
+                />
+              ) : (
+                <span>{user.email.charAt(0).toUpperCase()}</span>
+              )}
             </button>
+            {showUserMenu ? (
+              <div className="cc-panel absolute right-0 top-[2.4rem] z-50 w-48 p-1.5">
+                <div className="border-b border-line px-2 py-1.5 dark:border-slate-700">
+                  <p className="truncate text-xs font-semibold text-slate-700 dark:text-slate-200">
+                    {user.user_metadata?.name ?? user.email}
+                  </p>
+                  <p className="truncate text-[11px] text-slate-400">{user.email}</p>
+                </div>
+                <button
+                  type="button"
+                  className="mt-1 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-slate-100 dark:hover:bg-slate-700"
+                  onClick={() => {
+                    setShowUserMenu(false)
+                    onNavigate('settings')
+                  }}
+                >
+                  Settings
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-slate-100 dark:hover:bg-slate-700"
+                  onClick={() => {
+                    setShowUserMenu(false)
+                    onNavigate('workspace')
+                  }}
+                >
+                  Workspaces
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                  onClick={() => {
+                    setShowUserMenu(false)
+                    void handleSignOut()
+                  }}
+                >
+                  Sign out
+                </button>
+              </div>
+            ) : null}
           </div>
         ) : (
           <button
@@ -288,34 +408,16 @@ export function Toolbar() {
             Sign in
           </button>
         )}
-
-        <div className="relative">
-          <button
-            type="button"
-            className="cc-btn px-2"
-            title="Keyboard shortcuts"
-            data-active={showShortcuts}
-            onClick={() => setShowShortcuts((v) => !v)}
-          >
-            <IconKeyboard size={15} />
-          </button>
-          {showShortcuts ? (
-            <div ref={shortcutsRef} className="cc-panel absolute right-0 top-[2.4rem] z-50 w-[19rem] p-3">
-              <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Shortcuts</h3>
-              <ul className="grid gap-1.5 text-xs">
-                {SHORTCUTS.map(([keys, description]) => (
-                  <li key={keys} className="grid grid-cols-[7.5rem_1fr] items-center gap-2">
-                    <span className="cc-kbd">{keys}</span>
-                    <span className="text-slate-600">{description}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-        </div>
       </div>
 
-      {showAuth ? <LoginPage onAuth={(u) => { setUser(u); pushToast(`Welcome, ${u.email}!`, 'success') }} /> : null}
+      {showAuth ? (
+        <LoginPage
+          onAuth={(u) => {
+            onUserChange(u)
+            pushToast(`Welcome, ${u.email}!`, 'success')
+          }}
+        />
+      ) : null}
     </header>
   )
 }

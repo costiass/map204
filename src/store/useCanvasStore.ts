@@ -55,6 +55,8 @@ export interface CanvasStore {
   /** The Supabase document ID (for saving). */
   documentId: string | null
   setDocumentId: (id: string | null) => void
+  setDarkMode: (enabled: boolean) => void
+  setGridSize: (size: number) => void
 
   /* --- selection --------------------------------------------------- */
   selectedCardIds: string[]
@@ -335,6 +337,10 @@ export const useCanvasStore = create<CanvasStore>()(
       },
 
       setDocumentId: (id) => set({ documentId: id }),
+
+      setDarkMode: (enabled) => set({ darkMode: enabled }),
+
+      setGridSize: (size) => set({ gridSize: size }),
 
       /* ------------------------------------------------------------ */
       /* pages                                                        */
