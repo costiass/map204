@@ -1,0 +1,154 @@
+import { CardContentTab } from '@/components/CardContentTab'
+import { CardSettingsTab } from '@/components/CardSettingsTab'
+import { ConnectionEditor } from '@/components/ConnectionEditor'
+import { GroupEditor } from '@/components/GroupEditor'
+import { IconFit, IconX } from '@/components/Icons'
+import { MultiSelectEditor } from '@/components/MultiSelectEditor'
+import { useCanvasStore } from '@/store/useCanvasStore'
+import { cardRect, centerOn, rectCenter } from '@/utils/geometry'
+
+/**
+ * Right-hand inspector.
+ *
+ * It only exists while something is selected, and takes a meaningful slice of
+ * the window (30% of the screen, never more than half) because the card body is
+ * edited as a Markdown page here rather than in place on the canvas.
+ *
+ * A single card gets two tabs: Content (the Markdown page plus tags, steps and
+ * images) and Settings (colours, border, layout, and making this style the
+ * default). Several cards get the bulk editor; a single connection gets the
+ * connection editor.
+ */
+export function Inspector() {
+  const selectedCardIds = useCanvasStore((s) => s.selectedCardIds)
+  const card = useCanvasStore((s) =>
+    s.selectedCardIds.length === 1
+      ? s.doc.pages.find((p) => p.id === s.activePageId)?.cards.find((c) => c.id === s.selectedCardIds[0])
+      : undefined,
+  )
+  const group = useCanvasStore((s) =>
+    s.selectedGroupId
+      ? s.doc.pages.find((p) => p.id === s.activePageId)?.groups.find((g) => g.id === s.selectedGroupId)
+      : undefined,
+  )
+  const connection = useCanvasStore((s) =>
+    s.selectedConnectionIds.length === 1
+      ? s.doc.pages
+          .find((p) => p.id === s.activePageId)
+          ?.connections.find((c) => c.id === s.selectedConnectionIds[0])
+      : undefined,
+  )
+  const cardCount = useCanvasStore((s) =>
+    s.doc.pages.find((p) => p.id === s.activePageId)?.cards.filter((c) => s.selectedCardIds.includes(c.id)).length ?? 0,
+  )
+  const clearSelection = useCanvasStore((s) => s.clearSelection)
+  const tab = useCanvasStore((s) => s.inspectorTab)
+  const setTab = useCanvasStore((s) => s.setInspectorTab)
+  const updateCard = useCanvasStore((s) => s.updateCard)
+  const updateGroup = useCanvasStore((s) => s.updateGroup)
+  const flushCommit = useCanvasStore((s) => s.flushCommit)
+  const setViewport = useCanvasStore((s) => s.setViewport)
+  const viewportSize = useCanvasStore((s) => s.viewportSize)
+  const pageZoom = useCanvasStore((s) => s.doc.pages.find((p) => p.id === s.activePageId)?.viewport.zoom ?? 1)
+
+  const open = cardCount > 0 || Boolean(connection) || Boolean(group)
+  if (!open) return null
+
+  const heading = card
+    ? card.title || 'Untitled card'
+    : group
+      ? group.title || 'Untitled group'
+      : connection
+        ? 'Connection'
+        : `${cardCount} cards selected`
+
+  return (
+    <aside className="cc-panel fixed inset-x-0 bottom-0 z-40 flex max-h-[62vh] shrink-0 flex-col border-t border-line bg-white shadow-lg md:static md:z-auto md:h-full md:max-h-none md:w-[clamp(30%,36vw,50%)] md:shrink-0 md:border-t-0 md:border-l md:shadow-none">
+      <div className="flex shrink-0 items-center gap-1.5 border-b border-line px-2.5 py-2">
+        {card ? (
+          <>
+            <input
+              value={card.title}
+              className="min-w-0 flex-1 border-0 bg-transparent text-[13px] font-bold text-slate-700 outline-none placeholder:text-slate-400"
+              placeholder="Card title"
+              aria-label="Card title"
+              onChange={(event) => updateCard(card.id, { title: event.target.value }, { silent: true })}
+              onBlur={() => flushCommit()}
+            />
+            <button
+              type="button"
+              className="cc-btn shrink-0 px-1.5 py-1"
+              title="Centre this card in the viewport"
+              onClick={() => setViewport(centerOn(rectCenter(cardRect(card)), viewportSize, Math.max(pageZoom, 0.8)))}
+            >
+              <IconFit size={13} />
+            </button>
+          </>
+        ) : group ? (
+          <>
+            <input
+              value={group.title}
+              className="min-w-0 flex-1 border-0 bg-transparent text-[13px] font-bold text-slate-700 outline-none placeholder:text-slate-400"
+              placeholder="Group title"
+              aria-label="Group title"
+              onChange={(event) => updateGroup(group.id, { title: event.target.value }, { silent: true })}
+              onBlur={() => flushCommit()}
+            />
+            <button
+              type="button"
+              className="cc-btn shrink-0 px-1.5 py-1"
+              title="Centre this group in the viewport"
+              onClick={() => setViewport(centerOn(rectCenter(group.position), viewportSize, Math.max(pageZoom, 0.8)))}
+            >
+              <IconFit size={13} />
+            </button>
+          </>
+        ) : (
+          <h2 className="min-w-0 flex-1 truncate text-[13px] font-bold text-slate-700" title={heading}>
+            {heading}
+          </h2>
+        )}
+        <button
+          type="button"
+          className="cc-btn shrink-0 px-1.5 py-1"
+          onClick={clearSelection}
+          title="Close inspector (Esc)"
+          aria-label="Close inspector"
+        >
+          <IconX size={14} />
+        </button>
+      </div>
+
+      {card ? (
+        <>
+          <div className="flex shrink-0 gap-1 border-b border-line px-2 py-1.5">
+            <button
+              type="button"
+              className="cc-tab"
+              data-active={tab === 'content'}
+              onClick={() => setTab('content')}
+            >
+              Content
+            </button>
+            <button
+              type="button"
+              className="cc-tab"
+              data-active={tab === 'settings'}
+              onClick={() => setTab('settings')}
+            >
+              Settings
+            </button>
+          </div>
+          {tab === 'content' ? <CardContentTab key={card.id} card={card} /> : null}
+          {tab === 'settings' ? <CardSettingsTab key={card.id} card={card} /> : null}
+        </>
+      ) : null}
+
+      {group ? <GroupEditor key={group.id} group={group} /> : null}
+
+      {connection && !card ? <ConnectionEditor key={connection.id} connectionId={connection.id} /> : null}
+
+      {!card && !connection && cardCount > 1 ? <MultiSelectEditor cardIds={selectedCardIds} /> : null}
+    </aside>
+  )
+}

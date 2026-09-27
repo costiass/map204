@@ -1,0 +1,34 @@
+# Supabase CLI configuration
+# Run `supabase init` locally to set up, then `supabase db push` to deploy schema
+
+[project]
+id = "classcards"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+
+[db]
+port = 54321
+shadow_port = 54320
+
+[studio]
+enabled = true
+port = 54322
+
+[auth]
+enabled = true
+site_url = "http://localhost:5173"
+additional_redirect_urls = ["https://your-domain.vercel.app"]
+jwt_expiry = 3600
+
+[auth.external.google]
+enabled = true
+client_id = "your-google-client-id"
+secret = "your-google-client-secret"
+redirect_uri = "http://localhost:5173/auth/v1/callback"
+
+[realtime]
+enabled = true
