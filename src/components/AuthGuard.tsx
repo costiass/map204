@@ -15,6 +15,7 @@ export function AuthGuard({ children, onUserChange }: AuthGuardProps) {
 
   useEffect(() => {
     if (!isSupabaseConfigured()) {
+      console.error('[AuthGuard] Supabase not configured')
       setLoading(false)
       return
     }
@@ -50,9 +51,21 @@ export function AuthGuard({ children, onUserChange }: AuthGuardProps) {
     return () => subscription.unsubscribe()
   }, [onUserChange])
 
-  // If Supabase is not configured, allow access (local-only mode).
+  // If Supabase is not configured, show error.
   if (!isSupabaseConfigured()) {
-    return <>{children}</>
+    return (
+      <div className="flex h-full w-full items-center justify-center bg-canvas">
+        <div className="cc-panel max-w-sm p-6 text-center">
+          <h2 className="mb-2 text-lg font-bold text-slate-700">Configuration Error</h2>
+          <p className="text-sm text-slate-500">
+            Supabase is not configured. Add{' '}
+            <code className="cc-inline-code">VITE_SUPABASE_URL</code> and{' '}
+            <code className="cc-inline-code">VITE_SUPABASE_ANON_KEY</code> to your
+            environment variables and redeploy.
+          </p>
+        </div>
+      </div>
+    )
   }
 
   if (loading) {
