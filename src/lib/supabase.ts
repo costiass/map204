@@ -20,5 +20,5 @@ export function isSupabaseConfigured(): boolean {
 export type SupabaseUser = {
   id: string
   email: string
-  user_metadata?: { name?: string; avatar_url?: string }
+  user_metadata?: { name?: string; avatar_url?: string; picture?: string }
 }

@@ -43,16 +43,14 @@ const SHORTCUTS: Array<[string, string]> = [
   ['F', 'Fit all cards'],
 ]
 
-type Route = 'workspace' | 'canvas' | 'settings'
-
 interface ToolbarProps {
-  route: Route
   user: SupabaseUser | null
-  onNavigate: (route: Route) => void
+  onOpenSettings?: () => void
+  onOpenWorkspace?: () => void
   onUserChange: (user: SupabaseUser | null) => void
 }
 
-export function Toolbar({ route, user, onNavigate, onUserChange }: ToolbarProps) {
+export function Toolbar({ user, onOpenSettings, onOpenWorkspace, onUserChange }: ToolbarProps) {
   const activePageId = useCanvasStore((s) => s.activePageId)
   const page = useCanvasStore((s) => s.doc.pages.find((p) => p.id === s.activePageId))
   const renamePage = useCanvasStore((s) => s.renamePage)
@@ -81,7 +79,6 @@ export function Toolbar({ route, user, onNavigate, onUserChange }: ToolbarProps)
   const [showAuth, setShowAuth] = useState(false)
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
-
   const userMenuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -126,7 +123,7 @@ export function Toolbar({ route, user, onNavigate, onUserChange }: ToolbarProps)
     return () => window.removeEventListener('pointerdown', onPointerDown)
   }, [showUserMenu])
 
-  const isCanvas = route === 'canvas'
+  const isCanvas = Boolean(page)
 
   return (
     <header className="z-30 flex flex-wrap items-center gap-2 border-b border-line bg-white/85 px-3 py-2 backdrop-blur dark:bg-slate-900/85">
@@ -150,21 +147,15 @@ export function Toolbar({ route, user, onNavigate, onUserChange }: ToolbarProps)
           width="22"
           height="22"
           className="shrink-0 cursor-pointer"
-          onClick={() => onNavigate('workspace')}
+          onClick={() => onOpenWorkspace?.()}
         />
-        {isCanvas ? (
-          <span className="hidden text-sm font-bold tracking-tight text-slate-800 sm:inline dark:text-slate-100">
-            ClassCards
-          </span>
-        ) : (
-          <button
-            type="button"
-            className="hidden cursor-pointer text-sm font-bold tracking-tight text-slate-800 sm:inline dark:text-slate-100"
-            onClick={() => onNavigate('workspace')}
-          >
-            ClassCards
-          </button>
-        )}
+        <button
+          type="button"
+          className="hidden cursor-pointer text-sm font-bold tracking-tight text-slate-800 sm:inline dark:text-slate-100"
+          onClick={() => onOpenWorkspace?.()}
+        >
+          ClassCards
+        </button>
       </div>
 
       {/* Page title (canvas only) */}
@@ -370,7 +361,7 @@ export function Toolbar({ route, user, onNavigate, onUserChange }: ToolbarProps)
                   className="mt-1 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-slate-100 dark:hover:bg-slate-700"
                   onClick={() => {
                     setShowUserMenu(false)
-                    onNavigate('settings')
+                    onOpenSettings?.()
                   }}
                 >
                   Settings
@@ -380,7 +371,7 @@ export function Toolbar({ route, user, onNavigate, onUserChange }: ToolbarProps)
                   className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-slate-100 dark:hover:bg-slate-700"
                   onClick={() => {
                     setShowUserMenu(false)
-                    onNavigate('workspace')
+                    onOpenWorkspace?.()
                   }}
                 >
                   Workspaces
