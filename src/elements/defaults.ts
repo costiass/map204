@@ -82,6 +82,24 @@ export const DEFAULT_CONNECTION_STYLE_V2: ConnectionStyle & { relationshipType: 
 export const DEFAULT_ELEMENT_SIZE = { width: 280, height: 160 }
 
 /**
+ * The height of an element's title bar, in pixels.
+ *
+ * The model needs this number and not just the renderer, because an element's
+ * `height` covers the title bar *and* the body -- so an element whose body has to
+ * show a video of a given shape cannot be the right height unless somebody adds
+ * the bar on. Without it, `height = width / aspect` sizes the element to the video
+ * and the video is then squeezed into what is left after the title, so it is
+ * letterboxed or clipped and the number in the model was never the number on
+ * screen.
+ *
+ * The authority is `--cc-header-height` in `src/index.css`, which is what the
+ * stylesheet actually uses. This constant has to agree with it and
+ * `test:element-chrome.cjs` fails when it does not -- a fixed header and a stale
+ * constant would put the same off-by-thirty error back with a test that passes.
+ */
+export const ELEMENT_HEADER_HEIGHT = 38
+
+/**
  * A video's shape.
  *
  * 16:9, because that is what essentially every video is and what YouTube renders.

@@ -15,8 +15,16 @@
  * silent, which is the whole problem with them.
  */
 
-import type { Element, Group, NoteElement, Page, TableElement, VideoElement } from '@/elements/schema'
-import { DEFAULT_VIDEO_ASPECT } from '@/elements/defaults'
+import type {
+  Element,
+  Group,
+  NoteElement,
+  Page,
+  TableColumn,
+  TableElement,
+  VideoElement,
+} from '@/elements/schema'
+import { DEFAULT_VIDEO_ASPECT, ELEMENT_HEADER_HEIGHT } from '@/elements/defaults'
 
 /** The stamp every mutation leaves, so "what changed and when" is answerable. */
 function now(): string {
@@ -173,15 +181,26 @@ export function resizeElement(
 
   const aspect = options.aspect ?? (element.kind === 'video' ? aspectOf(element) : null)
   if (aspect && aspect > 0.01) {
+    /*
+     * The title bar is inside the element's height, so it is added before the
+     * aspect is applied and taken off again after.
+     *
+     * Without it, dragging a video's width set the *element* to the video's shape
+     * and the video was then drawn into what remained of the element once the bar
+     * had taken its cut -- so every video was letterboxed by however tall its
+     * title bar happened to be, and `height` was never the number on screen.
+     */
+    const bar = element.kind === 'video' ? ELEMENT_HEADER_HEIGHT : 0
+
     if (leading === 'width') {
       // Rounded, so a video sits on whole pixels. The grid is drawn in whole
       // pixels, and a video's height derived from a fractional width lands
       // between two rows and looks like it is not quite on the grid.
       element.width = Math.max(40, Math.round(size.width))
-      element.height = Math.max(40, Math.round(element.width / aspect))
+      element.height = Math.max(40, Math.round(bar + element.width / aspect))
     } else {
       element.height = Math.max(40, Math.round(size.height))
-      element.width = Math.max(40, Math.round(element.height * aspect))
+      element.width = Math.max(40, Math.round((element.height - bar) * aspect))
     }
   } else {
     element.width = Math.max(40, Math.round(size.width))
@@ -535,16 +554,162 @@ export function editTable(page: Page, id: string, patch: Partial<TableElement>):
   return true
 }
 
-/** The cell at a row and column, or `''` if it is off the end of the table. */
+/**
+ * The cell at a row and column, or `''` if it is off the end of the table.
+ *
+ * The bounds check is not defensive padding, it is the arithmetic. Cells are
+ * stored column-major, so the index is `column * rowCount + row` -- and with the
+ * row unchecked, asking for row 2 of a two-row table computes index 2, which is
+ * *column 1's first cell*. Every caller that walks a rectangle would read across
+ * into its neighbour instead of off the end.
+ *
+ * That is not theoretical: `resizeTableRows` growing a table asked for the new
+ * rows and got the next column's answers, so a 2x2 table turned into a 2x3 with
+ * column 0's new last row reading "r0c1".
+ */
 export function tableCell(table: TableElement, row: number, column: number): string {
+  if (row < 0 || column < 0) return ''
+  if (row >= table.rowCount || column >= table.columns.length) return ''
   const index = column * table.rowCount + row
   return table.cells[index] ?? ''
 }
 
-/** Write a cell, growing the table if the address is past its end. */
-export function setTableCell(table: TableElement, row: number, column: number, value: string): void {
-  const needed = (column + 1) * table.rowCount
-  while (table.cells.length < needed) table.cells.push('')
+/**
+ * Write a cell. Refuses an address outside the table.
+ *
+ * This used to pad `cells` until the address fitted, on the theory that writing
+ * past the end should grow the table. It does not: `cells` is indexed against
+ * `rowCount` and `columns`, so a padded cell sits at an index nothing renders and
+ * nothing can read back -- `tableCell` bounds-checks and returns empty for it.
+ * The write was invisible from the moment it happened.
+ *
+ * Growing a table is `resizeTableRows` and `resizeTableColumns`, which rewrite the
+ * shape and the cells together. Those are the only two ways to reach a cell that
+ * is not already there.
+ *
+ * Returns whether the write landed, so a caller can tell a rejected address from
+ * a successful write of an empty value.
+ */
+export function setTableCell(
+  table: TableElement,
+  row: number,
+  column: number,
+  value: string,
+): boolean {
+  if (row < 0 || column < 0) return false
+  if (row >= table.rowCount || column >= table.columns.length) return false
   table.cells[column * table.rowCount + row] = value
   table.updatedAt = now()
+  return true
+}
+
+/**
+ * The smallest table worth having, in each direction.
+ *
+ * One row by one column is a cell, not a table, and a count of zero is a bug
+ * waiting to divide by zero in `tableCell` -- the stride is `rowCount`, so a zero
+ * makes every cell in the table address index zero. Both are enforced here rather
+ * than in the inspector, because the inspector is not the only thing that can ask.
+ */
+export const MIN_TABLE_ROWS = 1
+export const MIN_TABLE_COLUMNS = 1
+
+/**
+ * How many columns a table may have.
+ *
+ * A ceiling rather than an open end, because the inspector offers a stepper and a
+ * stepper needs a top. 64 columns is far more than anybody has wanted and is far
+ * below anything that would make the canvas stutter.
+ */
+export const MAX_TABLE_COLUMNS = 64
+
+/**
+ * Set the row count, re-striding the cells.
+ *
+ * Cells are stored column-major -- `cells[column * rowCount + row]` -- so the row
+ * count is not a length, it is a *stride*. Changing it without rewriting the array
+ * reinterprets every cell, and silently: a 2x2 table asked for a third row reads
+ * column 0's new last row out of column 1's first cell, so the table fills with
+ * the wrong answers and every number moves one place.
+ *
+ * That is not hypothetical. The inspector's "+ Row" button patched `rowCount`
+ * directly and left `cells` alone, so it did exactly this.
+ *
+ * Rows past the old end are empty; rows beyond the new end are dropped.
+ */
+export function resizeTableRows(table: TableElement, rowCount: number): void {
+  const rows = clamp(rowCount, MIN_TABLE_ROWS, Number.MAX_SAFE_INTEGER)
+  if (rows === table.rowCount) return
+
+  const next: string[] = []
+  for (let column = 0; column < table.columns.length; column += 1) {
+    for (let row = 0; row < rows; row += 1) {
+      next.push(tableCell(table, row, column))
+    }
+  }
+
+  table.cells = next
+  table.rowCount = rows
+  table.updatedAt = now()
+}
+
+/**
+ * Set the column count, rebuilding both the columns and the cells.
+ *
+ * Widths are redistributed rather than kept: `width` is a percentage and the
+ * percentages have to add up to the element's width, so a new column has to take
+ * its share from somewhere. The kept columns keep their *relative* sizes and are
+ * scaled into what is left, which is what inserting a column into a spreadsheet
+ * does and is far less surprising than giving everybody an equal slice.
+ *
+ * `makeId` is passed in rather than imported, for the same reason
+ * `duplicateElements` takes one: an id minted by a global is an id the pure
+ * operations cannot predict, and these are supposed to be testable without a
+ * store.
+ */
+export function resizeTableColumns(
+  table: TableElement,
+  columnCount: number,
+  makeId: (prefix: string) => string,
+): void {
+  const count = clamp(columnCount, MIN_TABLE_COLUMNS, MAX_TABLE_COLUMNS)
+  if (count === table.columns.length) return
+
+  const keptCount = Math.min(count, table.columns.length)
+  const kept = table.columns.slice(0, keptCount)
+  const keptTotal = kept.reduce((sum, column) => sum + column.width, 0)
+
+  /*
+   * The new columns each take an equal 1/count share, so the kept ones are scaled
+   * into the remainder: growing from 3 to 4 leaves each new column a quarter and
+   * the three kept ones sharing half between them.
+   */
+  const keptTarget = (100 * keptCount) / count
+  const scale = keptTotal > 0 ? keptTarget / keptTotal : 0
+
+  const columns: TableColumn[] = kept.map((column) => ({
+    ...column,
+    width: scale > 0 ? column.width * scale : keptTarget / keptCount,
+  }))
+
+  const equalShare = 100 / count
+  for (let i = keptCount; i < count; i += 1) {
+    columns.push({ id: makeId('col'), title: '', width: equalShare })
+  }
+
+  const next: string[] = []
+  for (let column = 0; column < count; column += 1) {
+    for (let row = 0; row < table.rowCount; row += 1) {
+      next.push(tableCell(table, row, column))
+    }
+  }
+
+  table.columns = columns
+  table.cells = next
+  table.updatedAt = now()
+}
+
+function clamp(value: number, low: number, high: number): number {
+  if (!Number.isFinite(value)) return low
+  return Math.min(high, Math.max(low, Math.round(value)))
 }

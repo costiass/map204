@@ -40,6 +40,7 @@ import {
 import {
   DEFAULT_CONNECTION_STYLE_V2,
   DEFAULT_ELEMENT_SIZE,
+  ELEMENT_HEADER_HEIGHT,
   DEFAULT_GROUP_COLOR,
   DEFAULT_NOTE_STYLE,
   DEFAULT_RELATIONSHIP,
@@ -370,6 +371,11 @@ function normalizeTable(raw: unknown, at: { x: number; y: number }): TableElemen
     rowCount,
     editing: bool(value.editing, false),
     header: bool(value.header, true),
+    // Display, not content. Both default to on because a table with no borders at
+    // all looks like a mistake rather than a choice, and the author can turn
+    // either off in the inspector.
+    borders: bool(value.borders, true),
+    stripes: bool(value.stripes, false),
     ...(value.locked === true ? { locked: true } : {}),
   }
 }
@@ -448,8 +454,12 @@ export function createElement(
       return {
         ...baseOf({ ...input, id, createdAt: stamp, updatedAt: stamp }, at, 'video'),
         width,
-        // Height from the aspect, so a new video is never created stretched.
-        height: Math.round(width / aspect),
+        // Height from the aspect, *plus the title bar*. The element's height covers
+        // both, and the video is drawn in what is left after the bar -- so sizing
+        // the element to `width / aspect` alone gives a box the right size for the
+        // video and then squeezes the video into a shorter space. Adding the bar
+        // here is what makes "cover, edge to edge, no padding" true.
+        height: Math.round(ELEMENT_HEADER_HEIGHT + width / aspect),
         kind: 'video',
         title: str(input.title, 'Video'),
         url: str(input.url),
@@ -473,6 +483,10 @@ export function createElement(
         rowCount: DEFAULT_TABLE_ROWS,
         editing: false,
         header: true,
+        // Matches the normalizer's defaults, so a table made from the menu and a
+        // table read out of a file that predates these fields look the same.
+        borders: true,
+        stripes: false,
       }
     }
     case 'flash': {

@@ -266,6 +266,9 @@ export interface TableElement extends ElementBase {
   /**
    * How many rows. Derivable from `cells.length / columns.length`, but stored so
    * an empty table has a height to render rather than collapsing to nothing.
+   *
+   * This is the *stride* of `cells`, not a length. `resizeTableRows` rewrites the
+   * array when it changes; nothing else may.
    */
   rowCount: number
   /**
@@ -275,6 +278,18 @@ export interface TableElement extends ElementBase {
   editing: boolean
   /** Whether the first row is repeated and styled as a header. */
   header: boolean
+  /**
+   * Grid lines between cells.
+   *
+   * A choice rather than a constant because both readings are wanted: a grid of
+   * bordered cells is a spreadsheet, and a borderless one is a table of figures
+   * with rules under the headings -- which is how comparison tables, timetables
+   * and price lists are usually printed. Neither is the default answer for
+   * everybody, so the author picks.
+   */
+  borders: boolean
+  /** Alternating row shading, for reading across rather than down. */
+  stripes: boolean
 }
 
 /* ------------------------------------------------------------------ */

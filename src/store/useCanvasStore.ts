@@ -45,11 +45,15 @@ import {
   resizeElement as resizeElementOps,
   resizeGroupMembers,
   setTableCell as setTableCellOps,
+  resizeTableRows as resizeTableRowsOps,
+  resizeTableColumns as resizeTableColumnsOps,
   toggleCollapsed as toggleCollapsedOps,
   type ZOrderMode,
 } from '@/store/elementOps'
 import { centerOn, screenToWorld, stepViewport } from '@/utils/geometry'
 import { DEFAULT_WORKSPACE_ACCENT, DEFAULT_WORKSPACE_ICON } from '@/theme'
+import { ELEMENT_HEADER_HEIGHT } from '@/elements/defaults'
+import { MIN_CARD_HEIGHT } from '@/types'
 import { clone, uid } from '@/utils/id'
 
 const HISTORY_LIMIT = 80
@@ -321,6 +325,10 @@ export interface CanvasStore {
 
   setTableCell: (elementId: string, row: number, column: number, value: string) => void
   editTable: (elementId: string, patch: Record<string, unknown>) => void
+  /** Row count. Rewrites `cells`, so it deliberately is not a patch. */
+  resizeTableRows: (elementId: string, rowCount: number) => void
+  /** Column count. Rewrites `columns` and `cells`, so it deliberately is not a patch. */
+  resizeTableColumns: (elementId: string, columnCount: number) => void
 
   /** A flash deck. A deck of one is a single card, and always has been. */
   stepFlashDeck: (elementId: string, delta: number) => void
@@ -1153,11 +1161,39 @@ export const useCanvasStore = create<CanvasStore>()(
         })
       },
 
-      /** Headers, column count, row count — anything but a cell's own text. */
+      /** Headers, borders, stripes — anything that is display rather than content. */
       editTable: (elementId, patch) => {
         pushHistory()
         withPage((page) => {
           editTableOps(page, elementId, patch)
+        })
+      },
+
+      /**
+       * Row and column counts go through their own actions rather than
+       * `editTable`, because they have to rewrite `cells` and a patch cannot.
+       *
+       * `rowCount` is the stride of the column-major `cells` array, so setting it
+       * as a field reinterprets every cell in the table. That is what the old
+       * "+ Row" button did.
+       */
+      resizeTableRows: (elementId, rowCount) => {
+        pushHistory()
+        withPage((page) => {
+          const element = findElement(page, elementId)
+          if (!element || element.kind !== 'table') return
+          resizeTableRowsOps(element, rowCount)
+          page.updatedAt = new Date().toISOString()
+        })
+      },
+
+      resizeTableColumns: (elementId, columnCount) => {
+        pushHistory()
+        withPage((page) => {
+          const element = findElement(page, elementId)
+          if (!element || element.kind !== 'table') return
+          resizeTableColumnsOps(element, columnCount, uid)
+          page.updatedAt = new Date().toISOString()
         })
       },
 
@@ -1202,6 +1238,27 @@ export const useCanvasStore = create<CanvasStore>()(
           if (!element || element.kind !== 'video') return
           if (Math.abs((element.aspect ?? 0) - aspect) < 0.02) return
           element.aspect = aspect
+
+          /*
+           * Bring the height with it.
+           *
+           * The whole point of learning a video's real shape is that the element
+           * *is* that shape -- edge to edge, no padding, nothing letterboxed or
+           * cropped. Recording the aspect and leaving the height alone gives an
+           * element whose box is the old assumed 16:9 and whose video is now
+           * something else, so the video is cropped or padded instead. The element
+           * is resized rather than re-derived from scratch, because only the width
+           * is the author's business; the height was never a choice, it was the
+           * aspect's arithmetic.
+           *
+           * Only while `keepAspect`, which is the flag that says the height is not
+           * independently the author's. A video whose height was set deliberately
+           * keeps it.
+           */
+          if (element.keepAspect) {
+            const height = Math.round(ELEMENT_HEADER_HEIGHT + element.width / aspect)
+            if (height >= MIN_CARD_HEIGHT) element.height = height
+          }
         })
       },
 

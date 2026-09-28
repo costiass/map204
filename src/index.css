@@ -56,6 +56,49 @@
   --cc-radius-card: 12px;
   --cc-motion: 190ms;
 
+  /*
+   * The title bar's height, as a number the model can use.
+   *
+   * An element's `height` covers this bar *and* its body, so anything that sizes
+   * itself from an aspect -- a video, above all -- has to add it, or the element is
+   * the height of the video and the video is then squeezed into whatever is left.
+   *
+   * So this is not only a stylesheet value: `ELEMENT_HEADER_HEIGHT` in
+   * `src/elements/defaults.ts` mirrors it, and `test:element-chrome.cjs` fails if
+   * the two ever disagree. One of them changing without the other is the
+   * off-by-thirty that made video elements the wrong shape.
+   */
+  --cc-header-height: 38px;
+
+  /*
+   * The cursors, in the theme's primary colour.
+   *
+   * Defined once here rather than written into each rule, because the hotspot is
+   * half of the cursor's meaning and a hotspot written in six places is six
+   * chances to get it subtly wrong. `gen-cursors.cjs` writes the SVGs from the
+   * shape data in `scripts/cursors.config.cjs`, and `test-cursors.cjs` fails if
+   * either the artwork or the numbers here drift from that source.
+   *
+   * Four cursors, because there are four things a pointer can be promising:
+   *
+   *   grab     -- this moves if I press and move.
+   *   grabbing -- I am already moving it.
+   *   point    -- pressing this opens something.
+   *   text     -- this is typeable, selectable text.
+   *
+   * The keyword after each comma is the fallback for a browser that cannot load
+   * the SVG. It is not decoration: it is why a missing file degrades to a system
+   * cursor instead of to nothing.
+   *
+   * Note what is *not* here: a replacement for the default arrow. An arrow means
+   * "nothing to do here", and there is no better drawing of that than the one
+   * every other program uses.
+   */
+  --cc-cursor-grab: url('/cursors/grab.svg') 12 13, grab;
+  --cc-cursor-grabbing: url('/cursors/grabbing.svg') 12 13, grabbing;
+  --cc-cursor-point: url('/cursors/point.svg') 8 4, pointer;
+  --cc-cursor-text: url('/cursors/text.svg') 12 12, text;
+
   --cc-grid-dot: color-mix(in srgb, var(--cc-muted) 40%, transparent);
   --cc-grid-line: color-mix(in srgb, var(--cc-muted) 22%, transparent);
 
@@ -708,27 +751,23 @@ body {
  * being held, and `point` is at the tip of the finger. A cursor whose hotspot
  * is off by a few pixels is felt long before it is noticed.
  */
-.cc-cursor-grab {
-  cursor: url('/cursors/grab.svg') 12 12, grab;
-}
-
-.cc-cursor-grabbing {
-  cursor: url('/cursors/grabbing.svg') 12 12, grabbing;
-}
-
-.cc-cursor-point {
-  cursor: url('/cursors/point.svg') 5 2, pointer;
-}
-
 .cc-card__header {
   display: flex;
   align-items: center;
   gap: 0.25rem;
-  padding: 0.5rem 0.5rem 0.35rem 1rem;
+  padding: 0 0.5rem 0 1rem;
+  /*
+   * A fixed height, not padding.
+   *
+   * The old padding produced whatever the title's line box happened to be, which
+   * meant the bar's height was a side effect of font metrics and could not be
+   * known by the model. And the model *needs* to know it: an element's height
+   * covers this bar as well as the body, so anything sizing itself from an aspect
+   * has to add it. `--cc-header-height` is fixed so that number exists.
+   */
+  height: var(--cc-header-height);
   background: color-mix(in srgb, var(--cc-accent, #6366f1) 10%, transparent);
-  /* The header is the drag handle, so it says so — as a four-way move rather
-     than the OS's open hand. */
-  cursor: url('/cursors/grab.svg') 12 12, grab;
+  cursor: var(--cc-cursor-grab);
   touch-action: none;
   flex: 0 0 auto;
 }
@@ -746,11 +785,16 @@ body {
   line-height: 1.3;
   padding: 0.1rem 0.15rem;
   border-radius: 6px;
-  /* `grab`, not `text`. The title is no longer an input — it is read on the card
-     and written in the inspector — so the old `text` cursor was promising an
-     edit that could not happen. A move says "drag", which is what the header
-     does, and the body says something different. */
-  cursor: url('/cursors/grab.svg') 12 12, grab;
+  /* A fixed bar height means a long title has to be cut rather than to grow the
+     bar -- which is what would happen if this were allowed to wrap or push. The
+     full title is the header's `title` attribute and the inspector's field. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* Not the I-beam. The title is no longer an input -- it is read on the card and
+     written in the inspector -- so a text cursor was promising an edit that could
+     not happen. It says "drag", which is what the header does. */
+  cursor: var(--cc-cursor-grab);
   user-select: none;
 }
 
@@ -762,21 +806,22 @@ body {
 /*
  * The body of an element is a *button*, not a label.
  *
- * Clicking it opens the inspector, which is the thing a pointing hand promises.
- * The header says "drag" and the body says "press", so the cursor tells you
- * which of the two you would get before you press.
+ * Clicking it selects the element, which opens the inspector -- which is the
+ * thing a pointing hand promises. The header says "drag" and the body says
+ * "press", so the cursor tells you which of the two you would get before you
+ * press.
  */
 .cc-card__scroll {
-  cursor: url('/cursors/point.svg') 5 2, pointer;
+  cursor: var(--cc-cursor-point);
 }
 
-/* And while a drag is in progress, everything on the element is grabbing — the
+/* And while a drag is in progress, everything on the element is grabbing -- the
    pointer is being held, and a pointing hand mid-drag is a lie. */
 .cc-card[data-dragging='true'],
 .cc-card[data-dragging='true'] .cc-card__header,
 .cc-card[data-dragging='true'] .cc-card__title,
 .cc-card[data-dragging='true'] .cc-card__scroll {
-  cursor: url('/cursors/grabbing.svg') 12 12, grabbing;
+  cursor: var(--cc-cursor-grabbing);
 }
 
 .cc-card__btn {
@@ -1716,4 +1761,208 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 1ms !important;
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Tables                                                             */
+/* ------------------------------------------------------------------ */
+
+/*
+ * `table-layout: fixed` is the whole answer to "no minimum column width".
+ *
+ * The default is `auto`, which means the browser lays columns out to fit their
+ * *content* and only then applies the width you asked for. One long cell value —
+ * a sentence, a URL, a paragraph pasted from somewhere — therefore overrides every
+ * declared width and pushes the table wider than the element it is sitting in. The
+ * overflow is invisible as a mistake: the card just has a table running off the
+ * right edge, and the columns no longer add up to anything.
+ *
+ * `fixed` takes the widths literally and lets content clip instead. A column is
+ * exactly as wide as it says, the row always ends inside the card, and the long
+ * value scrolls within its own cell.
+ *
+ * `width: 100%` on the table itself, and `min-width: 0` on every cell. The second
+ * is the part that is easy to miss: a `<td>` has `min-width: auto` by default,
+ * which is the automatic minimum size rule, and that is *also* a minimum width --
+ * a second one, applied inside a fixed layout, and enough to stop the cell
+ * shrinking. Both have to go.
+ */
+.cc-table-wrap {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.cc-table {
+  table-layout: fixed;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.cc-table th,
+.cc-table td {
+  min-width: 0;
+  padding: 0.2rem 0.35rem;
+  text-align: left;
+  vertical-align: top;
+  /* Long values scroll inside the cell rather than widening it. `hidden` plus an
+     `input` inside, because the input is the thing that scrolls. */
+  overflow: hidden;
+}
+
+.cc-table th {
+  font-weight: 650;
+  color: color-mix(in srgb, currentColor 78%, transparent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cc-table input {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: 0.15rem 0.2rem;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  /* The cell clips; the value inside scrolls. Without this the input's own
+     default `size` width would become the column's minimum all over again. */
+  outline-offset: -1px;
+}
+
+.cc-table input:focus-visible {
+  outline: 2px solid var(--cc-brand);
+  background: var(--cc-surface);
+}
+
+/* Borders. A choice, on the element, because a grid of ruled cells is a
+   spreadsheet and a borderless one with rules under the headings is a table of
+   figures — and both are wanted, so neither can be the constant. */
+.cc-table[data-borders='true'] th,
+.cc-table[data-borders='true'] td {
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+}
+
+.cc-table[data-borders='false'] th {
+  /* Even without a grid, the headings need a rule. That is the convention rather
+     than an arbitrary line: it is how a borderless table is read. */
+  border-bottom: 1px solid color-mix(in srgb, currentColor 32%, transparent);
+}
+
+.cc-table[data-borders='false'] th + th,
+.cc-table[data-borders='false'] td + td {
+  border-left: 1px solid color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.cc-table tr[data-striped='true'] td {
+  background: color-mix(in srgb, currentColor 6%, transparent);
+}
+
+/* In dark mode a 16% alpha on the element's own colour is nearly invisible, so
+   the grid is mixed from the ink rather than from currentColor. */
+.dark .cc-table[data-borders='true'] th,
+.dark .cc-table[data-borders='true'] td {
+  border-color: color-mix(in srgb, var(--cc-ink) 22%, transparent);
+}
+
+/* ------------------------------------------------------------------ */
+/* Cursors, everywhere                                                */
+/* ------------------------------------------------------------------ */
+
+/*
+ * A flash face: a press turns the card over, so a pointing hand. Named rather than
+ * reusing `.cc-card__scroll`'s rule because the face sets its own cursor -- it is
+ * a child, so the parent's rule would be overridden by it, and Tailwind's
+ * `cursor-pointer` utility would win over both. One named class and no utility is
+ * less to keep in step.
+ */
+.cc-cursor-point-override {
+  cursor: var(--cc-cursor-point);
+}
+
+/*
+ * One cursor per gesture, applied by what the thing *does* rather than by what it
+ * is. Three groups, and the order they are written in is the order they win:
+ *
+ *   1. anything a press moves         -> grab, and grabbing while it moves
+ *   2. anything a press opens         -> point
+ *   3. anything a press types into    -> text
+ *
+ * Written this way -- by role, not by class -- so a new button is a pointing
+ * hand without anybody remembering to give it one, and a new drag zone is an open
+ * hand for the same reason. The old version styled `.cc-card__header` by hand and
+ * left everything else on system cursors, which is why the site was a mixture: a
+ * hand on a card, an arrow on a button, an I-beam on a drag handle.
+ */
+
+/* 1a. Drag zones: an element's title bar, a group's title bar, the connection
+      anchors and the resize grips. All four move their element on a press. */
+.cc-card__header,
+.cc-card__title,
+.cc-group__header,
+.cc-handle,
+.cc-resize {
+  cursor: var(--cc-cursor-grab);
+  touch-action: none;
+}
+
+/* 1b. While it moves. The pointer is held, so nothing on it may offer anything
+      else -- and `grab` specifically, because a `grab` under a moving element
+      says the press is finished. */
+.cc-card[data-dragging='true'],
+.cc-card[data-dragging='true'] *,
+.cc-group[data-dragging='true'],
+.cc-group[data-dragging='true'] * {
+  cursor: var(--cc-cursor-grabbing);
+}
+
+/* 2a. Presses that open something. `button`, `a`, and the ARIA roles that stand
+      in for a button. Not `label`, which points at a field rather than opening
+      one. */
+button:not(:disabled),
+[role='button']:not([aria-disabled='true']),
+a[href],
+summary,
+.cc-card__scroll {
+  cursor: var(--cc-cursor-point);
+}
+
+/* A disabled control is not a control. The browser already greys it out; a
+   pointing hand on it is a promise the click cannot keep. */
+button:disabled,
+[aria-disabled='true'] {
+  cursor: not-allowed;
+}
+
+/* 3a. Typeable text. The I-beam, in the theme colour like the others. */
+input:not([type='checkbox']):not([type='radio']):not([type='button']):not([type='submit']),
+textarea,
+select,
+[contenteditable='true'],
+.cc-input {
+  cursor: var(--cc-cursor-text);
+}
+
+/*
+ * A checkbox and a radio are a press that opens nothing and types nothing -- they
+ * toggle. So they are a pointing hand, not an I-beam, which is what the exclusion
+ * above is doing. Kept as its own rule so the reason survives the next person who
+ * wonders why these two types are named in a rule that is about text.
+ */
+input[type='checkbox'],
+input[type='radio'] {
+  cursor: var(--cc-cursor-point);
+}
+
+/* 3b. Long notes scroll. Panning is a drag, but of the page rather than of an
+      element, so it gets the open hand and never the closed one -- there is no
+      "while panning" state to hook. */
+.cc-card__scroll[data-scrollable='true'] {
+  cursor: var(--cc-cursor-grab);
 }

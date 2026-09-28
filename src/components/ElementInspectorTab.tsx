@@ -1,5 +1,6 @@
 import { useCanvasStore } from '@/store/useCanvasStore'
 import { Section } from '@/components/EditorParts'
+import { MAX_TABLE_COLUMNS, MIN_TABLE_COLUMNS, MIN_TABLE_ROWS } from '@/store/elementOps'
 import { type Element } from '@/types'
 import { safeEmbedUrl, youtubeThumbnailUrl, youtubeVideoId } from '@/utils/embeds'
 
@@ -336,8 +337,65 @@ function TableInspector({
   onChange: Patch
   onCommit: Commit
 }) {
+  const resizeTableRows = useCanvasStore((s) => s.resizeTableRows)
+  const resizeTableColumns = useCanvasStore((s) => s.resizeTableColumns)
+
   return (
     <div className="cc-scroll flex-1 overflow-y-auto">
+      {/*
+        Size, first, because it is what you reach for. Two steppers rather than a
+        column list and a pair of buttons: with a list you can rename columns but
+        not add one at all, which was the gap.
+
+        Both go through the store's resize actions rather than `onChange`. Cells are
+        stored column-major, so `rowCount` is the *stride* of the array and not its
+        length -- patching it reinterprets every cell in the table. That is what the
+        old "+ Row" button did, and it filled the table with the wrong answers
+        rather than adding an empty row.
+      */}
+      <Section title="Size">
+        <Stepper
+          label="Columns"
+          value={element.columns.length}
+          min={MIN_TABLE_COLUMNS}
+          max={MAX_TABLE_COLUMNS}
+          onChange={(count) => resizeTableColumns(element.id, count)}
+        />
+        <Stepper
+          label="Rows"
+          value={element.rowCount}
+          min={MIN_TABLE_ROWS}
+          onChange={(count) => resizeTableRows(element.id, count)}
+        />
+      </Section>
+
+      <Section title="How it shows">
+        <Toggle
+          label="Header row"
+          hint="Style the first row as headings and repeat it if the table scrolls."
+          checked={element.header}
+          onChange={(header) => onChange(element.id, { header })}
+        />
+        <Toggle
+          label="Borders"
+          hint="Grid lines around every cell. Off leaves rules under the headings only."
+          checked={element.borders}
+          onChange={(borders) => onChange(element.id, { borders })}
+        />
+        <Toggle
+          label="Striped rows"
+          hint="Shade every other row, for reading across rather than down."
+          checked={element.stripes}
+          onChange={(stripes) => onChange(element.id, { stripes })}
+        />
+        <Toggle
+          label="Editable on the canvas"
+          hint="Type straight into the cells without opening the inspector."
+          checked={element.editing}
+          onChange={(editing) => onChange(element.id, { editing })}
+        />
+      </Section>
+
       <Section title="Columns">
         {element.columns.map((column, index) => (
           <label key={column.id} className="mb-1.5 block">
@@ -345,6 +403,7 @@ function TableInspector({
             <input
               className="cc-input mt-1 w-full"
               value={column.title}
+              placeholder={`Column ${index + 1}`}
               onChange={(event) =>
                 onChange(
                   element.id,
@@ -361,30 +420,82 @@ function TableInspector({
           </label>
         ))}
       </Section>
-
-      <Section title="Rows">
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            className="cc-btn"
-            onClick={() => onChange(element.id, { rowCount: element.rowCount + 1 })}
-          >
-            + Row
-          </button>
-          <button
-            type="button"
-            className="cc-btn"
-            disabled={element.rowCount <= 1}
-            onClick={() => onChange(element.id, { rowCount: element.rowCount - 1 })}
-          >
-            − Row
-          </button>
-          <span className="text-[11px] text-slate-500">
-            {element.rowCount} row{element.rowCount === 1 ? '' : 's'}
-          </span>
-        </div>
-      </Section>
     </div>
+  )
+}
+
+/**
+ * A count with a lower and an upper bound, as two buttons and the number.
+ *
+ * Buttons rather than a number input on purpose: a number field invites typing
+ * 400, and the answer is then a table with 400 columns and 400 inputs in the
+ * render tree. The bounds are visible in the disabled state instead of being a
+ * clamp the user never sees happen.
+ */
+function Stepper({
+  label,
+  value,
+  min,
+  max = Number.MAX_SAFE_INTEGER,
+  onChange,
+}: {
+  label: string
+  value: number
+  min: number
+  max?: number
+  onChange: (value: number) => void
+}) {
+  return (
+    <div className="mb-2 flex items-center gap-1.5">
+      <span className="cc-label flex-1">{label}</span>
+      <button
+        type="button"
+        className="cc-btn"
+        aria-label={`One fewer ${label.toLowerCase()}`}
+        disabled={value <= min}
+        onClick={() => onChange(value - 1)}
+      >
+        −
+      </button>
+      <span className="w-6 text-center text-[11px] tabular-nums text-slate-600">{value}</span>
+      <button
+        type="button"
+        className="cc-btn"
+        aria-label={`One more ${label.toLowerCase()}`}
+        disabled={value >= max}
+        onClick={() => onChange(value + 1)}
+      >
+        +
+      </button>
+    </div>
+  )
+}
+
+/** A checkbox with a line of explanation under it, for the display flags. */
+function Toggle({
+  label,
+  hint,
+  checked,
+  onChange,
+}: {
+  label: string
+  hint: string
+  checked: boolean
+  onChange: (value: boolean) => void
+}) {
+  return (
+    <label className="mb-2 flex cursor-pointer items-start gap-2 text-xs text-slate-600">
+      <input
+        type="checkbox"
+        className="mt-0.5 accent-indigo-500"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      <span>
+        {label}
+        <span className="mt-0.5 block text-[10.5px] leading-snug text-slate-400">{hint}</span>
+      </span>
+    </label>
   )
 }
 

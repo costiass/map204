@@ -15,18 +15,6 @@ import { renderMarkdown } from '@/utils/markdown'
 const DOUBLE_CLICK_MS = 260
 
 /**
- * How far a pointer may travel and still count as a click.
- *
- * The face used to carry `data-no-drag`, which is how the canvas is told "this
- * is a control, do not start a drag here". The comment claimed the card still
- * dragged from it, and it did not: the canvas returns before capturing the
- * pointer, so a flash deck could not be moved at all. Which is the whole reason
- * this number exists instead — a click is a click *because* it did not become a
- * drag, and the deck can tell the difference itself.
- */
-const CLICK_SLOP_PX = 4
-
-/**
  * A flash **deck**, and the card currently showing on it.
  *
  * Three things here are less obvious than they look.
@@ -85,10 +73,22 @@ export function FlashDeck({
   const canFlip = editable && hasBack
   const manyCards = element.cards.length > 1
 
-  /* --- the click-versus-drag distinction -------------------------------- */
-  // Tracked here rather than delegated to `data-no-drag`, so the face can be
-  // dragged from anywhere and still turn over when it is genuinely clicked.
-  const downAt = useRef<{ x: number; y: number } | null>(null)
+  /* --- the click handling ------------------------------------------------ */
+  /*
+   * No travel tracking, and that is the point.
+   *
+   * This used to measure how far the pointer moved between press and release, so
+   * the face could be dragged from anywhere and still turn over when it was
+   * genuinely clicked. But dragging now happens *only* on the title bar, which is
+   * above this face and a different element entirely. Nothing can start a drag
+   * from here, so "is this a drag or a click" is no longer a question this face
+   * has to answer -- and answering it anyway was the thing that made a flick of
+   * the wrist fail to flip the card.
+   *
+   * What remains is one timer: a double click is two clicks, and firing both turns
+   * the card over twice -- which is to say not at all -- while also opening the
+   * inspector. So a single click waits to see whether a second one is coming.
+   */
   const dragTimer = useRef<number | null>(null)
 
   useEffect(() => {
@@ -96,6 +96,13 @@ export function FlashDeck({
       if (dragTimer.current !== null) window.clearTimeout(dragTimer.current)
     }
   }, [])
+
+  const clearPendingTurn = () => {
+    if (dragTimer.current !== null) {
+      window.clearTimeout(dragTimer.current)
+      dragTimer.current = null
+    }
+  }
 
   const turn = () => {
     setTurning(true)
@@ -105,45 +112,20 @@ export function FlashDeck({
     window.setTimeout(() => setTurning(false), 520)
   }
 
-  const requestFlip = (event: React.PointerEvent) => {
+  const requestFlip = () => {
     if (!canFlip) return
-    downAt.current = { x: event.clientX, y: event.clientY }
-    // A double click is two clicks, and firing both turns the card over twice —
-    // which is to say not at all — while also opening the inspector. So the turn
-    // waits to see whether a second one is coming.
-    if (dragTimer.current !== null) window.clearTimeout(dragTimer.current)
+    clearPendingTurn()
     dragTimer.current = window.setTimeout(() => {
       dragTimer.current = null
-      if (downAt.current === null) return
       turn()
     }, DOUBLE_CLICK_MS)
-  }
-
-  const onPointerMove = (event: React.PointerEvent) => {
-    const start = downAt.current
-    if (start === null) return
-    const moved = Math.hypot(event.clientX - start.x, event.clientY - start.y)
-    if (moved > CLICK_SLOP_PX) {
-      // A drag, not a click. Drop the pending turn — and do not *undo* one,
-      // because the turn cannot have happened yet: it is still waiting out the
-      // double-click window.
-      downAt.current = null
-      if (dragTimer.current !== null) {
-        window.clearTimeout(dragTimer.current)
-        dragTimer.current = null
-      }
-    }
   }
 
   const cancelFlipAndEdit = () => {
     // A card with no back still has a front worth editing, so the edit is
     // offered even when there is nothing to turn over to.
     if (!editable) return
-    if (dragTimer.current !== null) {
-      window.clearTimeout(dragTimer.current)
-      dragTimer.current = null
-    }
-    downAt.current = null
+    clearPendingTurn()
     onDoubleClick?.()
   }
 
@@ -152,7 +134,7 @@ export function FlashDeck({
   const visible = flipped ? answer : question
 
   return (
-    <div className="relative h-full w-full" onPointerMove={onPointerMove}>
+    <div className="relative h-full w-full">
       <div
         className="[perspective:900px] h-full w-full"
         style={{ height: '100%' }}
@@ -168,7 +150,7 @@ export function FlashDeck({
               ? 'transition-transform duration-500 [transform-style:preserve-3d] ' +
                 (flipped ? '[transform:rotateY(180deg)]' : '')
               : '',
-            canFlip ? 'cursor-pointer' : 'cursor-default',
+            canFlip ? 'cc-cursor-point-override' : 'cursor-default',
           ].join(' ')}
           role={canFlip ? 'button' : undefined}
           tabIndex={canFlip ? 0 : undefined}

@@ -36,6 +36,14 @@ export interface ElementNodeProps {
   size: { width: number; height: number } | null
   childTitles: string[]
   onElementPointerDown: (event: ReactPointerEvent<HTMLElement>, elementId: string) => void
+  /**
+   * The title bar's handler, which drags and does not select.
+   *
+   * Separate from the body handler on purpose. The body says "press to select",
+   * the title says "press and move" -- and running both through one handler is
+   * what made every reposition open the inspector.
+   */
+  onElementTitlePointerDown?: (event: ReactPointerEvent<HTMLElement>, elementId: string) => void
   onResizePointerDown: (event: ReactPointerEvent<HTMLElement>, elementId: string) => void
   onHandlePointerDown: (
     event: ReactPointerEvent<HTMLElement>,
@@ -56,6 +64,7 @@ function ElementNodeImpl({
   size,
   childTitles,
   onElementPointerDown,
+  onElementTitlePointerDown,
   onResizePointerDown,
   onHandlePointerDown,
   onContextMenu,
@@ -166,7 +175,15 @@ function ElementNodeImpl({
       <header
         className="cc-card__header"
         title={element.title || 'Untitled'}
-        onPointerDown={(event) => onElementPointerDown(event, element.id)}
+        onPointerDown={(event) => {
+          // `onElementTitlePointerDown` if the canvas gave us one, so the title
+          // drags without selecting. The fallback is the body handler, which does
+          // select -- a canvas that did not supply the drag-only handler would
+          // otherwise have a title bar that cannot move the element at all, which
+          // is worse than the old behaviour rather than better.
+          const handler = onElementTitlePointerDown ?? onElementPointerDown
+          handler(event, element.id)
+        }}
       >
         <span className="cc-card__title">{element.title || 'Untitled'}</span>
         <button
@@ -401,42 +418,63 @@ function TableBody({ element }: { element: Extract<Element, { kind: 'table' }> }
   const setTableCell = useCanvasStore((s) => s.setTableCell)
   const readOnlyReason = useCanvasStore((s) => s.readOnlyReason)
 
+  /*
+   * The three display flags ride on the element as data attributes rather than as
+   * props through three layers of nesting. A `<table>` cannot take a class per
+   * cell without one per cell, and conditional Tailwind classes on a `<td>` are
+   * the sort of thing that silently stops applying when a class name is refactored.
+   * The stylesheet reads `data-borders` on the table and the cells inherit.
+   */
+  const headerRow = element.header ? 1 : 0
+
   return (
-    <table className="cc-table">
-      <thead>
-        <tr>
-          {element.columns.map((column) => (
-            <th key={column.id} style={{ width: `${column.width}%` }}>
-              {column.title || 'Column'}
-            </th>
+    <div className="cc-table-wrap" data-scrollable={element.editing ? 'true' : 'false'}>
+      <table className="cc-table" data-borders={element.borders ? 'true' : 'false'} data-stripes={element.stripes ? 'true' : 'false'}>
+        {element.header ? (
+          <thead>
+            <tr>
+              {element.columns.map((column, columnIndex) => (
+                <th key={column.id} scope="col" style={{ width: `${column.width}%` }}>
+                  {column.title || `Column ${columnIndex + 1}`}
+                </th>
+              ))}
+            </tr>
+          </thead>
+        ) : null}
+
+        <tbody>
+          {Array.from({ length: element.rowCount }, (_, row) => (
+            <tr key={row} data-striped={element.stripes && row % 2 === 1 ? 'true' : undefined}>
+              {element.columns.map((column, columnIndex) => {
+                // Column-major storage: `cells[column * rowCount + row]`. The
+                // indexing lives in one place — `elementOps.tableCell` — so this is
+                // a read of it rather than a second copy of the arithmetic.
+                const value = element.cells[columnIndex * element.rowCount + row] ?? ''
+                return (
+                  <td key={column.id}>
+                    {/*
+                      An `<input>`, not a `<div contentEditable>`. A real input is
+                      keyboard reachable, works with a screen reader, and gives the
+                      browser's own text editing for free. Its width is `100%` with
+                      the cell clipped, so a long value scrolls inside its own cell
+                      rather than widening the column and the table with it.
+                    */}
+                    <input
+                      value={value}
+                      readOnly={readOnlyReason !== null}
+                      aria-label={`Row ${row + headerRow}, ${column.title || `column ${columnIndex + 1}`}`}
+                      onChange={(event) =>
+                        setTableCell(element.id, row, columnIndex, event.target.value)
+                      }
+                    />
+                  </td>
+                )
+              })}
+            </tr>
           ))}
-        </tr>
-      </thead>
-      <tbody>
-        {Array.from({ length: element.rowCount }, (_, row) => (
-          <tr key={row}>
-            {element.columns.map((column, columnIndex) => {
-              // Column-major storage: `cells[column * rowCount + row]`. The
-              // indexing lives in one place — `elementOps.tableCell` — so this is
-              // a read of it rather than a second copy of the arithmetic.
-              const value = element.cells[columnIndex * element.rowCount + row] ?? ''
-              return (
-                <td key={column.id}>
-                  <input
-                    value={value}
-                    readOnly={readOnlyReason !== null}
-                    aria-label={`Row ${row + 1}, ${column.title || `column ${columnIndex + 1}`}`}
-                    onChange={(event) =>
-                      setTableCell(element.id, row, columnIndex, event.target.value)
-                    }
-                  />
-                </td>
-              )
-            })}
-          </tr>
-        ))}
-      </tbody>
-    </table>
+        </tbody>
+      </table>
+    </div>
   )
 }
 

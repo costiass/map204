@@ -22,6 +22,11 @@ const { execFileSync } = require('child_process')
 const ROLDOWN_CLI = 'node_modules/rolldown/bin/cli.mjs'
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'elems-'))
 const bundle = path.join(dir, 'serialize.mjs')
+// `defaults` is bundled separately rather than reached through serialize, because
+// the assertions below compare the title bar's height against the arithmetic that
+// uses it, and that comparison is only meaningful if both numbers come from the
+// code. A test that hard-codes the constant is asserting against its own memory.
+const defaultsBundle = path.join(dir, 'defaults.mjs')
 
 try {
   execFileSync(
@@ -29,14 +34,20 @@ try {
     [ROLDOWN_CLI, 'src/elements/serialize.ts', '--format', 'esm', '--file', bundle],
     { stdio: 'pipe' },
   )
+  execFileSync(
+    process.execPath,
+    [ROLDOWN_CLI, 'src/elements/defaults.ts', '--format', 'esm', '--file', defaultsBundle],
+    { stdio: 'pipe' },
+  )
 } catch (error) {
-  console.log(`FAIL  could not bundle src/elements/serialize.ts: ${error.stderr ?? error.message}`)
+  console.log(`FAIL  could not bundle src/elements: ${error.stderr ?? error.message}`)
   process.exit(1)
 }
 
 const script = `
 import { pathToFileURL } from 'node:url'
 const m = await import(pathToFileURL(process.argv[2]).href)
+const d = await import(pathToFileURL(process.argv[3]).href)
 
 const failures = []
 const fail = (msg) => failures.push(msg)
@@ -70,10 +81,32 @@ for (const kind of ['note', 'video', 'flash', 'pdf', 'link', 'table']) {
   if (back.kind !== kind) fail(\`a \${kind} came back as a "\${back.kind}"\`)
 }
 
-/* --- a video's size comes from its aspect ---------------------------- */
+/* --- a video's size comes from its aspect, plus its title bar --------- */
+//
+// The element's height covers the title bar *and* the video, so the arithmetic is
+//
+//   height = header + width / aspect
+//
+// and not width / aspect. Sizing the element to the video's shape alone gives a
+// box exactly the right size for the video and then squeezes the video into
+// whatever the title bar left -- so every video is letterboxed by the height of
+// its own header, and the height stored in the model is not the height on screen.
+//
+// HEADER below is read from the bundle's own constants rather than written out,
+// because the number that matters is the one the code uses. Whether it agrees
+// with the stylesheet is a separate question, answered by test-element-chrome.cjs.
+const HEADER = d.ELEMENT_HEADER_HEIGHT
+if (typeof HEADER !== 'number' || HEADER <= 0) {
+  fail(\`the bundle has no usable ELEMENT_HEADER_HEIGHT, got \${HEADER}\`)
+}
+
+const bodyAspectOf = (v) => (v.width / (v.height - HEADER))
 const video = m.createElement('video', {}, { x: 0, y: 0 })
-if (Math.abs(video.width / video.height - video.aspect) > 0.02) {
-  fail(\`a new video is \${video.width}x\${video.height}, which is not its \${video.aspect} shape\`)
+if (Math.abs(bodyAspectOf(video) - video.aspect) > 0.02) {
+  fail(
+    \`a new video is \${video.width}x\${video.height}, whose body is not its \` +
+      \`\${video.aspect} shape once the \${HEADER}px title bar is taken off\`,
+  )
 }
 
 /* --- a video that cannot play is not left looking playable ------------ */
@@ -110,11 +143,11 @@ if (emptyVideo.url !== '') fail(\`a video with no URL got "\${emptyVideo.url}"\`
 // *covered* the box with that thumbnail, so a 4:3 video lost its sides and a
 // tall one lost its top. A caller that knows the shape gets a box of that shape.
 const widescreen = m.createElement('video', {}, { x: 0, y: 0 })
-if (Math.abs(widescreen.width / widescreen.height - 16 / 9) > 0.02) {
+if (Math.abs(bodyAspectOf(widescreen) - 16 / 9) > 0.02) {
   fail(\`a video with no known shape is \${widescreen.width}x\${widescreen.height}\`)
 }
 const fourThree = m.createElement('video', { aspect: 4 / 3 }, { x: 0, y: 0 })
-if (Math.abs(fourThree.width / fourThree.height - 4 / 3) > 0.02) {
+if (Math.abs(bodyAspectOf(fourThree) - 4 / 3) > 0.02) {
   fail(\`a 4:3 video was created \${fourThree.width}x\${fourThree.height}\`)
 }
 // A nonsense shape is refused rather than producing a box nobody can see.
@@ -312,7 +345,7 @@ let failures = []
 try {
   const scriptFile = path.join(dir, 'checks.mjs')
   fs.writeFileSync(scriptFile, script)
-  const output = execFileSync(process.execPath, [scriptFile, bundle], {
+  const output = execFileSync(process.execPath, [scriptFile, bundle, defaultsBundle], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   })

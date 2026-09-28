@@ -99,6 +99,59 @@ function blank(sql) {
   return out
 }
 
+/**
+ * A parameter list reduced to its types, so two declarations of the same function
+ * can be compared.
+ *
+ * Names are dropped — `p_document_id` is not part of the identity — and so is
+ * spacing and case. What is left is exactly what Postgres keys on.
+ *
+ * A comma inside a type's parentheses (`numeric(10,2)`) must not be read as a
+ * parameter boundary, so the split is on top-level commas only. Nothing in this
+ * schema uses such a type today; if something did, splitting naively would
+ * produce a signature that never matches and hide a real overload.
+ */
+function normalizeParams(list) {
+  const parts = []
+  let depth = 0
+  let current = ''
+  for (const c of list) {
+    if (c === '(') depth += 1
+    if (c === ')') depth -= 1
+    if (c === ',' && depth === 0) {
+      parts.push(current)
+      current = ''
+      continue
+    }
+    current += c
+  }
+  parts.push(current)
+
+  return parts
+    .map((part) =>
+      part
+        .trim()
+        // Drop `default <expr>`: the default is part of the call, not the type.
+        .replace(/\s+default\s+[\s\S]*$/i, '')
+        .replace(/\s+/g, ' ')
+        .toLowerCase(),
+    )
+    .filter(Boolean)
+    /*
+     * Drop the parameter *name*.
+     *
+     * `create` names its parameters and `drop` need not, so the same function is
+     * written `(p_document_id uuid, p_pages jsonb)` in one statement and
+     * `(uuid, jsonb)` in the other. Postgres keys on the types alone, so the
+     * comparison has to as well — otherwise the drop misses the function it names
+     * and the check reports an overload that was removed two lines earlier.
+     *
+     * A lone token is already a type; two or more means the first is the name.
+     */
+    .map((part) => (part.split(' ').length > 1 ? part.split(' ').slice(1).join(' ') : part))
+    .join(',')
+}
+
 /** Keywords that only exist in a PL/pgSQL body. */
 const PLPGSQL_ONLY = [
   { word: /\bdeclare\b/i, why: 'a variable block' },
@@ -149,6 +202,91 @@ const lastDefinitionOf = (function () {
   }
   return (name) => byName.get(String(name).toLowerCase())
 })()
+
+/**
+ * Overloaded function names: at most one live signature each.
+ *
+ * A function's identity is its name *and* its parameter types. So
+ * `create or replace function f(a text)` followed by
+ * `create or replace function f(a uuid)` does not update `f` — it leaves both of
+ * them alive under one name. Nothing errors. The schema is valid, the SQL is
+ * valid, and the function works if you call it with a cast.
+ *
+ * PostgREST then refuses, because a name it cannot resolve to one function is not
+ * a name it will guess at:
+ *
+ *   PGRST203 Could not choose the best candidate function between:
+ *     public.import_pages(p_document_id => text, p_pages => jsonb),
+ *     public.import_pages(p_document_id => uuid, p_pages => jsonb)
+ *
+ * and that is the whole RPC. Importing a document stops working, from a cause
+ * three files and two commits away from the edit that caused it.
+ *
+ * This walks the migrations in the order they run, tracking what is alive:
+ * `create`/`create or replace` adds or overwrites one signature, `drop function`
+ * removes one. A name with more than one live signature at the end is overloaded.
+ *
+ * It is a general invariant rather than a rule about `import_pages`, because the
+ * trap is general: changing a parameter's type is a change of *name*, and the
+ * person who wrote it was editing a body.
+ */
+{
+  // Lowercased `name -> Set<signature>`, plus where each signature came from, so a
+  // failure can name the file to look at.
+  const live = new Map()
+
+  const addLive = (name, signature, file) => {
+    const key = name.toLowerCase()
+    if (!live.has(key)) live.set(key, new Map())
+    // A `create or replace` on an identical signature overwrites in place; either
+    // way the signature is the same string, so this is just bookkeeping.
+    live.get(key).set(signature, file)
+  }
+
+  for (const file of files) {
+    const sql = blank(fs.readFileSync(path.join(dir, file), 'utf8'))
+
+    for (const m of sql.matchAll(
+      /drop\s+function\s+(?:if\s+exists\s+)?([\w.]+)\s*\(([\s\S]*?)\)/gi,
+    )) {
+      const key = m[1].toLowerCase()
+      if (!live.has(key)) continue
+      const signature = normalizeParams(m[2])
+      // A drop with no argument list, or one naming a signature that is not
+      // there, is not an error here — `drop function if exists` is allowed to
+      // miss. Only an exact hit removes something.
+      live.get(key).delete(signature)
+      if (live.get(key).size === 0) live.delete(key)
+    }
+
+    for (const m of sql.matchAll(
+      /create\s+(?:or\s+replace\s+)?function\s+([\w.]+)\s*\(([\s\S]*?)\)\s*returns/gi,
+    )) {
+      addLive(m[1], normalizeParams(m[2]), file)
+    }
+  }
+
+  for (const [name, signatures] of live) {
+    if (signatures.size <= 1) continue
+    const detail = [...signatures]
+      .map(([signature, file]) => `  (${signature || 'no arguments'})  introduced by ${file}`)
+      .join('\n')
+    fail(
+      '`' +
+        name +
+        '` is overloaded: ' +
+        signatures.size +
+        ' signatures are live at once.\n' +
+        detail +
+        '\n  PostgREST resolves an RPC by name and cannot choose between them, ' +
+        'so every call fails with PGRST203. A "create or replace" whose ' +
+        'parameter types differ does not replace - it adds. Drop the old one ' +
+        'first: drop function ' +
+        name +
+        '(<old types>);',
+    )
+  }
+}
 
 for (const file of files) {
   // `rawSql` keeps string literals and comments; `sql` is the blanked version the

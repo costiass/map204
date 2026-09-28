@@ -21,6 +21,7 @@ const ROLDOWN_CLI = 'node_modules/rolldown/bin/cli.mjs'
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'elemops-'))
 const opsBundle = path.join(dir, 'elementOps.mjs')
 const makeBundle = path.join(dir, 'serialize.mjs')
+const defaultsBundle = path.join(dir, 'defaults.mjs')
 
 const bundleTo = (entry, out) =>
   execFileSync(
@@ -32,6 +33,7 @@ const bundleTo = (entry, out) =>
 try {
   bundleTo('src/store/elementOps.ts', opsBundle)
   bundleTo('src/elements/serialize.ts', makeBundle)
+bundleTo('src/elements/defaults.ts', defaultsBundle)
 } catch (error) {
   console.log(`FAIL  could not bundle: ${error.stderr ?? error.message}`)
   process.exit(1)
@@ -39,9 +41,10 @@ try {
 
 const script = `
 import { pathToFileURL } from 'node:url'
-const [o, s] = await Promise.all([
+const [o, s, d] = await Promise.all([
   import(pathToFileURL(process.argv[2]).href),
   import(pathToFileURL(process.argv[3]).href),
+  import(pathToFileURL(process.argv[4]).href),
 ])
 
 const failures = []
@@ -246,14 +249,28 @@ const group = (id, over = {}) => ({
 
 /* --- a video keeps its shape ----------------------------------------- */
 {
+  // An element's height covers the title bar as well as the body, so a video's
+  // *body* is the aspect and the element is that plus the bar. Both directions are
+  // asserted against the bar, because getting it wrong in only one of them is the
+  // case where a video letterboxes when you pull it sideways and crops when you
+  // pull it up and down.
+  const BAR = d.ELEMENT_HEADER_HEIGHT
+  if (typeof BAR !== 'number' || BAR <= 0) {
+    fail(\`the bundle has no usable ELEMENT_HEADER_HEIGHT, got \${BAR}\`)
+  }
+  const bodyAspect = (el) => el.width / (el.height - BAR)
+
   const video = s.createElement('video', { id: 'v', aspect: 16 / 9, width: 640, height: 360 }, { x: 0, y: 0 })
   const page = pageWith([video])
   // Dragging the *width* handle sets the width, and the height follows.
   o.resizeElement(page, 'v', { width: 320, height: 999 })
   const v = o.findElement(page, 'v')
   if (v.width !== 320) fail(\`the width is \${v.width}\`)
-  if (Math.abs(v.width / v.height - 16 / 9) > 0.02) {
-    fail(\`dragging the width gave \${v.width}x\${v.height}, which is not 16:9\`)
+  if (Math.abs(bodyAspect(v) - 16 / 9) > 0.02) {
+    fail(
+      \`dragging the width gave \${v.width}x\${v.height}, whose body is not 16:9 \` +
+        \`once the \${BAR}px title bar is taken off\`,
+    )
   }
 
   // Dragging the *height* handle sets the height, and the width follows. Getting
@@ -263,8 +280,8 @@ const group = (id, over = {}) => ({
   if (Math.abs(o.findElement(page, 'v').height - 180) > 0.001) {
     fail(\`dragging the height gave \${o.findElement(page, 'v').height}\`)
   }
-  if (Math.abs(o.findElement(page, 'v').width / 180 - 16 / 9) > 0.02) {
-    fail('dragging the height did not produce a 16:9 video')
+  if (Math.abs(o.findElement(page, 'v').width / (180 - BAR) - 16 / 9) > 0.02) {
+    fail('dragging the height did not produce a 16:9 video body')
   }
 }
 
@@ -460,13 +477,114 @@ const group = (id, over = {}) => ({
   o.setTableCell(table, 1, 2, 'hello')
   if (o.tableCell(table, 1, 2) !== 'hello') fail(\`a cell did not keep its text: \${o.tableCell(table, 1, 2)}\`)
   if (o.tableCell(table, 0, 0) !== '') fail('writing one cell wrote another')
-  // Writing past the end grows the table rather than losing the text.
-  o.setTableCell(table, 0, table.columns.length + 2, 'far')
-  if (o.tableCell(table, 0, table.columns.length + 2) !== 'far') {
-    fail('a cell written past the end was lost')
+  // Writing off the end is refused rather than silently padded into an index
+  // nothing renders. tableCell bounds-checks, so a padded cell could never be
+  // read back -- the write was invisible from the moment it happened. Growing a
+  // table is resizeTableRows / resizeTableColumns, which rewrite the shape and the
+  // cells together.
+  if (o.setTableCell(table, 0, table.columns.length + 2, 'far') !== false) {
+    fail('a write past the last column was accepted')
+  }
+  if (o.setTableCell(table, table.rowCount + 5, 0, 'far') !== false) {
+    fail('a write past the last row was accepted')
   }
   // Reading off the end is empty, not a crash.
   if (o.tableCell(table, 99, 99) !== '') fail('reading off the end returned something')
+  // And a write *inside* the table still works, and says so.
+  if (o.setTableCell(table, 1, 2, 'hello') !== true) {
+    fail('a write inside the table was refused')
+  }
+}
+
+/* --- resizing a table ---------------------------------------------------- */
+//
+// The cells are stored column-major: cells[column * rowCount + row]. So the row
+// count is the *stride* of the array rather than its length, and changing it
+// without rewriting the array reinterprets every cell in the table.
+//
+// This is a test of arithmetic, not of a UI, and it exists because the arithmetic
+// was wrong in shipping code: the inspector's "+ Row" button patched rowCount
+// directly. On a 2x2 table with four answers, asking for a third row made column
+// 0's new last row read out of column 1's first cell -- so the table filled with
+// other people's answers and every value moved one place, silently.
+{
+  // A 2x2 table where every cell is distinguishable by both its row and its
+  // column. If a resize shifts the stride, these stop lining up.
+  const filled = s.createElement('table', { id: 't2' }, { x: 0, y: 0 })
+  o.resizeTableColumns(filled, 2, makeId)
+  o.resizeTableRows(filled, 2)
+  for (let r = 0; r < 2; r += 1) {
+    for (let c = 0; c < 2; c += 1) o.setTableCell(filled, r, c, \`r\${r}c\${c}\`)
+  }
+
+  const at = (t, r, c) => o.tableCell(t, r, c)
+
+  // Growing rows: every existing answer stays where it was, and the new row is
+  // empty rather than borrowed from somewhere else.
+  o.resizeTableRows(filled, 3)
+  if (filled.rowCount !== 3) fail(\`rowCount did not take: \${filled.rowCount}\`)
+  if (filled.cells.length !== filled.columns.length * 3) {
+    fail(\`cells is \${filled.cells.length} long for \${filled.columns.length} columns of 3\`)
+  }
+  for (let r = 0; r < 2; r += 1) {
+    for (let c = 0; c < 2; c += 1) {
+      if (at(filled, r, c) !== \`r\${r}c\${c}\`) {
+        fail(\`growing rows moved r\${r}c\${c}: it read \${JSON.stringify(at(filled, r, c))}\`)
+      }
+    }
+  }
+  if (at(filled, 2, 0) !== '' || at(filled, 2, 1) !== '') {
+    fail('the new row was not empty -- it borrowed a value from another column')
+  }
+
+  // Shrinking rows drops the ones past the end and keeps the rest.
+  o.resizeTableRows(filled, 1)
+  if (at(filled, 0, 0) !== 'r0c0' || at(filled, 0, 1) !== 'r0c1') {
+    fail(\`shrinking rows moved the first row: \${JSON.stringify(filled.cells)}\`)
+  }
+  if (filled.cells.length !== filled.columns.length) {
+    fail(\`after shrinking, cells is \${filled.cells.length}, expected \${filled.columns.length}\`)
+  }
+
+  // Never fewer than one. Zero would make the stride zero and every cell in the
+  // table would address index 0.
+  o.resizeTableRows(filled, 0)
+  if (filled.rowCount < 1) fail(\`rowCount went to \${filled.rowCount}\`)
+
+  // Growing columns: the old answers keep their coordinates.
+  o.resizeTableColumns(filled, 4, makeId)
+  if (filled.columns.length !== 4) fail(\`column count is \${filled.columns.length}\`)
+  if (at(filled, 0, 0) !== 'r0c0' || at(filled, 0, 1) !== 'r0c1') {
+    fail(\`growing columns moved the answers: \${JSON.stringify(filled.cells)}\`)
+  }
+  if (at(filled, 0, 2) !== '' || at(filled, 0, 3) !== '') {
+    fail('a new column was not empty')
+  }
+  if (new Set(filled.columns.map((c) => c.id)).size !== 4) {
+    fail('two new columns were given the same id')
+  }
+
+  // Widths are percentages and have to add up, or the columns stop filling the
+  // element and the table is narrower than the card it lives in.
+  const total = filled.columns.reduce((sum, c) => sum + c.width, 0)
+  if (Math.abs(total - 100) > 0.01) {
+    fail(\`column widths add up to \${total.toFixed(2)}, not 100\`)
+  }
+
+  // Shrinking columns drops the ones past the end.
+  o.resizeTableColumns(filled, 1, makeId)
+  if (filled.columns.length !== 1) fail(\`shrinking left \${filled.columns.length} columns\`)
+  if (at(filled, 0, 0) !== 'r0c0') fail('shrinking columns lost the first answer')
+  if (Math.abs(filled.columns.reduce((sum, c) => sum + c.width, 0) - 100) > 0.01) {
+    fail('shrinking columns did not rescale the survivors to 100')
+  }
+
+  o.resizeTableColumns(filled, 0, makeId)
+  if (filled.columns.length < 1) fail('the column count went to zero')
+  o.resizeTableColumns(filled, 9999, makeId)
+  if (filled.columns.length > o.MAX_TABLE_COLUMNS) {
+    fail(\`the column count ran past its ceiling: \${filled.columns.length}\`)
+  }
 }
 
 /* --- a note's own edits are note-only ---------------------------------- */
@@ -488,7 +606,7 @@ let failures = []
 try {
   const scriptFile = path.join(dir, 'checks.mjs')
   fs.writeFileSync(scriptFile, script)
-  const output = execFileSync(process.execPath, [scriptFile, opsBundle, makeBundle], {
+  const output = execFileSync(process.execPath, [scriptFile, opsBundle, makeBundle, defaultsBundle], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   })

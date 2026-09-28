@@ -5,7 +5,6 @@ import { ElementNode } from '@/components/ElementNode'
 import { ConnectionLayer } from '@/components/ConnectionLayer'
 import { CursorLayer } from '@/components/CursorLayer'
 import type { DraftConnection } from '@/components/ConnectionLayer'
-import { EmptyState } from '@/components/EmptyState'
 import { GroupNode } from '@/components/GroupNode'
 import { useCanvasStore } from '@/store/useCanvasStore'
 import {
@@ -662,6 +661,64 @@ export function Canvas() {
     setDragging(true)
   }
 
+  /**
+   * The title bar: drag, and nothing else.
+   *
+   * Deliberately separate from `handleCardPointerDown` rather than a flag on it,
+   * because the difference is not a mode -- it is a different promise. The body
+   * says "press this to select it"; the title says "press and move this". Running
+   * the body through the same handler is what made a drag also select the element
+   * and pop the inspector open, so every reposition left you looking at a panel
+   * you did not ask for.
+   *
+   * So this handler never touches the selection. Not on pointerdown, not on
+   * release. What it moves is:
+   *
+   *   - the whole selection, if this element is already part of one. Dragging one
+   *     member of a multi-selection and having the rest stay behind is the one
+   *     surprise that would actually lose work.
+   *   - otherwise just this element.
+   *
+   * and either way the selection afterwards is exactly the selection before.
+   */
+  const handleElementTitlePointerDown = (
+    event: ReactPointerEvent<HTMLElement>,
+    elementId: string,
+  ) => {
+    if (event.button !== 0) return
+    if (dimmedCardIds.has(elementId)) return
+    if (!useCanvasStore.getState().canEdit()) return
+    cancelViewportAnimation()
+    if (useCanvasStore.getState().spacePressed || event.altKey) {
+      event.preventDefault()
+      beginPan(event)
+      return
+    }
+
+    // Stop the canvas' own pointerdown, which would otherwise read this as a
+    // marquee against the background and clear the selection on release.
+    event.stopPropagation()
+    // A drag that turns out to be a click must not also select the text of the
+    // title, or moving an element leaves a blue smudge behind.
+    event.preventDefault()
+
+    const store = useCanvasStore.getState()
+    const ids = store.selectedElementIds.includes(elementId)
+      ? store.selectedElementIds
+      : [elementId]
+
+    capture(event.pointerId)
+    interactionRef.current = {
+      kind: 'drag',
+      pointerId: event.pointerId,
+      startWorld: worldPoint(event),
+      primaryId: elementId,
+      ids,
+      moved: false,
+    }
+    setDragging(true)
+  }
+
   const handleGroupHandlePointerDown = (
     event: ReactPointerEvent<HTMLElement>,
     groupId: string,
@@ -1227,6 +1284,7 @@ export function Canvas() {
               }
               childTitles={childrenOf.get(element.id) ?? []}
               onElementPointerDown={handleCardPointerDown}
+              onElementTitlePointerDown={handleElementTitlePointerDown}
               onResizePointerDown={handleResizePointerDown}
               onHandlePointerDown={handleHandlePointerDown}
               onContextMenu={openCardMenu}
@@ -1249,8 +1307,24 @@ export function Canvas() {
           zero. Screen-space placement belongs outside the transform. Ephemeral:
           broadcast only, never part of the document or anybody's undo history. */}
       <CursorLayer />
+      {/*
+        No empty-page overlay.
 
-      {cards.length === 0 ? <EmptyState onFit={fitView} /> : null}
+        There was a centred panel here with a heading, a paragraph of keyboard
+        shortcuts and two buttons. It is gone, and nothing replaced it, on purpose:
+
+        * "Fit view" on an empty page fits nothing. `fitViewport(null, ...)`
+          returns the origin viewport, so the button reset the camera to somewhere
+          that looks identical, and read as broken.
+
+        * "New card" duplicated the toolbar's Card button, the `C` shortcut and
+          double-clicking the canvas. Three working ways to do the same thing were
+          already one click away, and the panel covered the canvas they all act on.
+
+        An empty page is not an error state and does not need an explanation
+        drawn over it. The canvas is the interface; when there is nothing on it,
+        the toolbar and the shortcut are what you use next, and both are visible.
+      */}
     </div>
   )
 }
