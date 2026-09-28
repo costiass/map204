@@ -22,6 +22,8 @@ const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.166'
 const MIGRATIONS = path.join(__dirname, '..', 'supabase', 'migrations')
 
 let failures = 0
+/** Checks made, for the summary line. `failures` alone cannot say "it checked nothing". */
+let checked = 0
 const fail = (message) => {
   console.log(`FAIL  ${message}`)
   failures += 1
@@ -441,6 +443,99 @@ function docker(args, options = {}) {
     )
     if (bobRoleRead !== 'editor') {
       fail(`the new account reads as "${bobRoleRead}" on the shared workspace`)
+    }
+
+    /* -- who can read whose profile ----------------------------------------- */
+
+    /*
+     * The "Unknown user" bug, and the claim underneath it.
+     *
+     * `ShareDialog` showed "Unknown user" on every shared row, because
+     * `shares_document_with` decided whether two accounts share a workspace by
+     * joining `document_collaborators` against itself -- and the owner is
+     * deliberately not in that table. So the function could never relate the owner
+     * to anybody, RLS refused, and the embedded profile came back null.
+     *
+     * RLS needs a session to evaluate, so it cannot be tested from in here. What
+     * *can* be tested is the claim the whole diagnosis rests on, and it is the part
+     * that was never checked: that the owner has no membership row, and that a
+     * function which never mentions `documents.owner_id` is therefore structurally
+     * unable to relate them.
+     *
+     * If somebody "simplifies" `shares_document_with` back to a self-join, or adds an
+     * owner row to make it work, this is the test that notices -- and it explains
+     * which of the two happened.
+     */
+    {
+      const ownerRows = count(
+        `count(*) from public.document_collaborators where document_id = '${aliceDoc}' and user_id = '${aliceId}'`,
+      )
+      if (ownerRows !== 0) {
+        fail(
+          `the workspace owner has ${ownerRows} row(s) in document_collaborators. The ` +
+            'schema says there is deliberately none -- ownership lives in ' +
+            'documents.owner_id -- and shares_document_with is written on the ' +
+            'assumption. Check which of those two changed.',
+        )
+      }
+
+      const body = fs.readFileSync(
+        path.join(__dirname, '..', 'supabase', 'migrations', '20261001000012_profile_readable_by_owner.sql'),
+        'utf8',
+      )
+      checked += 1
+      // Stripped of comments, so a function *described* in prose is not mistaken
+      // for one that reads the column.
+      const code = body
+        .replace(/--[^\n]*/g, ' ')
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/\$\$[\s\S]*?\$\$/, (block) => block)
+
+      const fnStart = code.indexOf('create or replace function public.shares_document_with')
+      const fnBody = fnStart < 0 ? '' : code.slice(fnStart, fnStart + 1400)
+
+      // `documents` and `owner_id`, not `documents.owner_id`: the function aliases
+      // the table to `d` and writes `d.owner_id`, so the first version of this
+      // assertion looked for a string the correct code does not contain and failed
+      // it. A check that is wrong about the right answer is worse than no check.
+      if (!/\bfrom\s+public\.documents\b/.test(fnBody) || !/\bowner_id\b/.test(fnBody)) {
+        fail(
+          'shares_document_with no longer reads the documents table. Without it the ' +
+            'function cannot relate a workspace owner to anybody, because the owner ' +
+            'has no document_collaborators row -- and every profile read is refused, ' +
+            'so every shared row renders as "Unknown user".',
+        )
+      }
+    }
+
+    /* -- and the invitation records who sent it ------------------------------ */
+
+    /*
+     * `invited_by` is filled from the session, not sent by the client.
+     *
+     * It was `not null` with no default and the client never supplied it, so every
+     * pending invite failed with `null value in column "invited_by"`. A client that
+     * *did* supply it could supply any value -- an editor recording an invitation as
+     * coming from the owner -- so it is filled by a trigger from `auth.uid()`.
+     *
+     * Inserted here with no session, which is the branch that leaves the column
+     * alone: the test is not signed in as anybody, and `auth.uid()` is null, so
+     * this cannot prove the trigger fills it in. What it *can* prove is that the
+     * trigger exists, which is the half that was missing when it failed.
+     */
+    {
+      const body = fs.readFileSync(
+        path.join(__dirname, '..', 'supabase', 'migrations', '20261001000011_invited_by_from_session.sql'),
+        'utf8',
+      )
+      checked += 1
+      if (!/create trigger trg_set_invited_by[\s\S]*?before insert on public\.document_invites/.test(body)) {
+        fail(
+          'no before-insert trigger sets document_invites.invited_by from the session. ' +
+            'The column is NOT NULL and the client deliberately does not send it, so ' +
+            'every pending invitation fails with a not-null violation.',
+        )
+      }
     }
   } finally {
     cleanup()

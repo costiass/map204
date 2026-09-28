@@ -67,11 +67,19 @@ export function unionContent(local: PageContent, remote: PageContent): PageConte
 export interface RemoteSnapshot {
   title: string
   ordinal: number
-  viewport: Page['viewport']
+  /**
+   * Optional, and **ignored** — see `applySnapshot`.
+   *
+   * Still here because clients in the field still send it, and because a field that
+   * is only removed from the sender has to be *received* as absent rather than
+   * defaulting to something. Marking it optional is what lets a new bundle refuse to
+   * apply somebody else's camera while a cached one keeps type-checking.
+   */
+  viewport?: Page['viewport']
   elements: Element[]
   groups: Group[]
   connections: Connection[]
-  /** Sender's wall clock (ms) — decides who wins. */
+  /** Sender's wall clock (ms) - decides who wins. */
   sentAt: number
 }
 
@@ -92,7 +100,20 @@ export function applySnapshot(local: Page, remote: RemoteSnapshot, mode: MergeMo
     ...local,
     title: remote.title,
     ordinal: remote.ordinal,
-    viewport: remote.viewport,
+    /*
+     * `viewport` is the *local* page's, not the remote one.
+     *
+     * This is the receiving half of "each person has their own camera", and it
+     * matters as much as the sending half: an older client still puts `viewport` in
+     * the payload, and a reader running a cached bundle would apply somebody else's
+     * camera to their own. The field is still on `RemoteSnapshot` for that reason --
+     * to be *ignored*, and to be read as `undefined` by any client new enough to
+     * leave it out.
+     *
+     * The camera is the reader's own and lives in their browser (`viewportStore.ts`).
+     * What arrives from the room is content and cursors.
+     */
+    viewport: local.viewport,
     elements: content.elements,
     groups: content.groups,
     connections: content.connections,

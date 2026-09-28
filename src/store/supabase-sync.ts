@@ -515,7 +515,18 @@ export async function savePageSnapshot(page: Page, baseVersion: number): Promise
     .update({
       title: page.title,
       position: LEGACY_PAGE_POSITION,
-      viewport: page.viewport,
+      /*
+       * No `viewport`.
+       *
+       * The camera is not part of the document. Two people in the same map have two
+       * different cameras -- one reading the top left, one at the bottom right --
+       * and that is what a map is for. Writing it meant the last person to pan
+       * decided where the next person opened the map, and made panning count as an
+       * edit, so a read-only viewer who could not move anything could still take
+       * the document dirty and start a save.
+       *
+       * It is kept in each browser instead. See `viewportStore.ts`.
+       */
       cards: page.elements,
       groups: page.groups,
       connections: page.connections,
@@ -564,7 +575,11 @@ export async function savePageSnapshotKeepalive(
       body: JSON.stringify({
         title: page.title,
         position: LEGACY_PAGE_POSITION,
-        viewport: page.viewport,
+        // No `viewport`, and the reason is the same as in `savePageSnapshot` above.
+        // This path is the flush that fires when a tab closes, so leaving it in
+        // would write a camera on the way out even though the other path stopped
+        // writing one -- and the two disagreeing is exactly how a half-removed field
+        // comes back three commits later.
         cards: page.elements,
         groups: page.groups,
         connections: page.connections,

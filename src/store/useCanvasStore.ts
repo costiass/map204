@@ -53,6 +53,7 @@ import {
 import { centerOn, screenToWorld, stepViewport } from '@/utils/geometry'
 import { DEFAULT_WORKSPACE_ACCENT, DEFAULT_WORKSPACE_ICON } from '@/theme'
 import { ELEMENT_HEADER_HEIGHT } from '@/elements/defaults'
+import { recallViewport, rememberViewport, fallbackViewport } from '@/store/viewportStore'
 import { MIN_CARD_HEIGHT } from '@/types'
 import { clone, uid } from '@/utils/id'
 
@@ -639,12 +640,32 @@ export const useCanvasStore = create<CanvasStore>()(
 
       setActivePage: (pageId) => {
         if (get().activePageId === pageId) return
-        if (!get().doc.pages.some((p) => p.id === pageId)) return
+        const page = get().doc.pages.find((p) => p.id === pageId)
+        if (!page) return
         set((state) => {
           state.activePageId = pageId
           state.selectedElementIds = []
           state.selectedConnectionIds = []
           state.contextMenu = null
+          /*
+            This reader's own camera for this page, from their own browser.
+           *
+            Not the one in the document. Two people in one map are looking at two
+            different places, and taking the camera out of the document is what stops
+            the last person to have opened it from deciding where everybody else
+            starts.
+           *
+            `page.viewport` still holds *something* -- it is the in-memory camera the
+            canvas reads every frame -- so it has to be replaced with this reader's
+            remembered one here, or the page would open on whoever's camera was last
+            written into a column nothing writes any more.
+           *
+            `fallbackViewport` rather than the raw value, so a document written by an
+            older build, or hand-edited in the database, cannot open at a zoom of
+            `NaN`.
+           */
+          page.viewport =
+            rememberViewport(state.documentId ?? 'local', pageId) ?? fallbackViewport(page.viewport)
         })
       },
 
@@ -700,17 +721,27 @@ export const useCanvasStore = create<CanvasStore>()(
       },
 
       setViewport: (viewport) => {
-        // Viewport lives on the page; it is deliberately not an undoable
-        // document edit, so it never triggers a history entry.
+        // The camera lives on the page in memory, and in this browser between
+        // visits. It is deliberately not an undoable document edit, so it never
+        // triggers a history entry -- and it is not in `pageSignature`, so it never
+        // triggers a write or a broadcast either.
+        //
+        // That last part is the change. Panning used to be an edit: it changed the
+        // signature, so every wheel tick queued a save and told the room. Two people
+        // in one map have two cameras, and syncing them made the last person to move
+        // decide where the other was looking.
         withPage((page) => {
           page.viewport = viewport
+          recallViewport(get().documentId ?? 'local', page.id, viewport)
         })
       },
 
       setViewportForPage: (pageId, viewport) => {
         set((state) => {
           const page = state.doc.pages.find((p) => p.id === pageId)
-          if (page) page.viewport = viewport
+          if (!page) return
+          page.viewport = viewport
+          recallViewport(state.documentId ?? 'local', page.id, viewport)
         })
       },
 

@@ -210,12 +210,21 @@ const lastDocumentSettings = new Map<string, string>()
  * Content fingerprint of a page. It decides whether something actually changed
  * (no write) and it is also stamped when a remote snapshot is applied, so the
  * echo that comes back through the store never triggers a second broadcast.
+ *
+ * `v: page.viewport` used to be here, and it is the single most consequential line
+ * that was removed. With the camera in the fingerprint, *panning* counted as an
+ * edit: every wheel tick and every drag of the background changed the signature,
+ * queued a debounced write, and broadcast to everybody in the room. So moving your
+ * own view saved the document and moved everybody else's, and a read-only viewer
+ * who was allowed to pan was quietly taking a shared document dirty.
+ *
+ * The camera is now the reader's own and belongs to their browser. See
+ * `viewportStore.ts`.
  */
 function pageSignature(page: Page): string {
   return JSON.stringify({
     t: page.title,
     o: page.ordinal,
-    v: page.viewport,
     c: page.elements,
     g: page.groups,
     n: page.connections,
@@ -610,10 +619,16 @@ export function usePageSync() {
     // The broadcast payload is a `RemoteSnapshot`, which is in-memory shaped —
     // `elements`, not the `cards` column name. Only the *database* row uses that
     // name, and the two are different things on purpose.
+    //
+    // No `viewport`, and this is the change that stops one person's camera from
+    // being applied to everybody else's. Two people in the same map are looking at
+    // two different places; broadcasting the camera made whichever of them moved
+    // last drag everybody else to their view, which is not collaboration. What is
+    // shared is the content, and the cursors, which say where somebody is pointing
+    // without moving anybody.
     const payload: PageUpdatePayload & { origin: string } = {
       title: page.title,
       ordinal: page.ordinal,
-      viewport: page.viewport,
       elements: page.elements,
       groups: page.groups,
       connections: page.connections,
