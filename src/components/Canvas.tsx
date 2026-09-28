@@ -153,11 +153,19 @@ export function Canvas() {
   const focusMode = useCanvasStore((s) => s.focusMode)
   const presenting = useCanvasStore((s) => s.presenting)
 
-  // A presentation owns the camera. Panning and zooming are both *navigation*,
-  // and during a presentation the step's framing is the navigation — so a drag
-  // or a wheel that moves the view is not "looking around", it is abandoning the
-  // step. Both the background and the cards below check this.
-  const cameraLocked = presenting
+  /**
+   * The grid is part of the editor, not part of the map.
+   *
+   * Dots and lines are the thing that tells you where a card *is* while you are
+   * arranging it, and they are the first thing in the way when somebody is
+   * presenting the map to a room — a screen of faint dots is a screen of visual
+   * noise behind the thing being talked about.
+   *
+   * The canvas is blank while presenting, and the chrome is hidden, so what is
+   * left is the map on the page colour: no grid, no toolbar, no inspector, no
+   * sidebar.
+   */
+  const showGrid = gridPattern !== 'none' && !presenting
   // `spotlight` dims the rest *and* rings the target; `dim` only dims. Ringed
   // only when the step asked for it, because a ring the step did not ask for
   // is a second thing competing for the eye it is meant to direct.
@@ -220,11 +228,19 @@ export function Canvas() {
     if (world) world.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${zoom})`
     const grid = gridRef.current
     if (grid) {
-      const { gridPattern: pattern, gridSize: size } = useCanvasStore.getState()
+      // Read from the store rather than closing over the render's value: this
+      // runs once per frame from an animation, and a captured `presenting` would
+      // be whatever it was when the frame started. Starting a presentation and
+      // then panning has to show a blank background on the first frame.
+      const { gridPattern: pattern, gridSize: size, presenting: isPresenting } =
+        useCanvasStore.getState()
+      if (isPresenting || pattern === 'none') {
+        grid.style.backgroundImage = 'none'
+        return
+      }
       const step = Math.max(6, size * zoom)
       grid.style.backgroundImage = gridBackground(pattern)
-      grid.style.backgroundSize =
-        pattern === 'dots' ? `${step}px ${step}px` : pattern === 'lines' ? `${step}px ${step}px` : 'auto'
+      grid.style.backgroundSize = `${step}px ${step}px`
       grid.style.backgroundPosition = `${x}px ${y}px`
     }
   }, [])
@@ -507,8 +523,6 @@ export function Canvas() {
     cancelViewportAnimation()
 
     if (event.button === 1 || store.spacePressed || event.altKey) {
-      // Same rule as on a card: while presenting, a pan modifier does not pan.
-      if (store.presenting) return
       event.preventDefault()
       beginPan(event)
       return
@@ -530,12 +544,10 @@ export function Canvas() {
     if (event.button !== 0) return
     // Dimmed groups (filtered out) are not interactive.
     if (dimmedCardIds.has(groupId)) return
-    // Panning is still allowed; dragging a group is not. Except while
-    // presenting, when the camera belongs to the step — so the pan modifier does
-    // nothing either, rather than quietly moving the map off the slide.
+    // Panning is still allowed; dragging a group is not.
     if (!useCanvasStore.getState().canEdit()) {
       cancelViewportAnimation()
-      if (!cameraLocked && (useCanvasStore.getState().spacePressed || event.altKey)) {
+      if (useCanvasStore.getState().spacePressed || event.altKey) {
         event.preventDefault()
         beginPan(event)
       }
@@ -543,7 +555,6 @@ export function Canvas() {
     }
     cancelViewportAnimation()
     if (useCanvasStore.getState().spacePressed || event.altKey) {
-      if (cameraLocked) return
       event.preventDefault()
       beginPan(event)
       return
@@ -584,14 +595,14 @@ export function Canvas() {
     if (event.button !== 0) return
     // Dimmed cards (filtered out) are not interactive.
     if (dimmedCardIds.has(cardId)) return
-    // Panning is navigation, not editing, so it stays available while *reading* —
-    // being unable to look around a map you may not change is the one thing that
-    // would make view-only useless. Presenting is different: there, the step's
-    // framing is the whole point, so the camera is locked and nothing pans.
-    // Everything below this line moves or edits something.
+    // Panning is navigation, not editing, so it stays available in every mode
+    // that is not editing — reading, viewing and presenting. A camera that
+    // cannot be moved is fine right up until somebody asks a question about the
+    // part of the map you are not showing, and then it is the worst possible
+    // thing on screen. Everything below this line moves or edits something.
     if (!useCanvasStore.getState().canEdit()) {
       cancelViewportAnimation()
-      if (!cameraLocked && (useCanvasStore.getState().spacePressed || event.altKey)) {
+      if (useCanvasStore.getState().spacePressed || event.altKey) {
         event.preventDefault()
         beginPan(event)
       }
@@ -599,7 +610,6 @@ export function Canvas() {
     }
     cancelViewportAnimation()
     if (useCanvasStore.getState().spacePressed || event.altKey) {
-      if (cameraLocked) return
       event.preventDefault()
       beginPan(event)
       return
@@ -989,12 +999,10 @@ export function Canvas() {
         }
       }
 
-      // Reading a card is allowed while presenting; moving the map is not. This
-      // check is after the scroller test above on purpose — a step's card is
-      // often taller than the window, and locking that would make the
-      // presentation unreadable.
-      if (useCanvasStore.getState().presenting) return
-
+      // Nothing is blocked here. Panning and zooming the canvas are allowed
+      // while presenting, on purpose — see the note in `PresentOverlay`. A step
+      // frames what it points at, but a presenter who is asked about the part of
+      // the map they are not showing has to be able to get there.
       event.preventDefault()
       cancelViewportAnimation()
 
@@ -1104,8 +1112,11 @@ export function Canvas() {
     const { x, y, zoom } = viewportRef.current
     const step = Math.max(6, gridSize * zoom)
     return {
-      backgroundImage: gridBackground(gridPattern),
-      backgroundSize: gridPattern === 'none' ? 'auto' : `${step}px ${step}px`,
+      // Blank while presenting, so the map is on the page colour and nothing
+      // else. `applyViewport` clears the same element imperatively on every
+      // frame; this is what the first paint shows.
+      backgroundImage: showGrid ? gridBackground(gridPattern) : 'none',
+      backgroundSize: showGrid ? `${step}px ${step}px` : 'auto',
       backgroundPosition: `${x}px ${y}px`,
     }
   })()
@@ -1137,7 +1148,11 @@ export function Canvas() {
       onContextMenu={openCanvasMenu}
       onDoubleClick={handleDoubleClick}
     >
-      <div ref={gridRef} className="cc-grid" style={gridStyle} />
+      {/* Not rendered at all while presenting, rather than rendered with no
+          background: a full-canvas element that paints nothing is still an
+          element the browser composites, and on a large map that is real work
+          for a picture that is only ever empty. */}
+      {showGrid ? <div ref={gridRef} className="cc-grid" style={gridStyle} /> : null}
 
       <div
         ref={worldRef}

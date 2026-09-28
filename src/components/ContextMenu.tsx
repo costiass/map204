@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { CheckSquare, Frame, Maximize } from 'lucide-react'
+import { CheckSquare, Maximize } from 'lucide-react'
 
 import {
   IconBringFront,
@@ -14,9 +14,8 @@ import {
 } from '@/components/Icons'
 import { openInsertCard } from '@/components/InsertCardDialog'
 import { useCanvasStore } from '@/store/useCanvasStore'
-import { CARD_ACCENTS, CARD_BACKGROUNDS } from '@/types'
-import { CARD_TYPES } from '@/utils/embeds'
-import { INSERT_ICONS, NEEDS_LINK } from '@/components/InsertCardIcons'
+import { CARD_ACCENTS, CARD_BACKGROUNDS, type CardType } from '@/types'
+import { insertableKinds, needsSource } from '@/elements/registry'
 
 export function ContextMenu() {
   const menu = useCanvasStore((s) => s.contextMenu)
@@ -250,24 +249,27 @@ export function ContextMenu() {
 
                 "Here" means where the pointer is, so each of these places the
                 card under the cursor. */}
-            <p className="cc-menu-label">Insert a card</p>
-            {CARD_TYPES.map((kind) => {
-              const KindIcon = INSERT_ICONS[kind.id]
+            <p className="cc-menu-label">Insert</p>
+            {insertableKinds().map((kind) => {
+              const KindIcon = kind.icon
               return (
                 <button
                   key={kind.id}
                   type="button"
-                  title={kind.hint}
+                  title={kind.blurb}
                   onClick={() => {
-                    if (NEEDS_LINK.has(kind.id)) {
-                      // It needs a link before it can exist, so the dialog opens
-                      // with the kind already chosen and a note of where the
-                      // card will land.
+                    if (needsSource(kind.id)) {
+                      // It points at something, so there is nothing to create
+                      // until somebody says to what. The dialog opens with the
+                      // kind already chosen.
                       close()
-                      openInsertCard(menu.x, menu.y, kind.id)
+                      openInsertCard(menu.x, menu.y, kind.id as CardType)
                       return
                     }
-                    addCard({ type: kind.id }, { atScreen: { x: menu.x, y: menu.y } })
+                    addCard(
+                      { type: kind.id as CardType },
+                      { atScreen: { x: menu.x, y: menu.y } },
+                    )
                     close()
                   }}
                 >
@@ -277,7 +279,8 @@ export function ContextMenu() {
               )
             })}
             <button type="button" onClick={() => { addGroup(); close() }}>
-              <Frame size={14} className="shrink-0 opacity-70" /> Group
+              <span className="grid h-[14px] w-[14px] shrink-0 place-items-center rounded border border-current opacity-70" />
+              Group
             </button>
 
             <hr />

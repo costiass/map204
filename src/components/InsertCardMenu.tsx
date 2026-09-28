@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Frame, Plus } from 'lucide-react'
+import { Plus } from 'lucide-react'
 
-import { INSERT_ICONS, NEEDS_LINK } from '@/components/InsertCardIcons'
 import { openInsertCard } from '@/components/InsertCardDialog'
+import { insertableKinds, needsSource } from '@/elements/registry'
 import { useCanvasStore } from '@/store/useCanvasStore'
 import type { CardType } from '@/types'
-import { CARD_TYPES } from '@/utils/embeds'
 
 /**
  * The toolbar's one button for making a card, and the menu it opens.
@@ -141,15 +140,15 @@ export function InsertCardMenu() {
 
   if (readOnlyReason !== null) return null
 
-  const choose = (type: CardType) => {
+  const choose = (kindId: string) => {
     setOpen(false)
-    if (NEEDS_LINK.has(type)) {
-      // No position, so the dialog lets the card land wherever the canvas
-      // chooses — the same place a `C` press would put it.
-      openInsertCard(-1, -1, type)
+    if (needsSource(kindId)) {
+      // No position, so the dialog lets it land wherever the canvas chooses —
+      // the same place a `C` press would put it.
+      openInsertCard(-1, -1, kindId as CardType)
       return
     }
-    const id = addCard({ type })
+    const id = addCard({ type: kindId as CardType })
     if (id) selectCards([id])
   }
 
@@ -178,16 +177,16 @@ export function InsertCardMenu() {
           style={{ left: position?.left ?? 0, top: position?.top ?? 0 }}
           role="menu"
         >
-          <p className="cc-menu-label">Insert a card</p>
-          {CARD_TYPES.map((option) => {
-            const OptionIcon = INSERT_ICONS[option.id]
+          <p className="cc-menu-label">Insert</p>
+          {insertableKinds().map((option) => {
+            const OptionIcon = option.icon
             return (
               <button
                 key={option.id}
                 type="button"
                 role="menuitem"
                 onClick={() => choose(option.id)}
-                title={option.hint}
+                title={option.blurb}
               >
                 <OptionIcon size={15} className="shrink-0 opacity-70" />
                 <span className="min-w-0 flex-1">
@@ -206,10 +205,10 @@ export function InsertCardMenu() {
               useCanvasStore.getState().addGroup()
             }}
           >
-            <Frame size={15} className="shrink-0 opacity-70" />
+            <span className="grid h-[15px] w-[15px] shrink-0 place-items-center rounded border border-current opacity-70" />
             <span className="min-w-0 flex-1">
               <span className="block font-medium">Group</span>
-              <span className="block text-[11px] opacity-55">A frame to gather cards in</span>
+              <span className="block text-[11px] opacity-55">A frame that holds other things</span>
             </span>
           </button>
         </div>

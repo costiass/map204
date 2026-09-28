@@ -185,7 +185,15 @@ export interface CanvasStore {
   stepIndex: number
   startPresenting: (fromStepId?: string) => void
   stopPresenting: () => void
-  goToStep: (index: number) => void
+  /**
+   * Move to a step.
+   *
+   * `instant` puts the camera at the destination instead of travelling to it.
+   * Not the default, because the animation is the point of a step — but the
+   * outline needs it, since somebody reading a list should not have it vanish
+   * under their eye every time they click a row.
+   */
+  goToStep: (index: number, options?: { instant?: boolean }) => void
   nextStep: () => void
   prevStep: () => void
   /**
@@ -705,7 +713,7 @@ export const useCanvasStore = create<CanvasStore>()(
         }
       },
 
-      goToStep: (index) => {
+      goToStep: (index, options) => {
         const state = get()
         const steps = state.doc.settings.steps
         if (steps.length === 0) {
@@ -739,9 +747,10 @@ export const useCanvasStore = create<CanvasStore>()(
 
         state.requestCamera(
           viewport,
-          // An instant step has no arrival to animate. Zero is a real value the
-          // canvas handles by writing the viewport in one go, not a missing one.
-          step.transition === 'instant' ? 0 : step.durationMs,
+          // An instant step has no arrival to animate, and neither does a jump
+          // the caller asked to be instant. Zero is a real value the canvas
+          // handles by writing the viewport in one go, not a missing one.
+          step.transition === 'instant' || options?.instant ? 0 : step.durationMs,
           step.transition,
         )
       },

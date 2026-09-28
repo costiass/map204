@@ -336,6 +336,143 @@ Work to do, in the order it makes sense. Each item is checked off as it lands.
         from. That is a defect as much as a design: a step aimed at a card on
         page two, presented from page one, silently falls back to a wide shot.
 
+## The element system
+
+The core change, and the one that is not finished. Everything on a page stops
+being a "card with a type" and becomes an *element* — a discriminated union with
+a common base, a per-type payload, and a per-type view, settings and inspector.
+
+- [x] **The seam exists and is used.** `src/elements/registry.ts` is one list of
+      element kinds, and the toolbar menu, the context menu and the keyboard all
+      read from it. Three components each had their own copy of the icons and
+      their own opinion about which kinds need a link, and they had already
+      drifted — the insert button was broken for exactly that reason.
+  - [x] **A kind is either supported or it is not**, and unsupported kinds are
+        declared but not offered. `link` and `table` are in the registry with
+        `supported: false`. The alternative was casting the id to `CardType` at
+        every call site, which compiles cleanly and lies at runtime — a table
+        element that writes a card row with a `type` field fails *after* the
+        click, which is worse than not offering it.
+  - [x] Containers and layers are properties of the kind, not a hard-coded check
+        for the string `"group"` in the middle of the store.
+
+- [ ] **The data model.** `Card` becomes `Element`, with:
+    - a **common base** — position, size, z-order, and the link and interaction
+      systems, because every element participates in them and re-implementing
+      per type is how two elements end up behaving differently;
+    - a **per-type payload** that only that type reads, and which is never
+      `Record<string, unknown>` — that is a union with the names taken off;
+    - connections staying their own thing, because a link is a fact about *two*
+      elements and storing it on one makes the other incomplete.
+  - [x] **Every document already saved has to keep opening.** This is the whole
+        difficulty. A card written before the change has no `type` at all, and
+        `normalizeDoc` is the one place that decides what a document is, so the
+        old shape is a *valid* new shape rather than something to migrate.
+  - [ ] PDF uploads need a storage bucket, an RLS policy per kind of member, and
+        a signed-URL endpoint. The URL case works today and is not blocked by any
+        of that, so it is not a reason to wait.
+
+- [ ] **One folder per element type**, each holding its own view, its settings
+      and its inspector:
+    ```
+    src/elements/
+      registry.ts          the list, and the properties every kind has
+      base.ts              ElementBase, and the link and interaction systems
+      note/                NoteView, NoteSettings, note-specific inspector
+      video/               VideoView, VideoSettings
+      pdf/                 PdfView, PdfSettings
+      link/                LinkView, LinkSettings
+      group/               GroupView — drawn behind, holds other elements
+      table/               TableView, TableSettings
+    ```
+    The point is that a type's own files are *adjacent*, so reading one type
+    means reading one directory. Today `CardNode` renders four different things
+    and `CardNode` is 400 lines of conditionals — the four types are not
+    separate anywhere except in a `switch`.
+
+## Project structure
+
+- [x] **`src/elements/` exists and holds the registry**, rather than the folders
+      being speculative. A directory of empty type folders would be a promise
+      with nothing in it; a registry three menus already read is the seam the
+      migration widens.
+- [ ] **The rest of the reorganisation, once the folders have contents worth
+      putting in them.** The current shape is `src/components` with 44 files in
+      it, which is the symptom rather than the disease: everything is flat
+      because there is one kind of thing. Split it by *feature* —
+      `canvas/`, `workspace/`, `presentation/`, `elements/` — and the flat
+      directory stops being a problem, because a feature directory holds one
+      feature's files together.
+  - [ ] **`useCanvasStore.ts` is 61KB and `Canvas.tsx` is 44KB.** These are the
+        two files that would suffer most from the element split, and both need
+        cutting *by feature* rather than by line: the store's presentation and
+        saving slices are already separable, and the canvas's camera is a
+        self-contained concern with its own animation loop.
+
+## Presenting, again more recently
+
+- [x] **The camera moves again.** This reverses a decision made two turns ago,
+      and deliberately: nothing panned or zoomed while presenting, on the
+      reasoning that the camera belongs to the step.
+  - [x] That is right right up until somebody asks a question about the part of
+        the map you are not showing, and then it is the worst possible thing on
+        screen. Leaving the presentation to look loses the step you were on, and
+        re-entering re-runs the camera move. A camera that cannot be moved is
+        fine until it is needed.
+  - [x] Pinch-zoom stays blocked, because on a trackpad it is two fingers
+        dragging, and somebody reaching over to point at a spot would otherwise
+        zoom the map out from under the audience.
+  - [x] Scrolling a card still scrolls the card. Reading is not navigating.
+- [x] **No grid.** Dots and lines are for arranging cards; they are the first
+      thing in the way when a map is being shown to a room. The grid element is
+      not rendered at all while presenting, rather than rendered with no
+      background — a full-canvas element that paints nothing is still something
+      the browser composites.
+  - [x] The per-frame camera loop reads `presenting` from the store rather than
+        closing over it, so starting a presentation and immediately panning shows
+        a blank background on the *first* frame rather than the next.
+- [x] **The outline replaces the inspector while presenting.** It is the one
+      panel that helps rather than edits: it lists the steps in order and jumps
+      the camera to one. Nothing in it can be typed into.
+  - [x] Jumping from the outline is **instant**, because somebody reading a list
+        should not have it vanish under their eye on every click. The animation
+        is the point of *advancing*, not of *navigating*.
+  - [x] A step whose card has been deleted says so, rather than showing a blank
+        row.
+- [x] **Leave with `Esc` or the Finish button**, and nothing else. The outline
+      has a stop button too, for the same reason.
+
+## The workspace list
+
+- [x] **A search bar, and the largest thing on the page.** The old grid was fine
+      at four documents and useless at forty. Search is what makes a growing
+      list usable, so it is sized like the primary action rather than an icon
+      beside a heading.
+  - [x] A search with no results says so, and says how many there are. An empty
+      list with no explanation looks like the documents have gone.
+  - [x] Search also matches the kind, so "map" finds everything — and "outliner"
+      will find nothing rather than everything, which is an honest empty result
+      instead of a filter that quietly does not filter.
+- [x] **A list, not a gallery.** Rows, not a grid of tiles.
+- [x] **Colour and icon are hidden until you edit.** They were on every tile
+      always, which made the list a wall of coloured squares you had to read
+      *past*. They are identity, and identity is only interesting when you are
+      doing something to the document. The icon still tints the row's edge, so it
+      is available as a *cue* without being decoration.
+- [x] **One edit button, not four.** Rename, recolour and re-icon were three
+      separate affordances appearing on hover, competing with the title for the
+      same corner. One button opens one place with all three in it, and the row's
+      contents are *replaced* while editing — so the colour you are changing is
+      the one in front of you.
+- [x] **The whole row opens the document, not the title.** A row is one thing and
+      it does one thing; making the title the only clickable part means aiming at
+      a target the size of a word, and the empty space either side does nothing —
+      which reads as the row being broken rather than as a design choice. It is
+      a real `<button>`-shaped element, so Enter and Space both work.
+- [x] Creating a workspace still lets you choose its colour and icon *before* it
+      exists, collapsed behind a disclosure. The alternative is creating it and
+      then being invited to style it: two trips for one job.
+
 ## Character usage
 
 - [x] **The keyboard shortcut hints are off the buttons and in the tooltips.** A

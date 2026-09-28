@@ -9,6 +9,7 @@ import { ImportExportDialog } from '@/components/ImportExportDialog'
 import { InsertCardDialog } from '@/components/InsertCardDialog'
 import { PresentOverlay } from '@/components/PresentOverlay'
 import { PresentationInspector } from '@/components/PresentationInspector'
+import { PresentationTree } from '@/components/PresentationTree'
 import { Inspector } from '@/components/Inspector'
 import { NotFound } from '@/components/NotFound'
 import { PageSidebar } from '@/components/PageSidebar'
@@ -39,6 +40,7 @@ export default function App() {
   const presenting = useCanvasStore((s) => s.presenting)
   const presentationOpen = useCanvasStore((s) => s.presentationOpen)
   const setPresentationOpen = useCanvasStore((s) => s.setPresentationOpen)
+  const stopPresenting = useCanvasStore((s) => s.stopPresenting)
 
   // Real paths: `/`, `/doc/<docId>`, `/settings`. Anything else is a 404.
   // Runs once, before the first route is read, so a saved `#workspace/…` link
@@ -267,11 +269,25 @@ export default function App() {
             nothing is worse than no panel, because it looks like it works. The
             presentation inspector edits the document too, so it goes for the
             same reason. */}
-        {readOnlyReason === null
-          ? presentationOpen
-            ? <PresentationInspector onClose={() => setPresentationOpen(false)} />
-            : <Inspector />
-          : null}
+        {/* The inspector is the editor, and a canvas that cannot be edited has
+            no business showing one — an open panel of controls that quietly do
+            nothing is worse than no panel, because it looks like it works. The
+            presentation inspector edits the document too, so it goes for the
+            same reason.
+
+            A *presentation* gets the connection tree instead, which is the one
+            panel that helps rather than edits: it shows how the map hangs
+            together, which is exactly what you want while talking over it, and
+            it cannot change anything. */}
+        {readOnlyReason === null ? (
+          presentationOpen ? (
+            <PresentationInspector onClose={() => setPresentationOpen(false)} />
+          ) : (
+            <Inspector />
+          )
+        ) : null}
+
+        {presenting ? <PresentationTree onClose={stopPresenting} /> : null}
       </div>
 
       {presenting ? <PresentOverlay /> : null}

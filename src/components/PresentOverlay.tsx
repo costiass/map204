@@ -52,27 +52,28 @@ export function PresentOverlay() {
 
   useEffect(() => {
     if (!presenting) return
-    // While a presentation is running, *nothing* pans or zooms. The camera
-    // belongs to the step, and a wheel or a stray drag taking it somewhere else
-    // mid-sentence is the one thing that cannot be undone in front of an
-    // audience.
+    // Only the browser's own pinch gesture is suppressed. Panning, zooming and
+    // scrolling the canvas are all *allowed* while presenting.
     //
-    // This is deliberately absolute. Blocking it in the pointer handlers instead
-    // would leave a dozen paths — the wheel, a trackpad scroll, a pinch, a
-    // middle-drag — each of which has to be found and closed separately, and any
-    // one of them missed is a map that wanders off while you talk. One capture
-    // listener above all of it closes every path at once.
-    const block = (event: Event) => {
+    // This reverses an earlier decision, and deliberately. A step frames what it
+    // points at, but a presenter answering a question from the back of the room
+    // has to be able to go and look at the thing they are being asked about —
+    // and leaving the presentation to look loses the step they were on. A camera
+    // that cannot be moved is fine right up until the moment it is needed, and
+    // then it is the worst possible thing on screen.
+    //
+    // Pinch stays blocked because on a trackpad it is two fingers dragging, and
+    // somebody reaching over to point at a spot on the map would otherwise zoom
+    // the whole thing out from under the audience.
+    const blockPinch = (event: Event) => {
       if (event.cancelable) event.preventDefault()
     }
     const opts = { passive: false, capture: true }
-    window.addEventListener('wheel', block, opts)
-    window.addEventListener('gesturestart', block, opts)
-    window.addEventListener('contextmenu', block, opts)
+    window.addEventListener('gesturestart', blockPinch, opts)
+    window.addEventListener('gesturechange', blockPinch, opts)
     return () => {
-      window.removeEventListener('wheel', block, opts)
-      window.removeEventListener('gesturestart', block, opts)
-      window.removeEventListener('contextmenu', block, opts)
+      window.removeEventListener('gesturestart', blockPinch, opts)
+      window.removeEventListener('gesturechange', blockPinch, opts)
     }
   }, [presenting])
 
