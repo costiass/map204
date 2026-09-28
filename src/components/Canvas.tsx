@@ -200,10 +200,67 @@ export function Canvas() {
   }, [])
 
   /* ---------------------------------------------------------------- */
-  /* animated pan                                                     */
+  /* the camera, on request                                            */
   /* ---------------------------------------------------------------- */
 
+  // The store asks for a move; the canvas carries it out. The animation is
+  // frame-by-frame on the same ref the drag uses, so a step can interrupt a pan
+  // and a pan can interrupt a step without either leaving the canvas halfway.
+  const cameraRequest = useCanvasStore((s) => s.cameraRequest)
+  useEffect(() => {
+    if (cameraRequest.token === 0) return
+    cancelViewportAnimation()
 
+    const from = { ...viewportRef.current }
+    const to = cameraRequest.viewport
+    const duration = cameraRequest.durationMs
+
+    // A zero-length move, or one already there, would otherwise spin a
+    // cancellation frame for nothing.
+    if (
+      duration <= 0 ||
+      (Math.abs(from.x - to.x) < 0.5 &&
+        Math.abs(from.y - to.y) < 0.5 &&
+        Math.abs(from.zoom - to.zoom) < 0.001)
+    ) {
+      viewportRef.current = to
+      applyViewport()
+      commitViewport(true)
+      return
+    }
+
+    const started = performance.now()
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - started) / duration)
+      // Ease in and out. A linear camera move reads as a mechanical jump between
+      // two stills, which is exactly what a presentation is trying not to be.
+      const eased = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2
+
+      viewportRef.current = {
+        x: from.x + (to.x - from.x) * eased,
+        y: from.y + (to.y - from.y) * eased,
+        // Zoom interpolated on a log scale, so a move from 0.5 to 2 feels
+        // constant. Interpolated directly, the first half of it barely moves.
+        zoom: from.zoom * (to.zoom / from.zoom) ** eased,
+      }
+      applyViewport()
+
+      if (t < 1) {
+        panFrame.current = requestAnimationFrame(tick)
+      } else {
+        panFrame.current = null
+        commitViewport(true)
+      }
+    }
+    panFrame.current = requestAnimationFrame(tick)
+
+    return () => {
+      if (panFrame.current !== null) {
+        cancelAnimationFrame(panFrame.current)
+        panFrame.current = null
+      }
+    }
+  }, [cameraRequest, applyViewport, cancelViewportAnimation, commitViewport])
 
   // Switching pages swaps the viewport that is restored on the canvas.
   const previousPageId = useRef(activePageId)
@@ -444,6 +501,15 @@ export function Canvas() {
     if (event.button !== 0) return
     // Dimmed groups (filtered out) are not interactive.
     if (dimmedCardIds.has(groupId)) return
+    // Panning is still allowed; dragging a group is not.
+    if (!useCanvasStore.getState().canEdit()) {
+      cancelViewportAnimation()
+      if (useCanvasStore.getState().spacePressed || event.altKey) {
+        event.preventDefault()
+        beginPan(event)
+      }
+      return
+    }
     cancelViewportAnimation()
     if (useCanvasStore.getState().spacePressed || event.altKey) {
       event.preventDefault()
@@ -486,6 +552,18 @@ export function Canvas() {
     if (event.button !== 0) return
     // Dimmed cards (filtered out) are not interactive.
     if (dimmedCardIds.has(cardId)) return
+    // Panning is navigation, not editing, so it stays available while reading or
+    // presenting — being unable to look around a map you may not change is the
+    // one thing that would make the mode useless. Everything below this line
+    // moves or edits something.
+    if (!useCanvasStore.getState().canEdit()) {
+      cancelViewportAnimation()
+      if (useCanvasStore.getState().spacePressed || event.altKey) {
+        event.preventDefault()
+        beginPan(event)
+      }
+      return
+    }
     cancelViewportAnimation()
     if (useCanvasStore.getState().spacePressed || event.altKey) {
       event.preventDefault()
@@ -579,6 +657,7 @@ export function Canvas() {
 
   const handleResizePointerDown = (event: ReactPointerEvent<HTMLElement>, cardId: string) => {
     if (event.button !== 0) return
+    if (!useCanvasStore.getState().canEdit()) return
     event.stopPropagation()
     event.preventDefault()
     cancelViewportAnimation()
@@ -601,6 +680,8 @@ export function Canvas() {
     side: Anchor,
   ) => {
     if (event.button !== 0) return
+    // Drawing a new link is an edit, not a look.
+    if (!useCanvasStore.getState().canEdit()) return
     event.stopPropagation()
     event.preventDefault()
     cancelViewportAnimation()
@@ -906,6 +987,10 @@ export function Canvas() {
 
   const openCanvasMenu = (event: React.MouseEvent<HTMLDivElement>) => {
     event.preventDefault()
+    // Every entry in this menu is an edit — delete, duplicate, change style.
+    // A read-only canvas has no menu to show, and the browser's own is blocked
+    // while presenting, so a right click does nothing at all.
+    if (!useCanvasStore.getState().canEdit()) return
     useCanvasStore.getState().setContextMenu({
       x: event.clientX,
       y: event.clientY,
@@ -919,6 +1004,7 @@ export function Canvas() {
     event.preventDefault()
     event.stopPropagation()
     const store = useCanvasStore.getState()
+    if (!store.canEdit()) return
     if (!store.selectedCardIds.includes(cardId)) store.selectCards([cardId])
     store.setContextMenu({ x: event.clientX, y: event.clientY, cardId, connectionId: null, groupId: null })
   }
@@ -927,6 +1013,7 @@ export function Canvas() {
     event.preventDefault()
     event.stopPropagation()
     const store = useCanvasStore.getState()
+    if (!store.canEdit()) return
     if (store.selectedGroupId !== groupId) store.selectGroup(groupId)
     store.setContextMenu({ x: event.clientX, y: event.clientY, cardId: null, connectionId: null, groupId })
   }
@@ -935,6 +1022,7 @@ export function Canvas() {
     event.preventDefault()
     event.stopPropagation()
     const store = useCanvasStore.getState()
+    if (!store.canEdit()) return
     if (!store.selectedConnectionIds.includes(connectionId)) store.selectConnection(connectionId)
     store.setContextMenu({ x: event.clientX, y: event.clientY, cardId: null, connectionId, groupId: null })
   }

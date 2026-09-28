@@ -7,6 +7,7 @@ import { ContextMenu } from '@/components/ContextMenu'
 import { DevOverlay } from '@/components/DevOverlay'
 import { ImportExportDialog } from '@/components/ImportExportDialog'
 import { InsertCardDialog } from '@/components/InsertCardDialog'
+import { PresentOverlay } from '@/components/PresentOverlay'
 import { Inspector } from '@/components/Inspector'
 import { NotFound } from '@/components/NotFound'
 import { PageSidebar } from '@/components/PageSidebar'
@@ -33,6 +34,8 @@ export default function App() {
 
   const sidebarOpen = useCanvasStore((s) => s.sidebarOpen)
   const setSidebarOpen = useCanvasStore((s) => s.setSidebarOpen)
+  const readOnlyReason = useCanvasStore((s) => s.readOnlyReason)
+  const presenting = useCanvasStore((s) => s.presenting)
 
   // Real paths: `/`, `/w/<docId>`, `/settings`. Anything else is a 404.
   // Runs once, before the first route is read, so a saved `#workspace/…` link
@@ -171,15 +174,21 @@ export default function App() {
   const shell = (children: React.ReactNode) => (
     <AuthGuard onUserChange={setUser}>
       <div className="flex h-full w-full flex-col overflow-hidden bg-canvas">
-        {/* The route — not the store — decides what the chrome shows. */}
-        <Toolbar
-          user={user}
-          documentId={currentDocId}
-          onOpenSettings={openSettings}
-          onOpenWorkspace={openWorkspace}
-          onOpenShare={() => setShowShare(true)}
-          onUserChange={setUser}
-        />
+        {/* The route — not the store — decides what the chrome shows. A
+            presentation takes the screen over completely: a toolbar, a sidebar
+            and an inspector are all things the audience should not be looking at,
+            and all of them are ways to change the map mid-sentence. Escape and
+            the mouse are the way back. */}
+        {presenting ? null : (
+          <Toolbar
+            user={user}
+            documentId={currentDocId}
+            onOpenSettings={openSettings}
+            onOpenWorkspace={openWorkspace}
+            onOpenShare={() => setShowShare(true)}
+            onUserChange={setUser}
+          />
+        )}
         {children}
 
         {/* Both panels are overlays, so they work the same on every screen. */}
@@ -227,7 +236,7 @@ export default function App() {
   return shell(
     <>
       <div className="flex min-h-0 flex-1">
-        {sidebarOpen ? (
+        {sidebarOpen && !presenting ? (
           <>
             <div
               className="fixed inset-0 z-30 bg-slate-900/25 lg:hidden"
@@ -250,9 +259,15 @@ export default function App() {
           <ConnectionTree />
         </div>
 
-        <Inspector />
+        {/* The inspector is the editor. A canvas that cannot be edited has no
+            business showing one — an open panel full of controls that quietly
+            do nothing is worse than no panel, because it looks like it works. */}
+        {readOnlyReason === null ? <Inspector /> : null}
       </div>
 
+      {presenting ? <PresentOverlay /> : null}
+
+      {!presenting ? <Toasts /> : null}
     </>,
   )
 }

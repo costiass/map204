@@ -80,6 +80,8 @@ export const DEFAULT_DOC_SETTINGS: DocSettings = {
     animated: false,
   },
   defaultRelationshipType: 'related to',
+  // A workspace with no presentation yet is a real state, not a missing field.
+  steps: [],
 }
 
 export const DEFAULT_PAGE_POSITION: Position = {

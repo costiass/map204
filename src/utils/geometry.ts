@@ -212,3 +212,40 @@ export function centerOn(point: Point, size: ViewportSize, zoom: number): Viewpo
     zoom: z,
   }
 }
+
+/**
+ * Where the camera goes for one presentation step.
+ *
+ * A step asks for a zoom, and the answer is *never more* than it asked for. A
+ * step aimed at a card that is wider than the window would otherwise zoom in far
+ * enough to show the middle of it and crop off the part you meant to point at,
+ * which is the one failure a presentation cannot have.
+ *
+ * So the zoom is capped by what actually fits, and the target is centred. When
+ * `bounds` is null — an establishing shot of the whole page — the zoom is taken
+ * at face value, since there is no target to keep on screen.
+ *
+ * The cap is computed here rather than taken from `fitViewport`, which stops at
+ * 1× on purpose: fitting a page should never magnify it. A step is the opposite
+ * case — coming in close to a small card is the entire point — so it needs the
+ * largest zoom at which the target still fits, which can be well over 1.
+ */
+export function stepViewport(
+  bounds: Rect | null,
+  size: ViewportSize,
+  zoom: number,
+  padding = 120,
+): Viewport {
+  if (!bounds) return centerOn({ x: 0, y: 0 }, size, zoom)
+  if (size.width <= 0 || size.height <= 0) return centerOn(rectCenter(bounds), size, zoom)
+
+  const available = {
+    width: Math.max(80, size.width - padding * 2),
+    height: Math.max(80, size.height - padding * 2),
+  }
+  const fits = Math.min(
+    available.width / Math.max(1, bounds.width),
+    available.height / Math.max(1, bounds.height),
+  )
+  return centerOn(rectCenter(bounds), size, clampZoom(Math.min(zoom, fits)))
+}

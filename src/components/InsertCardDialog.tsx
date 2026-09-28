@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { FileText, Play, StickyNote } from 'lucide-react'
+import { FileText, Layers, Play, StickyNote } from 'lucide-react'
 
 import { useCanvasStore } from '@/store/useCanvasStore'
 import type { CardType } from '@/types'
@@ -25,16 +25,23 @@ import {
  * the kind of question a form should answer on its own.
  */
 
-let request: { x: number; y: number } | null = null
+let request: { x: number; y: number; type: CardType | null } | null = null
 let notify: (() => void) | null = null
 
-/** Ask the dialog to open at a point on the canvas. Screen coordinates. */
-export function openInsertCard(x: number, y: number): void {
-  request = { x, y }
+/**
+ * Ask the dialog to open.
+ *
+ * `type` is a suggestion, not a decision: the link still gets the last word, so
+ * a YouTube URL pasted into a card meant to be a PDF turns it into a video. Only
+ * `note` and `flash` are ever locked, because nothing about a link can make a
+ * note a video.
+ */
+export function openInsertCard(x: number, y: number, type: CardType | null = null): void {
+  request = { x, y, type }
   notify?.()
 }
 
-const ICONS = { note: StickyNote, youtube: Play, pdf: FileText }
+const ICONS = { note: StickyNote, flash: Layers, youtube: Play, pdf: FileText }
 
 export function InsertCardDialog() {
   const [open, setOpen] = useState(false)
@@ -45,6 +52,9 @@ export function InsertCardDialog() {
 
   useEffect(() => {
     notify = () => {
+      // A kind chosen on the way in wins over the previous value, so opening
+      // "PDF" after a "Video" does not start from the wrong field.
+      if (request?.type) setType(request.type)
       setOpen(true)
       // Focus after paint, so the field is there to receive it.
       requestAnimationFrame(() => urlRef.current?.focus())
@@ -68,7 +78,9 @@ export function InsertCardDialog() {
   const guessed = url.trim() ? guessCardType(url.trim()) : null
   const effective: CardType = guessed ?? type
   const Icon = ICONS[effective]
-  const needsUrl = effective !== 'note'
+  // A note and a flash card are made of text, so there is nothing to ask for.
+  // Only the two kinds that point at something need a link to point with.
+  const needsUrl = effective === 'youtube' || effective === 'pdf'
   const valid = !needsUrl || (effective === 'youtube' ? !!youtubeVideoId(url) : !!safeEmbedUrl(url))
 
   const insert = () => {
@@ -98,9 +110,10 @@ export function InsertCardDialog() {
       embed: built.embed,
     })
 
-    // A note has nothing to point at, so it starts empty and waits to be typed
-    // into. A video or PDF starts with its link already in place, which is the
-    // only reason to have created it.
+    // A note or a flash card is nothing but text, so it starts empty and waits
+    // to be typed into — selecting it means the next thing you do is type. A
+    // video or PDF starts with its link in place, which is the only reason to
+    // have made it, so it is left unselected rather than inviting typing.
     if (id && !needsUrl) {
       store.selectCards([id])
     }
@@ -130,7 +143,7 @@ export function InsertCardDialog() {
         <div className="space-y-3 px-4 py-3">
           <div>
             <span className="cc-label">Kind</span>
-            <div className="mt-1 grid grid-cols-3 gap-1.5">
+            <div className="mt-1 grid grid-cols-4 gap-1.5">
               {CARD_TYPES.map((option) => {
                 const OptionIcon = ICONS[option.id]
                 const active = effective === option.id

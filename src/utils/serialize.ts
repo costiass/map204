@@ -31,6 +31,7 @@ import {
   type LineStyle,
   type Page,
   type Position,
+  type PresentationStep,
   type Routing,
   type Viewport,
 } from '@/types'
@@ -175,7 +176,10 @@ function normalizeCardType(raw: unknown): CardType {
 }
 
 function normalizeCardEmbed(raw: unknown, type: CardType): CardEmbed | null {
-  if (type === 'note') return null
+  // A note and a flash card both show text, not something loaded from a URL, so
+  // there is nothing for an embed to be. Keeping one would be a field that says
+  // one thing and renders as another.
+  if (type === 'note' || type === 'flash') return null
   if (!isRecord(raw)) return null
 
   const url = str(raw.url)
@@ -254,6 +258,43 @@ function normalizeConnection(raw: unknown): Connection {
   }
 }
 
+/**
+ * The presentation, read defensively.
+ *
+ * An imported file is untrusted, and this is the part a stranger is most likely
+ * to get wrong: a step pointing at a card that is not on the page, a zoom of
+ * `NaN`, a duration in the millions. All of it is dropped or clamped rather than
+ * trusted, because a bad step would otherwise take the camera somewhere absurd
+ * when the presenter pressed the key.
+ */
+function normalizeSteps(raw: unknown): PresentationStep[] {
+  if (!Array.isArray(raw)) return []
+  const seen = new Set<string>()
+
+  return raw.flatMap((entry) => {
+    if (!isRecord(entry)) return []
+
+    const id = str(entry.id) || uid('step')
+    if (seen.has(id)) return []
+    seen.add(id)
+
+    const kind =
+      entry.targetKind === 'card' || entry.targetKind === 'group' ? entry.targetKind : 'page'
+    const targetId = strOrNull(entry.targetId)
+
+    return [
+      {
+        id,
+        // A step whose target is the whole page must not also name something.
+        targetId: kind === 'page' ? null : targetId,
+        targetKind: kind,
+        zoom: clamp(num(entry.zoom, 1), MIN_ZOOM * 4, 2),
+        durationMs: clamp(Math.round(num(entry.durationMs, 450)), 0, 4000),
+      },
+    ]
+  })
+}
+
 function normalizeSettings(raw: unknown): DocSettings {
   const value = isRecord(raw) ? raw : {}
   const fallback = createDefaultSettings()
@@ -268,6 +309,7 @@ function normalizeSettings(raw: unknown): DocSettings {
       typeof value.defaultRelationshipType === 'string'
         ? value.defaultRelationshipType
         : fallback.defaultRelationshipType,
+    steps: normalizeSteps(value.steps),
   }
 }
 
@@ -452,9 +494,9 @@ export function createCard(input: Partial<Card> & { position: Partial<CardPositi
     type,
     title: input.title ?? 'New card',
     content: input.content ?? '',
-    // A note has nothing to point at, and an embed without a kind to give it
-    // purpose would be read as a note with stray data attached.
-    embed: type === 'note' ? null : (input.embed ?? null),
+    // Only the two kinds that point somewhere carry an embed; a note and a flash
+    // card would be read as text with stray data attached.
+    embed: type === 'youtube' || type === 'pdf' ? (input.embed ?? null) : null,
     image: input.image ?? { src: null, alt: '' },
     position: {
       x: num(input.position.x, 0),

@@ -1214,6 +1214,62 @@ body {
   box-shadow: var(--cc-shadow-lg);
 }
 
+/*
+ * A menu that hangs off a button rather than following the pointer.
+ *
+ * `.cc-menu` is fixed, because a context menu has to be placed at the exact
+ * screen coordinates of the click and escape every ancestor's clipping and
+ * transform. A toolbar dropdown needs the opposite: it has to move with its
+ * button, which inside a scrolling or transformed ancestor means being absolute.
+ *
+ * This cannot be a Tailwind `absolute` on the element: the utility is layered
+ * and this file is not, so unlayered `position: fixed` would always win and the
+ * menu would sit at the top-right of the window no matter what the button said.
+ */
+.cc-menu[data-anchored='true'] {
+  position: absolute;
+}
+
+/* A row of small controls: one wide button, then the buttons beside it. */
+.cc-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+  border-radius: 7px;
+}
+
+.cc-menu-row:hover {
+  background: var(--cc-surface-sunken);
+}
+
+.cc-menu-row > button:not(:first-child) {
+  width: auto;
+  flex: none;
+  padding: 0.35rem 0.3rem;
+  color: inherit;
+  opacity: 0.7;
+}
+
+.cc-menu-row > button:not(:first-child):hover {
+  background: transparent;
+  opacity: 1;
+}
+
+.cc-menu-row > button:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+/* A heading inside a menu, for grouping the commands below it. */
+.cc-menu-label {
+  padding: 0.35rem 0.5rem 0.2rem;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--cc-muted);
+}
+
 .cc-menu button,
 .cc-menu label {
   display: flex;

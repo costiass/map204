@@ -20,9 +20,11 @@ import {
   type Group,
   type Page,
   type Point,
+  type PresentationStep,
+  type Rect,
   type Viewport,
 } from '@/types'
-import { centerOn, clamp, screenToWorld } from '@/utils/geometry'
+import { centerOn, clamp, screenToWorld, stepViewport, visualCardRect } from '@/utils/geometry'
 import { DEFAULT_WORKSPACE_ACCENT, DEFAULT_WORKSPACE_ICON } from '@/theme'
 import { clone, uid } from '@/utils/id'
 import { createCard, createConnection, createGroup, normalizeDoc } from '@/utils/serialize'
@@ -98,6 +100,25 @@ export interface CanvasStore {
   gridPattern: 'none' | 'dots' | 'lines'
   gridSize: number
   spacePressed: boolean
+  /**
+   * Why the canvas cannot be edited, if it cannot.
+   *
+   * The reason is stored rather than just a boolean because the two cases are
+   * not the same and the difference matters to the reader:
+   *
+   *   'presenting'  the owner or an editor chose to present, and can stop
+   *   'viewing'     this account only has `viewer` on this workspace, so the
+   *                 mode is not theirs to leave
+   *
+   * A viewer was previously able to open a shared workspace and try to edit it,
+   * with every write refused by the database and no explanation. Being told
+   * "view only" up front is the honest version, and it is the same mechanism a
+   * presenter uses — one thing doing both jobs rather than two features.
+   */
+  readOnlyReason: 'presenting' | 'viewing' | null
+  setReadOnlyReason: (reason: 'presenting' | 'viewing' | null) => void
+  /** True when the canvas must not be edited, for whatever reason. */
+  canEdit: () => boolean
   viewportSize: { width: number; height: number }
   /** Bumped by the toolbar / `F` shortcut; the canvas reacts to the change. */
   fitViewToken: number
@@ -131,6 +152,34 @@ export interface CanvasStore {
   setViewportForPage: (pageId: string, viewport: Viewport) => void
   resetViewport: () => void
   requestFitView: () => void
+
+  /* --- presentation ------------------------------------------------- */
+  /** The steps of the active page's document, in order. */
+  steps: () => PresentationStep[]
+  addStep: (input: Omit<PresentationStep, 'id'>) => string
+  updateStep: (stepId: string, patch: Partial<Omit<PresentationStep, 'id'>>) => void
+  removeStep: (stepId: string) => void
+  moveStep: (stepId: string, delta: number) => void
+  /** True while a presentation is running, whether by choice or by permission. */
+  presenting: boolean
+  /** Index into `steps()`, or -1 before the first step. */
+  stepIndex: number
+  startPresenting: (fromStepId?: string) => void
+  stopPresenting: () => void
+  goToStep: (index: number) => void
+  nextStep: () => void
+  prevStep: () => void
+  /**
+   * A camera move the canvas should carry out.
+   *
+   * The canvas owns the viewport in a ref, written straight to the DOM each
+   * frame, so it cannot be driven by a state value — a store-held viewport would
+   * re-render the whole tree sixty times a second. Instead the store says *where
+   * to go* and bumps a token; the canvas animates to it and acknowledges.
+   */
+  cameraRequest: { viewport: Viewport; durationMs: number; token: number }
+  requestCamera: (viewport: Viewport, durationMs: number) => void
+
   /** Which tab the card inspector opens on. */
   inspectorTab: 'content' | 'settings'
   setInspectorTab: (tab: 'content' | 'settings') => void
@@ -341,6 +390,10 @@ export const useCanvasStore = create<CanvasStore>()(
       gridPattern: 'dots',
       gridSize: 20,
       spacePressed: false,
+      readOnlyReason: null,
+      presenting: false,
+      stepIndex: -1,
+      cameraRequest: { viewport: { x: 0, y: 0, zoom: 1 }, durationMs: 0, token: 0 },
       viewportSize: { width: 1200, height: 800 },
       fitViewToken: 0,
       darkMode: false,
@@ -361,6 +414,14 @@ export const useCanvasStore = create<CanvasStore>()(
           if (!doc.pages.some((page) => page.id === state.activePageId)) {
             state.activePageId = doc.pages[0]?.id ?? ''
           }
+          // Opening a workspace replaces the document, so nothing about the
+          // previous one carries over — including the lock. Being a viewer of
+          // one map says nothing about the one you just opened, and keeping the
+          // lock would leave somebody stuck in a document they can edit. The
+          // role for the *new* workspace sets it again as soon as it is read.
+          state.presenting = false
+          state.stepIndex = -1
+          state.readOnlyReason = null
         })
       },
 
@@ -396,11 +457,27 @@ export const useCanvasStore = create<CanvasStore>()(
           ...(look.icon !== undefined ? { documentIcon: look.icon } : null),
         }),
 
-      setDocumentRole: (documentRole) => set({ documentRole }),
+      setDocumentRole: (documentRole) =>
+        set((state) => {
+          state.documentRole = documentRole
+          // A viewer is locked out of editing here and only here, so the reason
+          // follows the role. Note the asymmetry with 'presenting': that one is
+          // dropped when the mode ends, this one must not be — the permission
+          // that set it is still in force.
+          if (documentRole === 'viewer') {
+            state.readOnlyReason = 'viewing'
+          } else if (state.readOnlyReason === 'viewing') {
+            state.readOnlyReason = null
+          }
+        }),
 
       setStatus: (status) => set({ status }),
 
       setDarkMode: (enabled) => set({ darkMode: enabled }),
+
+      setReadOnlyReason: (readOnlyReason) => set({ readOnlyReason }),
+
+      canEdit: () => get().readOnlyReason === null,
 
       setGridSize: (size) => set({ gridSize: size }),
 
@@ -494,6 +571,144 @@ export const useCanvasStore = create<CanvasStore>()(
       },
 
       setInspectorTab: (tab) => set({ inspectorTab: tab }),
+
+      /* ------------------------------------------------------------ */
+      /* presentation                                                  */
+      /* ------------------------------------------------------------ */
+
+      steps: () => get().doc.settings.steps,
+
+      addStep: (input) => {
+        const id = uid('step')
+        pushHistory()
+        set((state) => {
+          state.doc.settings.steps.push({ ...input, id })
+        })
+        return id
+      },
+      updateStep: (stepId, patch) => {
+        pushHistory()
+        set((state) => {
+          const step = state.doc.settings.steps.find((s) => s.id === stepId)
+          if (!step) return
+          Object.assign(step, patch)
+        })
+      },
+
+      removeStep: (stepId) => {
+        pushHistory()
+        set((state) => {
+          state.doc.settings.steps = state.doc.settings.steps.filter((s) => s.id !== stepId)
+          // The running index is a position, not a key, so deleting a step before
+          // the current one has to move it back or the presentation jumps a step
+          // ahead and lands somewhere the presenter never chose.
+          const index = state.stepIndex
+          const count = state.doc.settings.steps.length
+          if (index >= count) state.stepIndex = count - 1
+        })
+      },
+
+      moveStep: (stepId, delta) => {
+        pushHistory()
+        set((state) => {
+          const steps = state.doc.settings.steps
+          const from = steps.findIndex((s) => s.id === stepId)
+          if (from < 0) return
+          const to = from + delta
+          if (to < 0 || to >= steps.length) return
+          const [step] = steps.splice(from, 1)
+          steps.splice(to, 0, step)
+        })
+      },
+
+      startPresenting: (fromStepId) => {
+        const steps = get().doc.settings.steps
+        const index = fromStepId ? steps.findIndex((s) => s.id === fromStepId) : -1
+        set((state) => {
+          state.presenting = true
+          state.stepIndex = index >= 0 ? index : 0
+          // Presenting is also a read-only reason: the whole point is that the
+          // thing on the projector cannot be dragged off mid-sentence.
+          //
+          // But it must never *replace* 'viewing'. A viewer who presents would
+          // otherwise have their permission-based lock overwritten by a
+          // mode-based one, and `stopPresenting` would then clear the lot and
+          // leave them editing a document they are only allowed to read. The
+          // stronger reason wins, and the weaker one is never written.
+          if (state.readOnlyReason === null) state.readOnlyReason = 'presenting'
+        })
+        get().goToStep(index >= 0 ? index : 0)
+      },
+
+      stopPresenting: () => {
+        const state = get()
+        set({ presenting: false, stepIndex: -1 })
+        // Only clear the reason if presenting is what set it. A viewer whose
+        // permission is the reason must still be locked after they stop.
+        if (state.readOnlyReason === 'presenting') {
+          set({ readOnlyReason: null })
+        }
+      },
+
+      goToStep: (index) => {
+        const state = get()
+        const steps = state.doc.settings.steps
+        if (steps.length === 0) {
+          set({ stepIndex: -1 })
+          return
+        }
+        const clamped = Math.max(0, Math.min(index, steps.length - 1))
+        const step = steps[clamped]
+        set({ stepIndex: clamped })
+
+        // The target is resolved *now*, from the live document, rather than
+        // stored on the step. A step pointing at a card that was since deleted
+        // then falls back to an establishing shot instead of flying the camera
+        // to nowhere.
+        const page = state.doc.pages.find((p) => p.id === state.activePageId)
+        let bounds: Rect | null = null
+        if (page && step.targetKind === 'card' && step.targetId) {
+          const card = page.cards.find((c) => c.id === step.targetId)
+          if (card) bounds = visualCardRect(card)
+        } else if (page && step.targetKind === 'group' && step.targetId) {
+          const group = page.groups.find((g) => g.id === step.targetId)
+          if (group) bounds = group.position
+        }
+
+        state.requestCamera(
+          stepViewport(bounds, state.viewportSize, step.zoom),
+          step.durationMs,
+        )
+      },
+
+      nextStep: () => {
+        const state = get()
+        const total = state.doc.settings.steps.length
+        if (total === 0) return
+        // Stopping at the end rather than wrapping: a loop that silently
+        // restarts looks like the app forgot what slide it was on.
+        if (state.stepIndex >= total - 1) {
+          state.stopPresenting()
+          return
+        }
+        state.goToStep(state.stepIndex + 1)
+      },
+
+      prevStep: () => {
+        const state = get()
+        if (state.stepIndex <= 0) return
+        state.goToStep(state.stepIndex - 1)
+      },
+
+      requestCamera: (viewport, durationMs) => {
+        set((state) => {
+          state.cameraRequest = {
+            viewport,
+            durationMs,
+            token: state.cameraRequest.token + 1,
+          }
+        })
+      },
 
       toggleDarkMode: () => set((state) => { state.darkMode = !state.darkMode }),
 

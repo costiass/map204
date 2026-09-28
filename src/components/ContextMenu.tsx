@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { StickyNote } from 'lucide-react'
 
 import {
   IconBringFront,
@@ -12,7 +11,6 @@ import {
 } from '@/components/Icons'
 import { useCanvasStore } from '@/store/useCanvasStore'
 import { CARD_ACCENTS, CARD_BACKGROUNDS } from '@/types'
-import { openInsertCard } from '@/components/InsertCardDialog'
 
 export function ContextMenu() {
   const menu = useCanvasStore((s) => s.contextMenu)
@@ -243,16 +241,6 @@ export function ContextMenu() {
             </button>
             <button type="button" onClick={() => { addCard(); close() }}>
               <span className="cc-kbd">C</span> New card here
-            </button>
-            <hr />
-            <button
-              type="button"
-              onClick={() => {
-                close()
-                openInsertCard(menu.x, menu.y)
-              }}
-            >
-              <StickyNote size={14} className="opacity-70" /> Insert a cardÃ¢â‚¬Â¦
             </button>
             <button type="button" onClick={() => { selectAllCards(); close() }}>
               <span className="cc-kbd">Ã¢Å’ËœA</span> Select all cards

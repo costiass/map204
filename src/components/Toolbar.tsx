@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { LoginPage } from '@/components/LoginPage'
+import { InsertCardMenu } from '@/components/InsertCardMenu'
+import { PresentMenu } from '@/components/PresentMenu'
 import { WorkspaceMark } from '@/components/WorkspaceMark'
 import { getWorkspaceAccent, getWorkspaceIconLabel } from '@/theme'
 import { supabase } from '@/lib/supabase'
@@ -32,7 +34,9 @@ import { zoomAtPoint } from '@/utils/geometry'
 
 const SHORTCUTS: Array<[string, string]> = [
   ['C', 'New card'],
+  ['I', 'Insert a card of a chosen kind'],
   ['G', 'New group'],
+  ['P', 'Present'],
   ['Double-click', 'New card at pointer'],
   ['Delete / Backspace', 'Delete selection'],
   ['Ctrl + Z', 'Undo'],
@@ -42,10 +46,12 @@ const SHORTCUTS: Array<[string, string]> = [
   ['Ctrl + D', 'Duplicate selection'],
   ['Space + drag', 'Pan canvas'],
   ['Alt + drag', 'Pan canvas'],
-  ['Scroll', 'Pan · Ctrl + scroll to zoom'],
+  ['Scroll', 'Pan Â· Ctrl + scroll to zoom'],
   ['Shift + click', 'Add to selection'],
   ['Escape', 'Cancel drag / close menus'],
   ['F', 'Fit all cards'],
+  ['← →', 'Move between presentation steps'],
+  ['1 – 9', 'Jump to a presentation step'],
 ]
 
 interface ToolbarProps {
@@ -62,8 +68,8 @@ interface ToolbarProps {
  * The app chrome, in the two rows every editor uses: identity on top, tools
  * below.
  *
- *   row 1  [sidebar] [logo] [document name] ……… [people] [share] [theme] [⋯] [avatar]
- *   row 2  add · history · zoom · grid · search        (canvas route only)
+ *   row 1  [sidebar] [logo] [document name] â€¦â€¦â€¦ [people] [share] [theme] [â‹¯] [avatar]
+ *   row 2  add Â· history Â· zoom Â· grid Â· search        (canvas route only)
  *
  * Row 1 is the same height and the same arrangement on every route, so nothing
  * shifts when you open a workspace. Row 2 appears only on the canvas, and
@@ -182,7 +188,7 @@ export function Toolbar({
   return (
     <header className="cc-topbar z-30 flex-none border-b border-line bg-surface/90 backdrop-blur">
       {/* ---------------------------------------------------------------- */}
-      {/* Row 1 — identity, present on every route                        */}
+      {/* Row 1 â€” identity, present on every route                        */}
       {/* ---------------------------------------------------------------- */}
       <div className="flex h-12 items-center gap-2 px-2 sm:px-3">
         {isCanvas ? (
@@ -243,15 +249,19 @@ export function Toolbar({
         )}
 
         {isCanvas ? (
-          <button
-            type="button"
-            className="cc-btn shrink-0"
-            data-variant="primary"
-            onClick={() => onOpenShare?.()}
-          >
-            <IconShare size={14} />
-            <span className="hidden sm:inline">Share</span>
-          </button>
+          <>
+            <InsertCardMenu />
+            <PresentMenu />
+            <button
+              type="button"
+              className="cc-btn shrink-0"
+              data-variant="primary"
+              onClick={() => onOpenShare?.()}
+            >
+              <IconShare size={14} />
+              <span className="hidden sm:inline">Share</span>
+            </button>
+          </>
         ) : null}
 
         {/* Who else is here, stacked the way Google Docs stacks them.
@@ -320,7 +330,7 @@ export function Toolbar({
             <IconMore size={16} />
           </button>
           {showMore ? (
-            <div className="cc-menu absolute right-0 top-10 z-50 w-56">
+            <div data-anchored="true" className="cc-menu absolute right-0 top-10 z-50 w-56">
               <button
                 type="button"
                 onClick={() => {
@@ -338,7 +348,7 @@ export function Toolbar({
                 }}
               >
                 <IconSearch size={15} /> Search cards
-                <span className="ml-auto text-[11px] text-muted">⌘K</span>
+                <span className="ml-auto text-[11px] text-muted">âŒ˜K</span>
               </button>
               <hr />
               <button
@@ -368,7 +378,7 @@ export function Toolbar({
                   }}
                 >
                   <IconSave size={15} /> Save now
-                  <span className="ml-auto text-[11px] text-muted">⌘S</span>
+                  <span className="ml-auto text-[11px] text-muted">âŒ˜S</span>
                 </button>
               ) : null}
               <hr />
@@ -405,7 +415,7 @@ export function Toolbar({
               )}
             </button>
             {showUserMenu ? (
-              <div className="cc-menu absolute right-0 top-10 z-50 w-52">
+              <div data-anchored="true" className="cc-menu absolute right-0 top-10 z-50 w-52">
                 <div className="border-b border-line px-2 py-1.5">
                   <p className="truncate text-xs font-semibold text-ink">
                     {user.user_metadata?.name ?? user.email}
@@ -453,7 +463,7 @@ export function Toolbar({
       </div>
 
       {/* ---------------------------------------------------------------- */}
-      {/* Row 2 — canvas tools                                             */}
+      {/* Row 2 â€” canvas tools                                             */}
       {/* ---------------------------------------------------------------- */}
       {isCanvas ? (
         <div className="cc-scroll flex h-10 items-center gap-1 overflow-x-auto border-t border-line px-2 sm:px-3">
@@ -569,7 +579,7 @@ export function Toolbar({
                 Keyboard shortcuts
               </h2>
               <button type="button" className="cc-btn px-1.5 py-1" onClick={() => setShowShortcuts(false)}>
-                ✕
+                âœ•
               </button>
             </div>
             <ul className="grid gap-1.5 text-xs">

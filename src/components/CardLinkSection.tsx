@@ -1,10 +1,10 @@
-import { FileText, Play, StickyNote } from 'lucide-react'
+import { FileText, Layers, Play, StickyNote } from 'lucide-react'
 
 import { useCanvasStore } from '@/store/useCanvasStore'
 import type { Card, CardType } from '@/types'
 import { CARD_TYPES, safeEmbedUrl, youtubeVideoId } from '@/utils/embeds'
 
-const ICONS = { note: StickyNote, youtube: Play, pdf: FileText }
+const ICONS = { note: StickyNote, flash: Layers, youtube: Play, pdf: FileText }
 
 /**
  * The kind of a card, and what it points at.
@@ -13,8 +13,8 @@ const ICONS = { note: StickyNote, youtube: Play, pdf: FileText }
  * before you know the video, or created with the wrong one, and a card whose
  * only remedy is "delete it and start again" loses whatever else was on it.
  *
- * Switching a card to a note keeps the link in the body rather than dropping it,
- * so nothing disappears on a misclick.
+ * Switching *away* from a kind with a link keeps the link in the body rather
+ * than dropping it, so nothing disappears on a misclick.
  */
 export function CardLinkSection({ card }: { card: Card }) {
   const updateCard = useCanvasStore((s) => s.updateCard)
@@ -22,9 +22,13 @@ export function CardLinkSection({ card }: { card: Card }) {
 
   const setType = (type: CardType) => {
     if (type === card.type) return
-    if (type === 'note') {
-      const body = card.embed?.url ? `\`\`\`\n${card.embed.url}\n\`\`\`` : card.content
-      updateCard(card.id, { type: 'note', embed: null, content: body || card.content })
+
+    // A flash card shows the title and the body, so it is the one kind that can
+    // absorb what a video or PDF card was holding.
+    if (type === 'note' || type === 'flash') {
+      const link = card.embed?.url
+      const body = link ? `${card.content}\n\n\`\`\`\n${link}\n\`\`\``.trim() : card.content
+      updateCard(card.id, { type, embed: null, content: body })
       return
     }
     updateCard(card.id, { type, embed: card.embed ?? { url: '' } })
@@ -38,7 +42,7 @@ export function CardLinkSection({ card }: { card: Card }) {
   return (
     <section className="border-b border-line px-3 py-2.5">
       <p className="cc-label">Kind</p>
-      <div className="mt-1 grid grid-cols-3 gap-1">
+      <div className="mt-1 grid grid-cols-4 gap-1">
         {CARD_TYPES.map((option) => {
           const Icon = ICONS[option.id]
           const active = card.type === option.id

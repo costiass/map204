@@ -183,12 +183,13 @@ export function youtubeWatchUrl(url: string): string {
 
 export const CARD_TYPES: Array<{ id: CardType; label: string; hint: string }> = [
   { id: 'note', label: 'Note', hint: 'A title and some Markdown' },
+  { id: 'flash', label: 'Flash', hint: 'Two sides, turns over on click' },
   { id: 'youtube', label: 'Video', hint: 'A YouTube link, played in place' },
   { id: 'pdf', label: 'PDF', hint: 'A document, referenced by link' },
 ]
 
 export function isCardType(value: unknown): value is CardType {
-  return value === 'note' || value === 'youtube' || value === 'pdf'
+  return value === 'note' || value === 'flash' || value === 'youtube' || value === 'pdf'
 }
 
 /** The kind a pasted URL most likely wants to be. */
@@ -209,8 +210,8 @@ export function embedFor(type: CardType, rawUrl: string, title?: string): {
   embed: CardEmbed | null
   title: string
 } {
-  if (type === 'note') {
-    return { type: 'note', embed: null, title: title?.trim() || 'Untitled card' }
+  if (type === 'note' || type === 'flash') {
+    return { type, embed: null, title: title?.trim() || (type === 'flash' ? 'Question' : 'Untitled card') }
   }
 
   const url = (rawUrl ?? '').trim()

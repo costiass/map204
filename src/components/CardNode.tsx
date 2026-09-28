@@ -3,6 +3,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 
 import { IconChevron, IconMore } from '@/components/Icons'
 import { CardEmbedView } from '@/components/CardEmbedView'
+import { FlashCard } from '@/components/FlashCard'
 import { useCanvasStore } from '@/store/useCanvasStore'
 import { ANCHORS, COLLAPSED_HEADER_HEIGHT, type Anchor, type Card, type Point } from '@/types'
 import { renderMarkdown } from '@/utils/markdown'
@@ -78,6 +79,90 @@ function CardNodeImpl({
   const addItem = useCallback(() => {
     addChecklistItem(card.id)
   }, [addChecklistItem, card.id])
+
+  // Read from the store as state, not `getState()` inside the render: a card
+  // already on the canvas has to *re-render* when read-only mode starts, and a
+  // one-off read would leave it clickable until something else happened to
+  // repaint it.
+  const readOnlyReason = useCanvasStore((s) => s.readOnlyReason)
+  const editable = readOnlyReason === null
+
+  /* ---------------------------------------------------------------- */
+  /* A flash card is a different shape of thing                         */
+  /* ---------------------------------------------------------------- */
+
+  // A flash card gets no header, and no title input. The front *is* the title,
+  // so a title field above it would say the same thing twice and make the card
+  // look like a note with a question on it. The controls move onto the face
+  // itself, where they sit on top of the card rather than above it.
+  if (card.type === 'flash' && !card.collapsed) {
+    return (
+      <div
+        className="cc-card"
+        style={style}
+        data-card-id={card.id}
+        data-selected={selected ? 'true' : undefined}
+        data-dimmed={dimmed ? 'true' : undefined}
+        data-drag-target={dragTarget ? 'true' : undefined}
+        data-shadow={card.style.shadow ? 'true' : 'false'}
+        onPointerDown={(event) => onCardPointerDown(event, card.id)}
+        onContextMenu={(event) => onContextMenu(event, card.id)}
+      >
+        <span className="cc-card__accent" />
+
+        <FlashCard
+          card={card}
+          editable={editable}
+          onDoubleClick={() => setInspectorTab('content')}
+        />
+
+        <div className="absolute right-1 top-1 flex gap-0.5">
+          <button
+            type="button"
+            className="cc-card__btn"
+            title="Collapse card"
+            data-no-drag=""
+            onPointerDown={stop}
+            onClick={() => toggleCollapsed([card.id])}
+          >
+            <IconChevron
+              size={14}
+              style={{ transform: 'rotate(-90deg)', transition: 'transform 140ms ease' }}
+            />
+          </button>
+          <button
+            type="button"
+            className="cc-card__btn"
+            title="Card menu"
+            data-no-drag=""
+            onPointerDown={stop}
+            onClick={(event) => {
+              const rect = event.currentTarget.getBoundingClientRect()
+              setContextMenu({
+                x: rect.left,
+                y: rect.bottom + 6,
+                cardId: card.id,
+                connectionId: null,
+                groupId: null,
+              })
+            }}
+          >
+            <IconMore size={14} />
+          </button>
+        </div>
+
+        {ANCHORS.map((side) => (
+          <span
+            key={side}
+            className="cc-handle"
+            data-side={side}
+            title={`Drag to connect from the ${side}`}
+            onPointerDown={(event) => onHandlePointerDown(event, card.id, side)}
+          />
+        ))}
+      </div>
+    )
+  }
 
   return (
     <div

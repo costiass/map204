@@ -140,10 +140,16 @@ Work to do, in the order it makes sense. Each item is checked off as it lands.
 
 ## Other kinds of card
 
-- [ ] **A card can be more than text.** An insert button, beside the existing
-      card controls, offering card types beyond a Markdown body. Each type is a
+- [x] **A card can be more than text.** An **Insert** button in the toolbar,
+      beside Share, offering card types beyond a Markdown body. Each type is a
       separate thing that does one job — not one embed field with a dropdown
       bolted on, which is how a single unreadable card type happens.
+  - [x] **The toolbar, not the right-click menu.** A context menu is a place you
+        have to already know to go, and the first thing a new card kind can do is
+        *be noticed*. A button in the toolbar is on screen the whole time.
+  - [x] Choosing a kind is one click, not a dialog. A note and a flash card need
+        nothing else and appear at once; the two kinds that point at something
+        open the link dialog already set to that kind.
 
   ### The types
 
@@ -155,6 +161,20 @@ Work to do, in the order it makes sense. Each item is checked off as it lands.
   - [x] **PDF.** A link, with an opt-in in-place preview. A preview needs the
         server to allow framing and many do not, so it is a button rather than a
         default, and the link is always there when framing is refused.
+  - [x] **Flash card.** The title on one side, the body on the other, a click
+        turns it over.
+    - [x] It has no header and no title field, because the front *is* the title
+          and a field above it would say the same thing twice.
+    - [x] The perspective is on an inner wrapper, never the card root. The root
+          is what the canvas positions, measures and transforms; a 3D context
+          there would change its layout box and dragging would drift.
+    - [x] **A click and a double click are told apart.** A double click is two
+          clicks, and firing both would turn the card over twice — which is to
+          say, not at all — while also opening the editor. The flip waits for a
+          second click that never comes. A card you cannot read is worse than a
+          card that opens an editor slightly late.
+    - [x] A card with nothing on the back says so, and does not pretend a second
+          side exists.
   - [ ] **Google event.** A card that refers to an event on a connected person's
         Google Calendar, and can create one.
 
@@ -165,35 +185,81 @@ Work to do, in the order it makes sense. Each item is checked off as it lands.
   - [x] The kind is guessed from a pasted link, so pasting a YouTube URL and
         being asked which kind it is would be a question the form should answer.
   - [x] The kind and the link can be changed afterwards in the inspector, and
-        switching to a note keeps the link in the body rather than dropping it.
+        switching to a note or a flash card keeps the link in the body rather
+        than dropping it.
   - [x] **No unvalidated URL reaches an iframe.** A pasted `javascript:` or
         `data:` URL in a card is code execution in the reader's session, so every
         `src` is http(s)-checked, and a YouTube player URL is *built* from the
         extracted id — a card that claims to be a video but points elsewhere
         shows a link, not that somewhere. Asserted by `npm run test:embeds`.
+  - [x] `npm run test:card-types` covers what has no other test: old documents
+        open unchanged, every kind survives export and import with its payload,
+        and hostile input in a file — an unknown kind, a non-string URL, a
+        `start: 'nope'` — is rejected rather than trusted.
 
-  ### Decided before any of it is built
+## Presenting
 
-  - [ ] **What a card type is in the data model.** A `type` plus a payload that
-        only that type reads, rather than new columns for every type. Everything
-        else follows from this, and it is cheaper to answer now than after three
-        types exist.
-  - [ ] **The self-contained types and the account-backed type are different
-        products.** A video and a PDF work for anyone, offline, from the file
-        alone. A Google event only exists on somebody's calendar. They should not
-        share a mental model, and an export containing one of each is two
-        different questions.
-  - [ ] **Whose calendar, for a shared workspace.** If one person creates a Google
-        event card and shares the workspace, does the collaborator see the event —
-        which means sharing it with *their* account or making it public — or only
-        a reference to something on the creator's calendar they cannot open? This
-        is a privacy question, not a UI one, and it is the first thing to answer.
-  - [ ] **What a calendar connection actually costs.** OAuth, a refresh token
-        held at rest, token expiry and renewal, and revocation when somebody
-        disconnects. That is a larger piece of work than the card, and it is the
-        only part of this list that can fail in ways the other two cannot.
-  - [ ] **What an exported file containing one of these means.** A video card
-        still works. A calendar card is a reference that may resolve to nothing.
+- [x] **Presentation mode.** The map with the camera moved. No toolbar, no
+      sidebar, no inspector: the app hands the screen over, because a panel of
+      controls is both something the audience should not be looking at and a way
+      to change the map mid-sentence.
+  - [x] `←` `→` `Space` move, `Esc` leaves, `1`–`9` jump, clicking the empty
+        canvas advances and clicking a card does not, so reading a card is not a
+        way to lose your place. The bar hides until the mouse goes near it.
+  - [x] **The camera is eased and zoom is interpolated on a log scale.** A linear
+        move reads as a mechanical jump between two stills, and a linear zoom
+        from 0.5 to 2 barely moves for its first half.
+  - [x] **It stops at the end** rather than wrapping, and a loop that silently
+        restarts looks like the app forgetting which slide it was on.
+
+- [x] **Steps.** Each one names a card, a group, or the whole page, and carries
+      a zoom. They live in the document's own settings, so a presentation travels
+      in an export and needs no migration.
+  - [x] **A step's zoom is captured from the camera, not typed.** Frame a card
+        the way you want it seen and add a step; the zoom is whatever the canvas
+        was doing. Typing "1.4" says nothing about whether the card fits, and
+        re-capturing is how a step gets retuned.
+  - [x] **A step never crops its target.** The zoom is capped at what actually
+        fits, because a step that shows the middle of the card you meant to point
+        at is the one thing a presentation cannot do.
+  - [x] The cap is computed separately from `fitViewport`, which stops at 1× on
+        purpose — fitting a page should never magnify it, and a step is the
+        opposite case.
+  - [x] A step pointing at a card that has since been deleted falls back to an
+        establishing shot rather than flying the camera nowhere.
+  - [x] Steps are clamped on load: a zoom of `NaN` or 900, a duration of nine
+        billion milliseconds, and a duplicate id are all dropped or bounded,
+        because a bad step from a shared file would otherwise move the camera
+        somewhere absurd on a keypress.
+
+- [x] **View only is the same mechanism.** A viewer is locked out of editing by
+      the same `readOnlyReason` a presenter sets, and the *reason* is kept
+      because the two are not the same thing: one is a choice that can be ended,
+      the other is a permission that cannot.
+  - [x] Presenting must never overwrite the viewer's lock. It did, once, and
+        `stopPresenting` then cleared the lot — so a viewer could present their
+        way to an editable canvas. `npm run test:read-only` asserts it.
+  - [x] The lock does not follow you to another workspace; the role for the new
+        one sets it again.
+  - [x] Panning and zooming still work, because being unable to look around a map
+        you may not change is the one thing that would make the mode useless.
+  - [x] An editing key a viewer presses says the workspace is view only, rather
+        than doing nothing and looking like a broken key.
+  - [x] A canvas that cannot be edited shows no inspector. A panel of controls
+        that quietly do not work is worse than no panel, because it looks like it
+        does.
+
+  ### Still to decide
+
+  - [ ] **What a presenter's notes are.** A step that reminds you what to say is
+        more useful than one that only remembers where to look, and the field
+        exists in the model with nothing able to write it. Either give it an
+        editor, or take it out — a field no code can set is a field that will be
+        wrong one day.
+  - [ ] **Whether a viewer should be able to *be shown* a presentation without
+        being able to start one.** Right now a viewer can start one, which is
+        probably right — it changes no data — but it is a decision rather than an
+        obvious one.
 
 ## Notes
 

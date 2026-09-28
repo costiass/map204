@@ -75,13 +75,14 @@ export interface CardStyle {
  * worse than three cards that are each one thing.
  *
  *   note      the original: a title and a Markdown body
+ *   flash     two sides, and a click turns it over
  *   youtube   a video, rendered from a YouTube id
  *   pdf       a document, referenced by URL
  *
  * `note` is the default everywhere, so a document written before this existed
  * needs no migration: a card with no `type` is a note.
  */
-export type CardType = 'note' | 'youtube' | 'pdf'
+export type CardType = 'note' | 'flash' | 'youtube' | 'pdf'
 
 /**
  * The thing a non-note card refers to.
@@ -182,6 +183,31 @@ export interface Page {
 }
 
 /**
+ * One step of a presentation: what to show, and how closely.
+ *
+ * The target is a card *or* a group — a group being the natural way to frame a
+ * section of a map, which is the thing a presentation actually wants to point
+ * at. The zoom is absolute rather than a multiplier because "the same size as
+ * last time" is not a thing you can reason about while presenting; 1.4 either
+ * means the same thing every time or the reader has no idea.
+ */
+export interface PresentationStep {
+  id: string
+  /** A card or group on the page. `null` for an establishing shot of the page. */
+  targetId: string | null
+  targetKind: 'card' | 'group' | 'page'
+  /** How close to come. Clamped to the app's zoom limits, and never more than
+   *  the target actually fits at — see `stepViewport`. */
+  zoom: number
+  /**
+   * How long the camera takes to arrive, in ms. Zero snaps. Longer reads as a
+   * deliberate move rather than a jump, which is the difference between a
+   * presentation and a slideshow.
+   */
+  durationMs: number
+}
+
+/**
  * Document-wide choices, stored with the document so an exported file carries
  * the look of the workspace with it. `setDefaultCardStyle` / right-click →
  * "Set as default style" writes here; new objects inherit from it.
@@ -195,6 +221,15 @@ export interface DocSettings {
    * with "Set as default for new links".
    */
   defaultRelationshipType: string
+  /**
+   * The presentation, in order.
+   *
+   * It lives here rather than in a table of its own because it is per-document
+   * and `settings` is already per-document JSONB — so a presentation travels in
+   * an export and needs no migration. It is not a *default* like the two fields
+   * above, and the name says so.
+   */
+  steps: PresentationStep[]
 }
 
 export interface CanvasDoc {
@@ -311,5 +346,6 @@ export function createDefaultSettings(): DocSettings {
     defaultCardStyle: { ...DEFAULT_CARD_STYLE },
     defaultConnectionStyle: { ...DEFAULT_CONNECTION_STYLE },
     defaultRelationshipType: DEFAULT_RELATIONSHIP,
+    steps: [],
   }
 }
