@@ -165,9 +165,93 @@ export function youtubeEmbedUrl(url: string, startSeconds?: number | null): stri
 }
 
 /** A thumbnail for a video, which is far cheaper than loading the player. */
+/**
+ * A thumbnail for a YouTube video, or `null`.
+ *
+ * Prefers `maxresdefault` (1280x720, the video's own shape) and falls back
+ * through the smaller sizes.
+ *
+ * The fallback matters: `hqdefault` is **480x360**, which is 4:3 with black
+ * letterbox bars above and below a 16:9 image. Reading that file's dimensions as
+ * the video's aspect is how an element ends up 4:3 and cropping the sides off
+ * every video in it. The sizes below are listed worst-acceptable first so the
+ * caller can tell which one it got — see `isPaddedThumbnail`.
+ */
+const YOUTUBE_THUMBNAIL_SIZES = [
+  'maxresdefault', // 1280x720, and the real aspect
+  'sddefault', // 640x480, also 4:3 padded
+  'hqdefault', // 480x360, also 4:3 padded
+  'mqdefault', // 320x180, always 16:9 and never padded
+] as const
+
 export function youtubeThumbnailUrl(url: string): string | null {
   const id = youtubeVideoId(url)
   return id ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : null
+}
+
+/** The same thumbnail, at the best size that exists for this video. */
+export function youtubeThumbnailUrlFor(
+  url: string,
+  preferred: (typeof YOUTUBE_THUMBNAIL_SIZES)[number] = 'maxresdefault',
+): string | null {
+  const id = youtubeVideoId(url)
+  return id ? `https://i.ytimg.com/vi/${id}/${preferred}.jpg` : null
+}
+
+export { YOUTUBE_THUMBNAIL_SIZES }
+
+/**
+ * YouTube's older thumbnail sizes are 4:3 with the video letterboxed inside.
+ *
+ * A 480x360 file holding a 16:9 video has 45px of black bar top and bottom, so
+ * the *visible* image is 480x270 — which is 16:9. Detecting the bars is how a
+ * real 4:3 video can be told apart from a 16:9 one shown in a 4:3 file, without
+ * an API key and without loading the video.
+ *
+ * Returns the aspect to use, or `null` if the bars were not found — in which case
+ * the caller should keep whatever it had rather than guess.
+ */
+export function aspectFromThumbnail(image: HTMLImageElement): number | null {
+  const w = image.naturalWidth
+  const h = image.naturalHeight
+  if (!w || !h) return null
+
+  // The padded files are exactly 4:3. Anything else is already the video's shape.
+  const ratio = w / h
+  if (Math.abs(ratio - 4 / 3) > 0.02) return ratio
+
+  // Scan a column down the middle for the first row that is not black.
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  if (!ctx) return null
+  try {
+    ctx.drawImage(image, 0, 0)
+  } catch {
+    // A cross-origin image taints the canvas, and reading it throws. The
+    // thumbnails are served with permissive CORS, so this is a fallback rather
+    // than the expected path — but returning null is right either way.
+    return null
+  }
+
+  const { data } = ctx.getImageData(0, 0, w, h)
+  const isBlackRow = (y: number): boolean => {
+    for (let x = 0; x < w; x += Math.max(1, Math.floor(w / 32))) {
+      const i = (y * w + x) * 4
+      if (data[i] > 24 || data[i + 1] > 24 || data[i + 2] > 24) return false
+    }
+    return true
+  }
+
+  let top = 0
+  while (top < h / 2 && isBlackRow(top)) top += 1
+  let bottom = h - 1
+  while (bottom > h / 2 && isBlackRow(bottom)) bottom -= 1
+
+  const visibleHeight = bottom - top + 1
+  if (visibleHeight < h * 0.4) return null
+  return w / visibleHeight
 }
 
 /** The watch URL, for "open on YouTube". */

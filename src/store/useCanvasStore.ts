@@ -325,6 +325,22 @@ export interface CanvasStore {
   /** A flash deck. A deck of one is a single card, and always has been. */
   stepFlashDeck: (elementId: string, delta: number) => void
   setFlashFacing: (elementId: string, facing: 'front' | 'back') => void
+
+  /**
+   * Records a video's real aspect once its thumbnail has loaded.
+   *
+   * A *derived fact*, not an edit. It must not push undo — otherwise undo after
+   * opening a document lands on "the video's aspect changed" instead of on the
+   * person's last actual change — and it must not mark the document dirty, so
+   * merely looking at a map does not start a save.
+   *
+   * The element's *height* is not changed here either. Resizing a video because
+   * its shape was learned would move everything below it, which is a surprise
+   * for something the person did not do. The aspect is used for the next resize,
+   * and the box on screen already shows the whole frame because the renderer
+   * contains rather than covers.
+   */
+  learnVideoAspect: (elementId: string, aspect: number) => void
   addFlashCard: (elementId: string) => void
   removeFlashCard: (elementId: string, at: number) => void
 
@@ -1171,6 +1187,21 @@ export const useCanvasStore = create<CanvasStore>()(
           if (!element || element.kind !== 'flash') return
           element.showing = facing
           element.updatedAt = new Date().toISOString()
+        })
+      },
+
+      learnVideoAspect: (elementId, aspect) => {
+        // Guarded twice: a nonsense aspect would collapse every later resize,
+        // and an element that is not a video has no aspect to learn.
+        if (!Number.isFinite(aspect) || aspect <= 0.05 || aspect > 10) return
+        // `set` rather than `withPage`, so no `updatedAt` is stamped and the
+        // document is not marked dirty. See the note on the interface.
+        set((draft) => {
+          const page = draft.doc.pages.find((p) => p.id === draft.activePageId)
+          const element = page?.elements.find((e) => e.id === elementId)
+          if (!element || element.kind !== 'video') return
+          if (Math.abs((element.aspect ?? 0) - aspect) < 0.02) return
+          element.aspect = aspect
         })
       },
 

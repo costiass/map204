@@ -174,15 +174,18 @@ export function resizeElement(
   const aspect = options.aspect ?? (element.kind === 'video' ? aspectOf(element) : null)
   if (aspect && aspect > 0.01) {
     if (leading === 'width') {
-      element.width = Math.max(40, size.width)
+      // Rounded, so a video sits on whole pixels. The grid is drawn in whole
+      // pixels, and a video's height derived from a fractional width lands
+      // between two rows and looks like it is not quite on the grid.
+      element.width = Math.max(40, Math.round(size.width))
       element.height = Math.max(40, Math.round(element.width / aspect))
     } else {
-      element.height = Math.max(40, size.height)
+      element.height = Math.max(40, Math.round(size.height))
       element.width = Math.max(40, Math.round(element.height * aspect))
     }
   } else {
-    element.width = Math.max(40, size.width)
-    element.height = Math.max(40, size.height)
+    element.width = Math.max(40, Math.round(size.width))
+    element.height = Math.max(40, Math.round(size.height))
   }
   element.updatedAt = now()
   page.updatedAt = now()

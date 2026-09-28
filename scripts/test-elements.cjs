@@ -102,6 +102,53 @@ if (notAVideo.url !== 'https://example.com/not-a-video') {
 // distinguishable from one that has a URL that happens to be unplayable.
 const emptyVideo = m.normalizeElement({ kind: 'video', width: 400, height: 300 })
 if (emptyVideo.url !== '') fail(\`a video with no URL got "\${emptyVideo.url}"\`)
+
+/* --- a new video is created at the shape it is given ---------------- */
+//
+// Every video used to be created 16:9 whatever it held, because the maker had
+// no idea what the video was until its thumbnail loaded - and the renderer then
+// *covered* the box with that thumbnail, so a 4:3 video lost its sides and a
+// tall one lost its top. A caller that knows the shape gets a box of that shape.
+const widescreen = m.createElement('video', {}, { x: 0, y: 0 })
+if (Math.abs(widescreen.width / widescreen.height - 16 / 9) > 0.02) {
+  fail(\`a video with no known shape is \${widescreen.width}x\${widescreen.height}\`)
+}
+const fourThree = m.createElement('video', { aspect: 4 / 3 }, { x: 0, y: 0 })
+if (Math.abs(fourThree.width / fourThree.height - 4 / 3) > 0.02) {
+  fail(\`a 4:3 video was created \${fourThree.width}x\${fourThree.height}\`)
+}
+// A nonsense shape is refused rather than producing a box nobody can see.
+for (const bad of [0, -1, 1e9, Number.NaN]) {
+  const made = m.createElement('video', { aspect: bad }, { x: 0, y: 0 })
+  if (!(made.aspect > 0.05 && made.aspect < 10)) {
+    fail(\`an aspect of \${bad} was kept: \${made.aspect}\`)
+  }
+}
+
+/* --- every kind has a style and tags -------------------------------- */
+//
+// These were on the note, so a video, a deck, a PDF and a table had neither -
+// which meant they could not be coloured, labelled, or found by a filter, and
+// the settings panel could only offer a colour picker to one kind.
+for (const kind of ['note', 'video', 'flash', 'pdf', 'table', 'link']) {
+  const made = m.createElement(kind, {}, { x: 0, y: 0 })
+  if (!made.style || typeof made.style.backgroundColor !== 'string') {
+    fail(\`a \${kind} has no style, so it cannot be coloured\`)
+  }
+  if (!Array.isArray(made.tags)) {
+    fail(\`a \${kind} has no tags, so it cannot be labelled or filtered\`)
+  }
+}
+// A video's frame is black, because a white frame around a black player reads as
+// a rendering fault.
+if (m.createElement('video', {}, { x: 0, y: 0 }).style.backgroundColor === '#ffffff') {
+  fail('a new video was created with a white background')
+}
+// Tags survive on any kind, which is the point of them being on the base.
+const taggedVideo = m.normalizeElement({ kind: 'video', tags: ['lecture', 'week 1'] })
+if (taggedVideo.tags.join(',') !== 'lecture,week 1') {
+  fail(\`a video lost its tags: \${JSON.stringify(taggedVideo.tags)}\`)
+}
 // A stored aspect of zero would collapse every resize, so it is refused — and
 // the *size* is left exactly as it was, because the aspect governs future
 // resizes, not what is on screen now. Reshaping an element on load would move

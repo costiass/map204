@@ -1,13 +1,17 @@
 import { useState } from 'react'
 import { ExternalLink, FileText, Play } from 'lucide-react'
 
+import { useCanvasStore } from '@/store/useCanvasStore'
+
 import type { PdfElement, VideoElement } from '@/types'
 import {
   embedHost,
   safeEmbedUrl,
   youtubeEmbedUrl,
   youtubeThumbnailUrl,
+  youtubeThumbnailUrlFor,
   youtubeVideoId,
+  aspectFromThumbnail,
 } from '@/utils/embeds'
 
 /**
@@ -42,8 +46,13 @@ function VideoView({ element }: { element: VideoElement }) {
   const wantsPlayer = element.display === 'player'
 
   const player = youtubeEmbedUrl(element.url, element.startSeconds)
-  const thumbnail = youtubeThumbnailUrl(element.url)
   const videoId = youtubeVideoId(element.url)
+  // `maxresdefault` is the video's own shape; the older sizes are 4:3 with
+  // letterbox bars, which is how the element used to end up 4:3 and cropping
+  // every video in it. The image falls back on its own if that size does not
+  // exist for this video.
+  const thumbnail = youtubeThumbnailUrlFor(element.url) ?? youtubeThumbnailUrl(element.url)
+  const learnVideoAspect = useCanvasStore((s) => s.learnVideoAspect)
 
   if (!videoId) {
     return (
@@ -66,12 +75,33 @@ function VideoView({ element }: { element: VideoElement }) {
         style={{ aspectRatio: `${element.aspect || 16 / 9}` }}
         title="Play this video"
       >
+        {/*
+          `object-contain`, not `object-cover`.
+
+          Cover fills the box and crops whatever does not fit, so a video whose
+          real shape differs from the element's is silently cut off at the sides
+          or the top — and the element looks correct because the box *is* the
+          element. Contain shows the whole frame; where the shapes disagree the
+          difference is letterboxing, which is visible and truthful.
+        */}
         {thumbnail ? (
           <img
             src={thumbnail}
             alt=""
             draggable={false}
-            className="h-full w-full object-cover opacity-85 transition group-hover:opacity-100"
+            // The real shape, learned from the thumbnail. `onLoad` because the
+            // dimensions are not knowable before it has loaded, and reading the
+            // element's own size would just measure the box we are trying to fix.
+            onLoad={(event) => {
+              const measured = aspectFromThumbnail(event.currentTarget)
+              if (measured && Math.abs(measured - (element.aspect ?? 0)) > 0.02) {
+                // Written straight to the element rather than through the store:
+                // this is a correction to a derived fact, not an edit the person
+                // made, and it must not land in the undo history.
+                learnVideoAspect(element.id, measured)
+              }
+            }}
+            className="h-full w-full object-contain opacity-90 transition group-hover:opacity-100"
           />
         ) : null}
         <span className="absolute inset-0 grid place-items-center">

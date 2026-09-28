@@ -436,18 +436,27 @@ export function createElement(
   switch (kind) {
     case 'video': {
       const width = DEFAULT_ELEMENT_SIZE.width * 1.4
+      // A caller that already knows the video's real shape gets a box of that
+      // shape. Nobody does at insert time — the thumbnail has not loaded — so this
+      // is 16:9 in practice, and `learnVideoAspect` corrects it once the
+      // thumbnail is in. The alternative, guessing, is what made every video
+      // element 16:9 regardless of what it held.
+      const aspect =
+        typeof input.aspect === 'number' && input.aspect > 0.05 && input.aspect < 10
+          ? input.aspect
+          : DEFAULT_VIDEO_ASPECT
       return {
-        ...baseOf({ ...input, id, createdAt: stamp, updatedAt: stamp }, at),
+        ...baseOf({ ...input, id, createdAt: stamp, updatedAt: stamp }, at, 'video'),
         width,
         // Height from the aspect, so a new video is never created stretched.
-        height: Math.round(width / DEFAULT_VIDEO_ASPECT),
+        height: Math.round(width / aspect),
         kind: 'video',
         title: str(input.title, 'Video'),
         url: str(input.url),
         startSeconds: typeof input.startSeconds === 'number' ? input.startSeconds : null,
         display: oneOf(input.display, ['thumbnail', 'player'] as const, 'thumbnail'),
         keepAspect: true,
-        aspect: DEFAULT_VIDEO_ASPECT,
+        aspect,
       }
     }
     case 'table': {
