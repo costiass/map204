@@ -1,4 +1,4 @@
-import type { ConnectionStyle, NoteStyle } from './schema'
+import type { ConnectionStyle, ElementStyle } from './schema'
 
 /**
  * The defaults a new element starts with.
@@ -11,7 +11,7 @@ import type { ConnectionStyle, NoteStyle } from './schema'
  * can change and which travel with an export, are applied on top of these.
  */
 
-export const DEFAULT_NOTE_STYLE: NoteStyle = {
+export const DEFAULT_NOTE_STYLE: ElementStyle = {
   backgroundColor: '#ffffff',
   accentColor: '#6366F1',
   textColor: '#111827',
@@ -19,6 +19,52 @@ export const DEFAULT_NOTE_STYLE: NoteStyle = {
   borderWidth: 1,
   borderRadius: 12,
   shadow: true,
+}
+
+/**
+ * A video's frame.
+ *
+ * Black, because that is what a video *is* — a letterboxed rectangle. A white
+ * frame around a black player reads as a rendering fault, and a coloured one
+ * fights the footage.
+ *
+ * The accent stays the document's: a video can be *tagged* with a colour for
+ * filtering, and that is a different thing from how it looks.
+ */
+export const DEFAULT_VIDEO_STYLE: ElementStyle = {
+  backgroundColor: '#0B0B0F',
+  accentColor: '#EF4444',
+  textColor: '#F9FAFB',
+  borderColor: '#1F2937',
+  borderWidth: 1,
+  borderRadius: 12,
+  shadow: true,
+}
+
+/** A flash deck reads as a card, so it starts like a note. */
+export const DEFAULT_FLASH_STYLE: ElementStyle = { ...DEFAULT_NOTE_STYLE }
+
+/** A PDF is a sheet of paper. */
+export const DEFAULT_PDF_STYLE: ElementStyle = {
+  ...DEFAULT_NOTE_STYLE,
+  backgroundColor: '#FAFAFA',
+  borderColor: '#D1D5DB',
+}
+
+/** A table is text on a page, and reads better with less rounding. */
+export const DEFAULT_TABLE_STYLE: ElementStyle = {
+  ...DEFAULT_NOTE_STYLE,
+  borderRadius: 6,
+}
+
+/** The style a kind gets when nothing has been said about it. */
+export const DEFAULT_STYLE_BY_KIND: Record<string, ElementStyle> = {
+  note: DEFAULT_NOTE_STYLE,
+  video: DEFAULT_VIDEO_STYLE,
+  flash: DEFAULT_FLASH_STYLE,
+  pdf: DEFAULT_PDF_STYLE,
+  table: DEFAULT_TABLE_STYLE,
+  link: DEFAULT_NOTE_STYLE,
 }
 
 export const DEFAULT_CONNECTION_STYLE_V2: ConnectionStyle & { relationshipType: string } = {

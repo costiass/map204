@@ -48,11 +48,15 @@ import {
   type DocSettings,
   type Element,
   type Group,
-  type NoteStyle,
+  type ElementStyle,
   type Page,
   type PresentationStepV2,
 } from './schema'
-import { DEFAULT_NOTE_STYLE, DEFAULT_CONNECTION_STYLE_V2 } from './defaults'
+import {
+  DEFAULT_NOTE_STYLE,
+  DEFAULT_CONNECTION_STYLE_V2,
+  DEFAULT_STYLE_BY_KIND,
+} from './defaults'
 
 /** The version 1 shapes, as loosely as they need to be described. */
 interface V1Card {
@@ -121,17 +125,24 @@ function mintId(prefix: string): string {
   return `${prefix}_v2_${counter.toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 }
 
-function noteStyleOf(raw: unknown): NoteStyle {
-  if (!isRecord(raw)) return { ...DEFAULT_NOTE_STYLE }
-  const base = DEFAULT_NOTE_STYLE
+/**
+ * A version 1 card's style, read onto whichever kind it became.
+ *
+ * A v1 video card had a note's white background, because a video *was* a card.
+ * Keeping that is the honest translation — the person chose those colours — and
+ * the new video default applies only to videos made from now on.
+ */
+function styleOf(raw: unknown, kind: string): ElementStyle {
+  const fallback = DEFAULT_STYLE_BY_KIND[kind] ?? DEFAULT_NOTE_STYLE
+  if (!isRecord(raw)) return { ...fallback }
   return {
-    backgroundColor: str(raw.backgroundColor, base.backgroundColor),
-    accentColor: str(raw.accentColor, base.accentColor),
-    textColor: str(raw.textColor, base.textColor),
-    borderColor: str(raw.borderColor, base.borderColor),
-    borderWidth: num(raw.borderWidth, base.borderWidth),
-    borderRadius: num(raw.borderRadius, base.borderRadius),
-    shadow: typeof raw.shadow === 'boolean' ? raw.shadow : base.shadow,
+    backgroundColor: str(raw.backgroundColor, fallback.backgroundColor),
+    accentColor: str(raw.accentColor, fallback.accentColor),
+    textColor: str(raw.textColor, fallback.textColor),
+    borderColor: str(raw.borderColor, fallback.borderColor),
+    borderWidth: num(raw.borderWidth, fallback.borderWidth),
+    borderRadius: num(raw.borderRadius, fallback.borderRadius),
+    shadow: typeof raw.shadow === 'boolean' ? raw.shadow : fallback.shadow,
   }
 }
 
@@ -167,6 +178,9 @@ function convertCard(raw: unknown, index: number, stamp: string): Element | null
   const card = raw as V1Card
 
   const position = isRecord(card.position) ? card.position : {}
+  // The base is built before the kind is known, because the kind decides the
+  // *style* default. So `style` is filled in per case below, and only the
+  // fields that are the same for every kind live here.
   const base = {
     id: str(card.id) || mintId('el'),
     x: num(position.x, index * 40 + 40),
@@ -176,6 +190,12 @@ function convertCard(raw: unknown, index: number, stamp: string): Element | null
     zIndex: num(position.zIndex, 1),
     createdAt: str(card.createdAt) || stamp,
     updatedAt: str(card.updatedAt) || stamp,
+    // Tags were a note's field in version 1. They are the base's now, so a video
+    // or a deck can be labelled, and so a label survives the migration whatever
+    // kind the card became.
+    tags: Array.isArray(card.tags)
+      ? card.tags.filter((tag): tag is string => typeof tag === 'string')
+      : [],
     ...(card.collapsed === true ? { collapsed: true } : {}),
   }
 
@@ -195,7 +215,7 @@ function convertCard(raw: unknown, index: number, stamp: string): Element | null
         kind: 'note',
         title,
         body,
-        style: noteStyleOf(card.style),
+        style: styleOf(card.style, 'note'),
         checklist: Array.isArray(card.checklist)
           ? card.checklist.flatMap((item) => {
               if (!isRecord(item) || typeof item.id !== 'string') return []
@@ -224,11 +244,13 @@ function convertCard(raw: unknown, index: number, stamp: string): Element | null
         ...base,
         kind: 'flash',
         title,
+        style: styleOf(card.style, 'flash'),
         cards: [[{ id: mintId('face'), text: title }, { id: mintId('face'), text: body }]],
         cardIndex: 0,
         showing: 'front',
         presentation: 'single',
         hideAnswer: true,
+        answerFit: 'center' as const,
       }
     }
 
@@ -242,6 +264,7 @@ function convertCard(raw: unknown, index: number, stamp: string): Element | null
       return {
         ...base,
         kind: 'video',
+        style: styleOf(card.style, 'video'),
         title: title === 'Untitled' ? `Video ${id}` : title,
         url,
         startSeconds: fromLink ?? (embedStart > 0 ? embedStart : null),
@@ -257,6 +280,7 @@ function convertCard(raw: unknown, index: number, stamp: string): Element | null
         ...base,
         kind: 'pdf',
         title,
+        style: styleOf(card.style, 'pdf'),
         file: null,
         url,
         display: 'chip',
@@ -479,7 +503,7 @@ export function migrateToV2(input: unknown): MigrationResult {
     // Version 1 called the card style `defaultCardStyle`; version 2 calls it the
     // note style, because there is more than one kind of style now and "card" is
     // no longer a word that means anything.
-    defaultNoteStyle: noteStyleOf(rawSettings.defaultCardStyle),
+    defaultNoteStyle: styleOf(rawSettings.defaultCardStyle, 'note'),
     defaultConnectionStyle: DEFAULT_CONNECTION_STYLE_V2,
     defaultRelationshipType: str(rawSettings.defaultRelationshipType, 'related to'),
     // Steps survive with their `targetKind` renamed, because they used to point

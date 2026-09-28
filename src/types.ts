@@ -89,7 +89,7 @@ export type {
   LinkElement,
   NoteChecklistItem as ChecklistItem,
   NoteElement,
-  NoteStyle as CardStyle,
+  ElementStyle as CardStyle,
   Page,
   PdfElement,
   PresentationStepV2 as PresentationStep,

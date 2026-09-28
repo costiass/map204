@@ -57,8 +57,6 @@ function ElementNodeImpl({
   onHandlePointerDown,
   onContextMenu,
 }: ElementNodeProps) {
-  const updateElement = useCanvasStore((s) => s.updateElement)
-  const flushCommit = useCanvasStore((s) => s.flushCommit)
   const toggleElementCollapsed = useCanvasStore((s) => s.toggleElementCollapsed)
   const setContextMenu = useCanvasStore((s) => s.setContextMenu)
   const setInspectorTab = useCanvasStore((s) => s.setInspectorTab)
@@ -88,13 +86,6 @@ function ElementNodeImpl({
   } as CSSProperties
 
   const stop = (event: React.SyntheticEvent) => event.stopPropagation()
-
-  const handleTitleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    event.stopPropagation()
-    if (event.key === 'Enter' || event.key === 'Escape') {
-      event.currentTarget.blur()
-    }
-  }
 
   // Read from the store as state, not `getState()` inside the render: an element
   // already on the canvas has to *re-render* when read-only mode starts, and a
@@ -213,31 +204,40 @@ function ElementNodeImpl({
     >
       <span className="cc-card__accent" />
 
-      <header className="cc-card__header">
-        <input
-          className="cc-card__title"
-          value={element.title}
-          placeholder="Untitled"
-          spellCheck={false}
-          aria-label="Element title"
-          // Selects the element, but lets the caret move so the title stays
-          // editable.
-          data-no-drag=""
-          onKeyDown={handleTitleKeyDown}
-          onChange={(event) => updateElement(element.id, { title: event.target.value }, { silent: true })}
-          onBlur={() => flushCommit()}
-        />
+      {/*
+        The header is a *drag handle*, not a text field.
+
+        An editable title on the element meant two conflicting gestures on the
+        same 20 pixels: press and move is a drag, press and type is a rename, and
+        which one you got depended on how far your hand moved before the caret
+        appeared. So the title is read here and written in the inspector, where
+        there is a field that is plainly for editing.
+
+        `data-no-drag` is deliberately *not* on it, so the pointerdown reaches the
+        element and starts a drag.
+      */}
+      <header className="cc-card__header" title={element.title || 'Untitled'}>
+        <span className="cc-card__title">{element.title || 'Untitled'}</span>
         <button
           type="button"
           className="cc-card__btn"
           title={element.collapsed ? 'Expand element' : 'Collapse element'}
+          aria-label={element.collapsed ? 'Expand element' : 'Collapse element'}
+          aria-expanded={!element.collapsed}
           onPointerDown={stop}
           onClick={() => toggleElementCollapsed([element.id])}
         >
+          {/*
+            The chevron points the way the *click* goes, not the way the element
+            is currently folded. Collapsed, it points down to unfold; expanded, it
+            points up to fold. The old version rotated the other way, so a
+            collapsed card showed a down-chevron as though it were the thing to
+            press to collapse it.
+          */}
           <IconChevron
             size={14}
             style={{
-              transform: element.collapsed ? 'rotate(-90deg)' : 'none',
+              transform: element.collapsed ? 'none' : 'rotate(180deg)',
               transition: 'transform 140ms ease',
             }}
           />

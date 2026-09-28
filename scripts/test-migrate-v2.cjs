@@ -127,10 +127,73 @@ if (video.embed !== undefined) fail('a version 2 video still has an embed wrappe
 if (video.keepAspect !== true) fail('a video does not keep its aspect ratio by default')
 if (video.startSeconds !== 90) fail(\`the timestamp was lost: \${video.startSeconds}\`)
 
-// The point of the whole change. A video has no body, no checklist, no image,
-// no style — there is nowhere in version 2 to put them.
-for (const field of ['body', 'content', 'checklist', 'tags', 'image', 'style', 'title2']) {
+// The point of the whole change. A video has no *body*, no checklist and no
+// image - those are a note's content, and there is nowhere in version 2 to put
+// them.
+//
+// The "style" and "tags" fields are deliberately *not* in this list. They were, once, and
+// the assertion was right at the time: style and tags lived on the note, so a
+// video genuinely had neither, and the settings panel could only offer a colour
+// picker to one kind. That read as "the app cannot style this" rather than "this
+// kind has no style", and it meant a video or a flash deck could not be labelled
+// or found by a filter. Both are on the base now, and every kind has both.
+for (const field of ['body', 'content', 'checklist', 'image', 'title2']) {
   if (field in video) fail(\`a video carried a note's field: \${field}\`)
+}
+if (!video.style || typeof video.style.backgroundColor !== 'string') {
+  fail('a video has no style, so it cannot be coloured')
+}
+if (!Array.isArray(video.tags)) {
+  fail('a video has no tags, so it cannot be labelled or filtered')
+}
+// And the ones it must *not* have are still absent.
+for (const field of ['body', 'checklist', 'image']) {
+  if (field in video) fail(\`a video grew a note's field: \${field}\`)
+}
+
+/* --- every kind carries a style and tags, from the card that became it -- */
+//
+// Style and tags moved from the note onto the base. So a v1 *card* of any kind
+// now migrates to an element of any kind that still has the labels the author
+// wrote — and a video that became a video does not lose them, which it did when
+// tags were a note's field.
+const labelled = run({
+  version: 1,
+  pages: [{
+    id: 'p1',
+    title: 'P',
+    cards: [
+      { id: 'n1', type: 'note', title: 'N', content: '', style: {}, tags: ['biology'],
+        checklist: [], position: { x: 0, y: 0, width: 200, height: 100, zIndex: 1 },
+        createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+      { id: 'v1', type: 'youtube', title: 'V', content: '',
+        embed: { url: 'https://youtu.be/dQw4w9WgXcQ' },
+        style: { backgroundColor: '#123456', borderRadius: 4 }, tags: ['lecture', 'week 1'],
+        checklist: [], position: { x: 300, y: 0, width: 320, height: 180, zIndex: 2 },
+        createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+    ],
+    groups: [],
+  }],
+}).doc.pages[0].elements
+
+if (labelled[0].tags.join(',') !== 'biology') {
+  fail(\`a note lost its tags: \${JSON.stringify(labelled[0].tags)}\`)
+}
+if (labelled[1].tags.join(',') !== 'lecture,week 1') {
+  fail(\`a video lost its tags: \${JSON.stringify(labelled[1].tags)}\`)
+}
+// The colours the author chose are kept, even on a video — which is the point of
+// "what the person chose" beating "what the kind defaults to".
+if (labelled[1].style.backgroundColor !== '#123456') {
+  fail(\`a video lost its background: \${labelled[1].style.backgroundColor}\`)
+}
+if (labelled[1].style.borderRadius !== 4) {
+  fail(\`a video lost its border radius: \${labelled[1].style.borderRadius}\`)
+}
+// A field the card did not set falls back to the *kind's* default, not the
+// note's — so a video with a partly-specified style is still black.
+if (labelled[1].style.textColor === '#ffffff') {
+  fail('a video with no stored text colour took the note default rather than its own')
 }
 
 /* --- a flash card becomes a deck of one ----------------------------- */

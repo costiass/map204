@@ -29,7 +29,7 @@ import {
   type LinkElement,
   type NoteChecklistItem,
   type NoteElement,
-  type NoteStyle,
+  type ElementStyle,
   type Page,
   type PdfElement,
   type PresentationStepV2,
@@ -43,6 +43,7 @@ import {
   DEFAULT_GROUP_COLOR,
   DEFAULT_NOTE_STYLE,
   DEFAULT_RELATIONSHIP,
+  DEFAULT_STYLE_BY_KIND,
   DEFAULT_TABLE_COLUMNS,
   DEFAULT_TABLE_ROWS,
   DEFAULT_VIDEO_ASPECT,
@@ -99,6 +100,13 @@ const ANCHORS = ['top', 'right', 'bottom', 'left'] as const
 /* ------------------------------------------------------------------ */
 
 /** The geometry every element shares, read out of a raw object. */
+/**
+ * The fields every element shares.
+ *
+ * Mirrors `ElementBase` minus the optional ones. A named type rather than
+ * `Omit<ElementBase, 'kind'>` so that a field added to the base and forgotten
+ * here is a compile error in one place, rather than `as Element` in six.
+ */
 interface BaseFields {
   id: string
   x: number
@@ -108,9 +116,19 @@ interface BaseFields {
   zIndex: number
   createdAt: string
   updatedAt: string
+  style: ElementStyle
+  tags: string[]
 }
 
-function baseOf(raw: unknown, fallback: { x: number; y: number }): BaseFields {
+/**
+ * The fields every element shares, read out of a raw object.
+ *
+ * `style` and `tags` are read *here* rather than per kind. That is the point of
+ * having them on the base: a new kind gets a colour and labels without writing
+ * either, and cannot accidentally forget to — which is exactly what had
+ * happened, with four kinds carrying neither.
+ */
+function baseOf(raw: unknown, fallback: { x: number; y: number }, kind = 'note'): BaseFields {
   const value = isRecord(raw) ? raw : {}
   return {
     id: str(value.id) || mintId('el'),
@@ -121,6 +139,13 @@ function baseOf(raw: unknown, fallback: { x: number; y: number }): BaseFields {
     zIndex: Math.round(num(value.zIndex, 1)),
     createdAt: str(value.createdAt) || new Date().toISOString(),
     updatedAt: str(value.updatedAt) || new Date().toISOString(),
+    // The document's own default wins over the kind's, so "set a note style as
+    // the default" does what it says; and the kind's default wins over
+    // nothing, so a video is black rather than white.
+    style: styleOf(value.style, kind),
+    tags: Array.isArray(value.tags)
+      ? value.tags.filter((tag): tag is string => typeof tag === 'string' && tag.length > 0)
+      : [],
   }
 }
 
@@ -128,16 +153,23 @@ function baseOf(raw: unknown, fallback: { x: number; y: number }): BaseFields {
 /* per-kind                                                             */
 /* ------------------------------------------------------------------ */
 
-const noteStyleOf = (raw: unknown): NoteStyle => {
-  if (!isRecord(raw)) return { ...DEFAULT_NOTE_STYLE }
+/**
+ * A style, with a fallback for the kind.
+ *
+ * A missing field falls back to the *kind's* default rather than to the note's,
+ * so a video whose file has a border width but no background is still black.
+ */
+const styleOf = (raw: unknown, kind: string): ElementStyle => {
+  const fallback = DEFAULT_STYLE_BY_KIND[kind] ?? DEFAULT_NOTE_STYLE
+  if (!isRecord(raw)) return { ...fallback }
   return {
-    backgroundColor: str(raw.backgroundColor, DEFAULT_NOTE_STYLE.backgroundColor),
-    accentColor: str(raw.accentColor, DEFAULT_NOTE_STYLE.accentColor),
-    textColor: str(raw.textColor, DEFAULT_NOTE_STYLE.textColor),
-    borderColor: str(raw.borderColor, DEFAULT_NOTE_STYLE.borderColor),
-    borderWidth: clamp(num(raw.borderWidth, DEFAULT_NOTE_STYLE.borderWidth), 0, 12),
-    borderRadius: clamp(num(raw.borderRadius, DEFAULT_NOTE_STYLE.borderRadius), 0, 40),
-    shadow: bool(raw.shadow, DEFAULT_NOTE_STYLE.shadow),
+    backgroundColor: str(raw.backgroundColor, fallback.backgroundColor),
+    accentColor: str(raw.accentColor, fallback.accentColor),
+    textColor: str(raw.textColor, fallback.textColor),
+    borderColor: str(raw.borderColor, fallback.borderColor),
+    borderWidth: clamp(num(raw.borderWidth, fallback.borderWidth), 0, 12),
+    borderRadius: clamp(num(raw.borderRadius, fallback.borderRadius), 0, 40),
+    shadow: bool(raw.shadow, fallback.shadow),
   }
 }
 
@@ -151,13 +183,12 @@ const checklistOf = (raw: unknown): NoteChecklistItem[] =>
 
 function normalizeNote(raw: unknown, at: { x: number; y: number }): NoteElement {
   const value = isRecord(raw) ? raw : {}
-  const base = baseOf(value, at)
+  const base = baseOf(value, at, 'note')
   return {
     ...base,
     kind: 'note',
     title: str(value.title, 'Untitled'),
     body: str(value.body),
-    style: noteStyleOf(value.style),
     checklist: checklistOf(value.checklist),
     tags: Array.isArray(value.tags)
       ? value.tags.filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0)
@@ -173,7 +204,7 @@ function normalizeNote(raw: unknown, at: { x: number; y: number }): NoteElement 
 
 function normalizeVideo(raw: unknown, at: { x: number; y: number }): VideoElement {
   const value = isRecord(raw) ? raw : {}
-  const base = baseOf(value, at)
+  const base = baseOf(value, at, 'video')
   return {
     ...base,
     kind: 'video',
@@ -194,7 +225,7 @@ function normalizeVideo(raw: unknown, at: { x: number; y: number }): VideoElemen
 
 function normalizeFlash(raw: unknown, at: { x: number; y: number }): FlashElement {
   const value = isRecord(raw) ? raw : {}
-  const base = baseOf(value, at)
+  const base = baseOf(value, at, 'flash')
   // `cards`, not `elements`. The deck is a flash element's *own* `cards` field,
   // and it is a different thing from a page's `elements` — which is exactly the
   // collision the rename pass walked into. Reading `value.elements` here makes
@@ -202,9 +233,27 @@ function normalizeFlash(raw: unknown, at: { x: number; y: number }): FlashElemen
   const cards = Array.isArray(value.cards)
     ? value.cards.flatMap((pair) => {
         if (!Array.isArray(pair)) return []
-        const sides = pair.flatMap((side) =>
-          isRecord(side) ? [{ id: str(side.id) || mintId('face'), text: str(side.text) }] : [],
-        )
+        const sides = pair.flatMap((side) => {
+          if (!isRecord(side)) return []
+          const hasImage = isRecord(side.image) && typeof side.image.src === 'string'
+          return [
+            {
+              id: str(side.id) || mintId('face'),
+              text: str(side.text),
+              // Only carried when there is one, so a face that has no image is
+              // not carrying an empty `{src: null}` that every read has to
+              // check for.
+              ...(hasImage
+                ? {
+                    image: {
+                      src: strOrNull((side.image as { src?: unknown }).src),
+                      alt: str((side.image as { alt?: unknown }).alt),
+                    },
+                  }
+                : {}),
+            },
+          ]
+        })
         // Exactly two sides or nothing. A "card" with one side cannot be turned
         // over, and a card with three has nowhere to put the third.
         return sides.length === 2 ? [sides] : []
@@ -224,6 +273,7 @@ function normalizeFlash(raw: unknown, at: { x: number; y: number }): FlashElemen
     showing: oneOf(value.showing, ['front', 'back'] as const, 'front'),
     presentation: oneOf(value.presentation, ['carousel', 'single'] as const, 'single'),
     hideAnswer: bool(value.hideAnswer, true),
+    answerFit: oneOf(value.answerFit, ['center', 'top'] as const, 'center'),
     ...(value.locked === true ? { locked: true } : {}),
   }
 }
@@ -251,7 +301,7 @@ const storedFileOrNull = (raw: unknown): StoredFile | null => {
 
 function normalizePdf(raw: unknown, at: { x: number; y: number }): PdfElement {
   const value = isRecord(raw) ? raw : {}
-  const base = baseOf(value, at)
+  const base = baseOf(value, at, 'pdf')
   return {
     ...base,
     kind: 'pdf',
@@ -266,7 +316,7 @@ function normalizePdf(raw: unknown, at: { x: number; y: number }): PdfElement {
 
 function normalizeLink(raw: unknown, at: { x: number; y: number }): LinkElement {
   const value = isRecord(raw) ? raw : {}
-  const base = baseOf(value, at)
+  const base = baseOf(value, at, 'link')
   return {
     ...base,
     kind: 'link',
@@ -281,7 +331,7 @@ function normalizeLink(raw: unknown, at: { x: number; y: number }): LinkElement 
 
 function normalizeTable(raw: unknown, at: { x: number; y: number }): TableElement {
   const value = isRecord(raw) ? raw : {}
-  const base = baseOf(value, at)
+  const base = baseOf(value, at, 'table')
   const columns = Array.isArray(value.columns)
     ? value.columns.flatMap((column, index) => {
         if (!isRecord(column)) return []
@@ -429,6 +479,7 @@ export function createElement(
         showing: 'front',
         presentation: 'single',
         hideAnswer: true,
+        answerFit: 'center' as const,
       }
     }
     case 'pdf':
@@ -590,7 +641,7 @@ function normalizeSettings(raw: unknown): DocSettings {
   // has — so the second one goes and the run is one step shorter, visibly.
   const seen = new Set<string>()
   return {
-    defaultNoteStyle: noteStyleOf(value.defaultNoteStyle),
+    defaultNoteStyle: styleOf(value.defaultNoteStyle, 'note'),
     defaultConnectionStyle: DEFAULT_CONNECTION_STYLE_V2,
     defaultRelationshipType: str(value.defaultRelationshipType, 'related to'),
     steps: Array.isArray(value.steps)
@@ -748,7 +799,7 @@ export {
   type LinkElement,
   type NoteChecklistItem,
   type NoteElement,
-  type NoteStyle,
+  type ElementStyle,
   type Page,
   type PdfElement,
   type PresentationStepV2,

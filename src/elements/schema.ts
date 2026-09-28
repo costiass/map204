@@ -24,6 +24,29 @@ export const DOC_VERSION = 2
 /* ------------------------------------------------------------------ */
 
 /**
+ * How an element looks, whatever it is.
+ *
+ * This lives on the base rather than on the note because *every* element has a
+ * colour, a shape and a border. Putting it on the note meant a video or a flash
+ * deck rendered with whatever the browser defaulted to, and meant the settings
+ * panel could only offer a colour picker to one kind — which reads as "the app
+ * cannot style this" rather than as "this kind has no style".
+ *
+ * A video's fill is black because that is what a video *is*, and its accent is
+ * still choosable; that is the whole difference, and it is a default, not a
+ * different type.
+ */
+export interface ElementStyle {
+  backgroundColor: string
+  accentColor: string
+  textColor: string
+  borderColor: string
+  borderWidth: number
+  borderRadius: number
+  shadow: boolean
+}
+
+/**
  * What every element has, whatever else it is.
  *
  * Position and size are the interaction system's, not any one element's, which
@@ -40,6 +63,16 @@ export interface ElementBase {
   zIndex: number
   createdAt: string
   updatedAt: string
+  /** How this element looks. Every kind has one — see `ElementStyle`. */
+  style: ElementStyle
+  /**
+   * Free-form labels, on every kind.
+   *
+   * Filtering and searching read these, so a tag on a video has to be findable
+   * the same way a tag on a note is. Keeping them on the note meant a video
+   * could not be labelled, and could not be found by one.
+   */
+  tags: string[]
   /**
    * Whether the player can move this. Not a style — a *constraint* on the
    * interaction system, and the one every element respects.
@@ -51,16 +84,6 @@ export interface ElementBase {
 /* ------------------------------------------------------------------ */
 /* Note                                                                */
 /* ------------------------------------------------------------------ */
-
-export interface NoteStyle {
-  backgroundColor: string
-  accentColor: string
-  textColor: string
-  borderColor: string
-  borderWidth: number
-  borderRadius: number
-  shadow: boolean
-}
 
 export interface NoteChecklistItem {
   id: string
@@ -74,9 +97,7 @@ export interface NoteElement extends ElementBase {
   title: string
   /** Markdown. The same format the document itself uses. */
   body: string
-  style: NoteStyle
   checklist: NoteChecklistItem[]
-  tags: string[]
   image: { src: string | null; alt: string }
 }
 
@@ -118,10 +139,21 @@ export interface VideoElement extends ElementBase {
 /* Flashcards                                                          */
 /* ------------------------------------------------------------------ */
 
+/**
+ * One face of a flash card.
+ *
+ * Both faces carry the same content fields, because both are read the same way —
+ * a question can be a diagram and an answer can be a formula, and neither is
+ * "just text". What the answer may additionally carry is `image`, because that
+ * is the difference a flash card turns on: a question is read at a glance from
+ * the front of a room, and a long answer is read close up.
+ */
 export interface FlashSide {
   id: string
-  /** The question, or the answer. Which is which depends on the card's `front`. */
+  /** Markdown, exactly as a note's body is. */
   text: string
+  /** An image the face shows above its text. Optional — most faces have none. */
+  image?: { src: string | null; alt: string }
 }
 
 export interface FlashElement extends ElementBase {
@@ -149,6 +181,15 @@ export interface FlashElement extends ElementBase {
   presentation: 'carousel' | 'single'
   /** Whether the answer is hidden until the card is clicked. */
   hideAnswer: boolean
+  /**
+   * How far an answer may fill the card.
+   *
+   * A question is read across a room, so it centres. An answer is read close up
+   * and may be long, so it starts at the top and scrolls when it does not fit.
+   * These are the limits that stop a long answer silently shrinking to
+   * unreadable: the text stops getting smaller, and past this it scrolls.
+   */
+  answerFit: 'center' | 'top'
 }
 
 /* ------------------------------------------------------------------ */
@@ -365,7 +406,7 @@ export interface Page {
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
 export interface DocSettings {
-  defaultNoteStyle: NoteStyle
+  defaultNoteStyle: ElementStyle
   defaultConnectionStyle: ConnectionStyle
   defaultRelationshipType: string
   steps: PresentationStepV2[]
