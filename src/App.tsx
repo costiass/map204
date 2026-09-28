@@ -10,6 +10,7 @@ import { NotFound } from '@/components/NotFound'
 import { PageSidebar } from '@/components/PageSidebar'
 import { SearchPanel } from '@/components/SearchPanel'
 import { ShareDialog } from '@/components/ShareDialog'
+import { StatusBar } from '@/components/StatusBar'
 import { Toasts } from '@/components/Toasts'
 import { Toolbar } from '@/components/Toolbar'
 import { UserSettingsPage } from '@/components/UserSettingsPage'
@@ -188,6 +189,7 @@ export default function App() {
 
         <ContextMenu />
         <ImportExportDialog />
+        <StatusBar />
         <Toasts />
       </div>
     </AuthGuard>

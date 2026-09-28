@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { MousePointer2 } from 'lucide-react'
 
 import { firstNameOf, usePresence } from '@/store/presence'
 import { useCanvasStore } from '@/store/useCanvasStore'
@@ -69,8 +70,9 @@ export function CursorLayer() {
     store.setViewport(centerOn(cursor, store.viewportSize, page.viewport.zoom))
   }, [cursor, cursorPageId, activePageId, spacePressed])
 
-  // A cursor is only meaningful on the page its owner is looking at. Somebody
-  // browsing another page still appears in the avatar cluster, just not here.
+  // A pointer is only meaningful on the page its owner is looking at. Somebody
+  // browsing another page still appears in the avatar cluster and beside that
+  // page in the sidebar, just not on this canvas.
   const visible = entries.filter(
     (entry) => entry.cursor && entry.pageId === activePageId,
   )
@@ -94,17 +96,18 @@ export function CursorLayer() {
               transform: `translate3d(${point.x}px, ${point.y}px, 0) scale(${1 / viewport.zoom})`,
             }}
           >
-            <svg width="18" height="18" viewBox="0 0 18 18" className="drop-shadow-sm">
-              <path
-                d="M2 1.5 L2 14 L5.6 10.6 L8 15.4 L10.4 14.2 L8 9.5 L12.8 9.3 Z"
-                fill={entry.color}
-                stroke="#ffffff"
-                strokeWidth="1.2"
-                strokeLinejoin="round"
-              />
-            </svg>
+            {/* The lucide pointer, filled in that person's colour and outlined
+                in white so it stays legible over a card of any shade. */}
+            <MousePointer2
+              size={20}
+              className="drop-shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
+              style={{ color: entry.color, fill: entry.color, stroke: '#ffffff' }}
+              strokeWidth={1.75}
+            />
+
+            {/* Name chip, tucked under the point of the pointer. */}
             <span
-              className="absolute left-3 top-4 whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10.5px] font-semibold text-white shadow-sm"
+              className="absolute left-4 top-5 whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10.5px] font-semibold text-white shadow-sm"
               style={{ background: entry.color }}
             >
               {firstNameOf(entry.name)}

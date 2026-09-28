@@ -1,15 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { IconDownload, IconUpload, IconX } from '@/components/Icons'
-import { primePageSync } from '@/hooks/usePageSync'
-import { loadDocument, replaceDocumentPages } from '@/store/supabase-sync'
+import { broadcastPagesImported, primePageSync } from '@/hooks/usePageSync'
+import { importPages, loadDocument, type WrittenPage } from '@/store/supabase-sync'
 import { useCanvasStore } from '@/store/useCanvasStore'
 import { downloadDoc, parseDoc, serializeDoc } from '@/utils/serialize'
-import { reissueIds } from '@/utils/reissue'
 import { formatBytes } from '@/utils/image'
 import type { CanvasDoc } from '@/types'
 
-type Mode = 'replace' | 'merge'
 type Tab = 'export' | 'import'
 
 export function ImportExportDialog() {
@@ -24,8 +22,6 @@ export function ImportExportDialog() {
 function ImportExportBody({ initialTab }: { initialTab: Tab }) {
   const setDialog = useCanvasStore((s) => s.setDialog)
   const doc = useCanvasStore((s) => s.doc)
-  const replaceDoc = useCanvasStore((s) => s.replaceDoc)
-  const mergeDoc = useCanvasStore((s) => s.mergeDoc)
   const pushToast = useCanvasStore((s) => s.pushToast)
 
   const [tab, setTab] = useState<Tab>(initialTab)
@@ -33,7 +29,8 @@ function ImportExportBody({ initialTab }: { initialTab: Tab }) {
   const [raw, setRaw] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [warnings, setWarnings] = useState<string[]>([])
-  const [mode, setMode] = useState<Mode>('replace')
+  /** True while the server has the file, so the button can say so. */
+  const [importing, setImporting] = useState(false)
   const [parsed, setParsed] = useState<CanvasDoc | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -93,71 +90,68 @@ function ImportExportBody({ initialTab }: { initialTab: Tab }) {
     const store = useCanvasStore.getState()
     const documentId = store.documentId
 
-    // An import **reproduces** the file rather than copying it: same cards,
-    // positions, connections, styling and text, but every id re-issued. So the
-    // result shares no identity with the file it came from, and importing the
-    // same file twice gives you two independent documents rather than one that
-    // quietly overwrites the other.
-    const incoming = reissueIds(parsed).doc
-
-    if (mode === 'replace' && documentId) {
-      // The server must end up holding exactly these pages, so it is rewritten
-      // first and the page-list diff is re-primed before the canvas swaps.
-      const written = await replaceDocumentPages(documentId, incoming.pages)
-      if (!written) {
-        pushToast('The import could not be saved — the reason is in the console.', 'error')
-        return
-      }
-
-      // Read the pages back rather than trusting the local copy. The server is
-      // the authority on what exists now, and re-reading means a write that
-      // silently did not land cannot leave the canvas holding a page the
-      // database has never heard of — which is what the next save would then
-      // try, and fail, to create.
-      const refreshed = await loadDocument(documentId)
-      if (!refreshed) {
-        pushToast('The pages were written but could not be read back.', 'error')
-        return
-      }
-
-      primePageSync(documentId, refreshed)
-      replaceDoc({
-        version: 1,
-        pages: refreshed.pages,
-        settings: refreshed.settings,
-      })
-      pushToast(`Imported ${written.length} page(s).`, 'success')
-      setDialog(null)
-      return
-    }
-
-    if (mode === 'replace') {
-      // No workspace is open, so there is nowhere to save. Say so plainly.
-      //
-      // The tempting shortcut is to drop the pages into the local document and
-      // let the page-list diff persist them later. That is what this used to do,
-      // and it is a trap: the diff cannot tell an imported page from one you
-      // typed, so the next workspace you opened would try to insert these pages
-      // *into that workspace*. The insert then fails on
-      //   42501 new row violates row-level security policy for table "pages"
-      // for anyone without edit rights on the workspace they happened to open
-      // next — an error that names the database and says nothing about an
-      // import done several clicks earlier.
-      setError(
-        'Open a workspace first — there is nowhere to save these pages yet.',
-      )
-      return
-    }
-
-    // Merging also needs a workspace, for the same reason.
+    // Nowhere to put the pages. Said plainly rather than dropped into the local
+    // document: the page-list diff cannot tell an imported page from a typed
+    // one, so it would try to insert them into whichever workspace was opened
+    // next — an error about the database, caused by something done several
+    // clicks earlier.
     if (!documentId) {
       setError('Open a workspace first — there is nowhere to save these pages yet.')
       return
     }
 
-    mergeDoc(incoming)
+    setImporting(true)
+    const pageCount = parsed.pages.length
+    store.setStatus({
+      busy: true,
+      message: `Adding ${pageCount} page${pageCount === 1 ? '' : 's'}…`,
+      detail: 'The server is inserting them in one go.',
+    })
+
+    let written: WrittenPage[] | null = null
+    let failed = ''
+
+    try {
+      // One call. The server mints every id, rewires every reference, and
+      // inserts the pages in a single transaction — so this is either the whole
+      // file or none of it, and the browser holds nothing but the file text.
+      written = await importPages(documentId, parsed.pages)
+
+      if (written) {
+        // Read the pages back rather than trusting the request: the server
+        // minted the ids, so the local copy cannot know them, and a page the
+        // database has never heard of would be re-created — and fail — on the
+        // next save.
+        const refreshed = await loadDocument(documentId)
+        if (refreshed) {
+          primePageSync(documentId, refreshed)
+          store.replaceDoc({
+            version: 1,
+            pages: refreshed.pages,
+            settings: refreshed.settings,
+          })
+          // Tell anyone else looking at this workspace to re-read. Their page
+          // list is derived from what they last loaded, so without this they
+          // would not know new pages had arrived.
+          broadcastPagesImported(documentId, written.length)
+        }
+      } else {
+        failed = 'The server refused the import.'
+      }
+    } catch (error) {
+      failed = error instanceof Error ? error.message : 'The import failed.'
+    } finally {
+      setImporting(false)
+      store.setStatus(null)
+    }
+
+    if (!written) {
+      setError(`${failed} The reason is in the console.`)
+      return
+    }
+
     pushToast(
-      `Merged ${incoming.pages.length} page(s) into the document.`,
+      `Added ${written.length} page${written.length === 1 ? '' : 's'}.`,
       'success',
     )
     setDialog(null)
@@ -289,44 +283,27 @@ function ImportExportBody({ initialTab }: { initialTab: Tab }) {
                 </div>
               ) : null}
 
-              <fieldset className="mt-3">
-                <legend className="cc-label">How should this be applied?</legend>
-                <div className="grid gap-1.5 sm:grid-cols-2">
-                  {(
-                    [
-                      ['replace', 'Replace document', 'Discard the current pages and use the imported ones.'],
-                      ['merge', 'Merge into document', 'Add new pages/cards, keeping what is already here.'],
-                    ] as const
-                  ).map(([value, title, description]) => (
-                    <label
-                      key={value}
-                      className={`flex cursor-pointer gap-2 rounded-lg border px-2.5 py-2 text-[11px] ${
-                        mode === value ? 'border-indigo-400 bg-indigo-50' : 'border-line hover:bg-slate-50'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="import-mode"
-                        className="mt-0.5 accent-indigo-500"
-                        checked={mode === value}
-                        onChange={() => setMode(value)}
-                      />
-                      <span>
-                        <span className="block font-semibold text-slate-700">{title}</span>
-                        <span className="text-slate-500">{description}</span>
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
+              <p className="mt-3 rounded-lg bg-surface-alt px-2.5 py-2 text-[11px] text-muted">
+                Every page in the file is added to this workspace as a new page.
+                Nothing already here is changed, and importing the same file twice
+                gives you two independent copies.
+              </p>
             </div>
 
             <div className="mt-auto flex items-center justify-end gap-2 border-t border-line px-4 py-3">
               <button type="button" className="cc-btn" onClick={() => setDialog(null)}>
                 Cancel
               </button>
-              <button type="button" className="cc-btn" data-variant="primary" disabled={!parsed} onClick={() => void doImport()}>
-                Import JSON
+              <button
+                type="button"
+                className="cc-btn"
+                data-variant="primary"
+                disabled={!parsed || importing}
+                onClick={() => void doImport()}
+              >
+                {importing
+                  ? 'Adding pages…'
+                  : `Add ${parsed?.pages.length ?? 0} page${parsed?.pages.length === 1 ? '' : 's'}`}
               </button>
             </div>
           </>

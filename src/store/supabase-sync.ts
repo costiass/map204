@@ -360,10 +360,11 @@ export async function deleteDocument(documentId: string): Promise<boolean> {
  *
  *   42501  new row violates row-level security policy for table "pages"
  *
- * A collision is now impossible by construction — an import re-issues every id
- * before it arrives here (`reissueIds`), so a page being created was minted
- * moments ago by this client. The insert is therefore plain, and a collision is
- * reported rather than silently resolved: it would mean two clients generated
+ * A collision is now impossible by construction. An import does not come through
+ * here at all: it is one `import_pages` call, and the server mints the ids. What
+ * reaches this function is a page the user just added, so the id was minted by
+ * this client moments ago. The insert is therefore plain, and a collision is
+ * reported rather than silently resolved — it would mean two clients generated
  * the same id, which is a bug worth seeing.
  *
  * The ordinal is written here rather than patched afterwards. Writing `0` and
@@ -535,52 +536,47 @@ export interface WrittenPage {
 }
 
 /**
- * Makes the server hold exactly `pages`, in order — the whole-document rewrite
- * behind "Replace document" in the import dialog.
+ * `POST /rpc/import_pages` — add every page in a file to a workspace.
  *
- * Every page is inserted, then the workspace's previous pages are deleted. The
- * previous version branched on whether a page id already existed and either
- * updated or inserted, but the import re-issues every id before it gets here
- * (`reissueIds`), so an incoming id never matches an existing one and the
- * update branch was unreachable. Removing it left one request per page instead
- * of two, and removed a remap the caller had to reconcile against.
+ * One request, one transaction. The server mints the ids, rewrites every
+ * reference between them, and inserts the pages; the browser does none of that.
+ * The previous version did all of it client-side, which meant N + N + 1 requests
+ * and — the reason it mattered — no atomicity: a failure part-way through left
+ * a workspace holding both the old pages and some of the new ones.
  *
- * Inserts happen before deletes deliberately: `trg_prevent_last_page_delete`
- * refuses to remove a workspace's final page, and a workspace whose only page is
- * being replaced would otherwise veto its own import.
+ * Additive. Nothing already in the workspace is read, written or deleted, so
+ * there is no destructive mode left to get wrong and importing twice is safe.
  *
- * Returns null if any write failed, in which case the server may hold a mixture
- * of old and new pages — the caller re-reads rather than assuming success.
+ * Returns the pages the server created, or `null` if the whole import was
+ * refused — in which case the workspace is untouched.
  */
-export async function replaceDocumentPages(
+export async function importPages(
   documentId: string,
   pages: Page[],
 ): Promise<WrittenPage[] | null> {
   const db = authRequired()
   if (!db) return null
-
-  const existing = await listPages(documentId)
-
-  // An empty import would delete every page and leave the workspace unusable,
-  // so it is refused here rather than half-applied.
   if (pages.length === 0) return null
 
-  const written: WrittenPage[] = []
-  for (const [ordinal, page] of pages.entries()) {
-    const row = await createPage(documentId, page, ordinal)
-    if (!row) return null
-    written.push({ id: row.id, title: page.title, ordinal, version: row.version ?? 0 })
+  const { data, error } = await db.rpc('import_pages', {
+    p_document_id: documentId,
+    // The pages are plain JSON already; the cast is only to satisfy the
+    // generated client, which types every non-primitive RPC argument as `Json`.
+    p_pages: pages as unknown as Record<string, unknown>,
+  })
+
+  if (error) {
+    await handleWriteError(error, 'sync:importPages')
+    return null
   }
 
-  // Only rows that belonged to this workspace are touched, so a page of somebody
-  // else's can never be removed by an import here.
-  const wanted = new Set(pages.map((page) => page.id))
-  for (const row of existing) {
-    if (wanted.has(row.id)) continue
-    await deletePage(row.id)
-  }
-
-  return written
+  const created = (data ?? []) as Array<{ id: string; title: string }>
+  return created.map((row, index) => ({
+    id: row.id,
+    title: row.title,
+    ordinal: index,
+    version: 0,
+  }))
 }
 
 /* ------------------------------------------------------------------ */

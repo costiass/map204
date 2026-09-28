@@ -8,6 +8,7 @@ import type { LoadedDocument } from '@/store/supabase-sync'
 import {
   createPage,
   deletePage,
+  loadDocument,
   renameDocument,
   saveDocumentSettings,
   savePageSnapshot,
@@ -148,6 +149,32 @@ function pageSignature(page: Page): string {
 /* ------------------------------------------------------------------ */
 /* The hook                                                            */
 /* ------------------------------------------------------------------ */
+
+/**
+ * The channel for a document, so code outside this hook can tell the room
+ * something. Held per document because the import dialog has no hook of its own
+ * and the channel is the only thing it needs.
+ */
+const channels = new Map<string, RealtimeChannel>()
+
+/**
+ * Tell everyone else looking at this workspace that pages have been added.
+ *
+ * Their page list is derived from whatever they last loaded, so without this
+ * they would not know new pages had arrived — the import would be invisible to
+ * everyone but the person who ran it. They re-read on hearing this rather than
+ * being sent the pages themselves, because the server minted the ids and is the
+ * only authority on them.
+ */
+export function broadcastPagesImported(documentId: string, count: number): void {
+  const channel = channels.get(documentId)
+  if (!channel) return
+  void channel.send({
+    type: 'broadcast',
+    event: 'pages-imported',
+    payload: { count, at: Date.now() },
+  })
+}
 
 export function usePageSync() {
   const documentId = useCanvasStore((s) => s.documentId)
@@ -319,9 +346,28 @@ export function usePageSync() {
           page_id: null,
         })
       })
+      // Somebody added pages to this workspace. Their page list is built from
+      // what they last loaded, so it has to be re-read — the server minted the
+      // ids, so sending the pages themselves would be guesswork.
+      .on('broadcast', { event: 'pages-imported' }, () => {
+        if (syncedDocumentId !== documentId) return
+        useCanvasStore.getState().pushToast('New pages were added to this workspace.', 'info')
+        void loadDocument(documentId).then((fresh) => {
+          if (!fresh || syncedDocumentId !== documentId) return
+          useCanvasStore.getState().hydrateDocument({
+            version: 1,
+            pages: fresh.pages,
+            settings: fresh.settings,
+          })
+          primePageSync(documentId, fresh)
+        })
+      })
+
+    channels.set(documentId, channel)
 
     return () => {
       usePresence.getState().clear()
+      channels.delete(documentId)
       void db.removeChannel(channel)
     }
   }, [documentId])

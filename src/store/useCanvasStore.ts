@@ -72,6 +72,15 @@ export interface CanvasStore {
   setDarkMode: (enabled: boolean) => void
   setGridSize: (size: number) => void
 
+  /**
+   * A line of text along the bottom of the canvas for work that is in progress.
+   *
+   * A status, not a message: it appears when something starts and disappears
+   * when it ends, so it cannot be misread for a toast that has already faded.
+   */
+  status: { message: string; detail?: string; busy?: boolean } | null
+  setStatus: (status: { message: string; detail?: string; busy?: boolean } | null) => void
+
   /* --- selection --------------------------------------------------- */
   selectedCardIds: string[]
   selectedConnectionIds: string[]
@@ -313,6 +322,7 @@ export const useCanvasStore = create<CanvasStore>()(
       documentAccent: DEFAULT_WORKSPACE_ACCENT,
       documentIcon: DEFAULT_WORKSPACE_ICON,
       documentRole: null,
+      status: null,
 
       selectedCardIds: [],
       selectedConnectionIds: [],
@@ -387,6 +397,8 @@ export const useCanvasStore = create<CanvasStore>()(
         }),
 
       setDocumentRole: (documentRole) => set({ documentRole }),
+
+      setStatus: (status) => set({ status }),
 
       setDarkMode: (enabled) => set({ darkMode: enabled }),
 
