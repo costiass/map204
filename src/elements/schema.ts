@@ -177,8 +177,6 @@ export interface FlashElement extends ElementBase {
    * showing the first one.
    */
   cardIndex: number
-  /** Whether the deck is stepped through on the canvas or only in the inspector. */
-  presentation: 'carousel' | 'single'
   /** Whether the answer is hidden until the card is clicked. */
   hideAnswer: boolean
   /**

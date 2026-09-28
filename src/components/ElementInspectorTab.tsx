@@ -296,7 +296,8 @@ function FlashInspector({
         ) : null}
       </Section>
 
-      <Section title="Behaviour">
+      {/* Was "Behaviour": it held a One card / Carousel choice that nothing read. */}
+      <Section title="The answer">
         <label className="flex items-center gap-2 text-[12px]">
           <input
             type="checkbox"
@@ -305,24 +306,6 @@ function FlashInspector({
           />
           Hide the answer until the card is turned over
         </label>
-        <div className="mt-2 grid grid-cols-2 gap-1.5">
-          <button
-            type="button"
-            className="cc-btn"
-            data-variant={element.presentation === 'single' ? 'primary' : undefined}
-            onClick={() => onChange(element.id, { presentation: 'single' })}
-          >
-            One card
-          </button>
-          <button
-            type="button"
-            className="cc-btn"
-            data-variant={element.presentation === 'carousel' ? 'primary' : undefined}
-            onClick={() => onChange(element.id, { presentation: 'carousel' })}
-          >
-            Carousel
-          </button>
-        </div>
       </Section>
     </div>
   )

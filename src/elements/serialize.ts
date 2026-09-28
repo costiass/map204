@@ -272,7 +272,6 @@ function normalizeFlash(raw: unknown, at: { x: number; y: number }): FlashElemen
     // file, and a deck showing nothing is a worse outcome than showing the first.
     cardIndex: clamp(Math.round(num(value.cardIndex, 0)), 0, cards.length - 1),
     showing: oneOf(value.showing, ['front', 'back'] as const, 'front'),
-    presentation: oneOf(value.presentation, ['carousel', 'single'] as const, 'single'),
     hideAnswer: bool(value.hideAnswer, true),
     answerFit: oneOf(value.answerFit, ['center', 'top'] as const, 'center'),
     ...(value.locked === true ? { locked: true } : {}),
@@ -500,7 +499,6 @@ export function createElement(
         cards,
         cardIndex: 0,
         showing: 'front',
-        presentation: 'single',
         hideAnswer: true,
         answerFit: 'center' as const,
       }

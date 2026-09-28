@@ -601,6 +601,64 @@ export function Canvas() {
     setDragging(true)
   }
 
+  /**
+   * A group's title bar: drag, and nothing else.
+   *
+   * The same rule as an element's title bar, for the same reason. A group is
+   * selected by clicking its frame or its body, and repositioning it by the title
+   * used to select it at the same time -- so every nudge left the group's
+   * properties panel open over the thing you were arranging.
+   *
+   * What moves is the group plus whatever else is selected, so dragging one member
+   * of a multi-selection and leaving the rest behind cannot happen here either.
+   */
+  const handleGroupTitlePointerDown = (
+    event: ReactPointerEvent<HTMLElement>,
+    groupId: string,
+  ) => {
+    if (event.button !== 0) return
+    if (dimmedCardIds.has(groupId)) return
+    if (!useCanvasStore.getState().canEdit()) return
+    cancelViewportAnimation()
+    if (useCanvasStore.getState().spacePressed || event.altKey) {
+      event.preventDefault()
+      beginPan(event)
+      return
+    }
+
+    event.stopPropagation()
+
+    /*
+     * A control inside the bar still gets its own click.
+     *
+     * A group's title is a real `<input>` drawn in the bar rather than read off the
+     * frame, so pressing it has to reach the field. `preventDefault` here would
+     * stop the browser focusing it, which is the difference between renaming a
+     * group in place and having to click twice and lose the caret. The drag only
+     * starts from the bar itself.
+     */
+    if ((event.target as HTMLElement).closest('[data-no-drag]') !== null) return
+
+    event.preventDefault()
+
+    const store = useCanvasStore.getState()
+    const ids =
+      store.selectedGroupId === groupId || store.selectedElementIds.length > 0
+        ? [groupId, ...store.selectedElementIds]
+        : [groupId]
+
+    capture(event.pointerId)
+    interactionRef.current = {
+      kind: 'drag',
+      pointerId: event.pointerId,
+      startWorld: worldPoint(event),
+      primaryId: groupId,
+      ids,
+      moved: false,
+    }
+    setDragging(true)
+  }
+
   const handleCardPointerDown = (event: ReactPointerEvent<HTMLElement>, cardId: string) => {
     if (event.button !== 0) return
     // Dimmed cards (filtered out) are not interactive.
@@ -1251,6 +1309,7 @@ export function Canvas() {
               dimmed={dimmedCardIds.has(group.id)}
               offset={dragOffsetFor(group.id)}
               onPointerDown={handleGroupPointerDown}
+            onTitlePointerDown={handleGroupTitlePointerDown}
               onHandlePointerDown={handleGroupHandlePointerDown}
               onResizePointerDown={handleGroupResizePointerDown}
               onContextMenu={openGroupMenu}

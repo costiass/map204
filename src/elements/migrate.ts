@@ -248,7 +248,6 @@ function convertCard(raw: unknown, index: number, stamp: string): Element | null
         cards: [[{ id: mintId('face'), text: title }, { id: mintId('face'), text: body }]],
         cardIndex: 0,
         showing: 'front',
-        presentation: 'single',
         hideAnswer: true,
         answerFit: 'center' as const,
       }

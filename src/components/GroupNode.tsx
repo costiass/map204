@@ -11,6 +11,8 @@ export interface GroupNodeProps {
   dimmed: boolean
   offset: Point | null
   onPointerDown: (event: ReactPointerEvent<HTMLElement>, groupId: string) => void
+  /** The title bar's: drags without selecting. Falls back to `onPointerDown`. */
+  onTitlePointerDown?: (event: ReactPointerEvent<HTMLElement>, groupId: string) => void
   onHandlePointerDown: (event: ReactPointerEvent<HTMLElement>, groupId: string, side: Anchor) => void
   onResizePointerDown: (event: ReactPointerEvent<HTMLElement>, groupId: string) => void
   onContextMenu: (event: React.MouseEvent<HTMLDivElement>, groupId: string) => void
@@ -22,6 +24,7 @@ function GroupNodeImpl({
   dimmed,
   offset,
   onPointerDown,
+  onTitlePointerDown,
   onHandlePointerDown,
   onResizePointerDown,
   onContextMenu,
@@ -68,6 +71,21 @@ function GroupNodeImpl({
       <header
         className="cc-group__header"
         style={{ background: `${group.color}18` }}
+        /*
+          Drag-only, like an element's title bar. Without a handler of its own this
+          header falls through to the group's own pointerdown, which selects as well
+          as drags -- so rearranging a group opened its properties panel every time.
+
+          The title input below is the exception: it is a real field, so it keeps
+          `data-no-drag` and a text cursor and is edited where it is drawn.
+        */
+        onPointerDown={(event) => {
+          // The drag-only handler when the canvas supplied one. The fallback is the
+          // group handler, which selects too -- a group with no drag-only handler
+          // would otherwise have a title bar that cannot move it at all.
+          const handler = onTitlePointerDown ?? onPointerDown
+          handler(event, group.id)
+        }}
       >
         <input
           className="cc-group__title"
