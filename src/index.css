@@ -75,29 +75,36 @@
    *
    * Defined once here rather than written into each rule, because the hotspot is
    * half of the cursor's meaning and a hotspot written in six places is six
-   * chances to get it subtly wrong. `gen-cursors.cjs` writes the SVGs from the
+   * chances to get it subtly wrong. `gen-cursors.cjs` rasterizes the PNGs from the
    * shape data in `scripts/cursors.config.cjs`, and `test-cursors.cjs` fails if
    * either the artwork or the numbers here drift from that source.
    *
    * Four cursors, because there are four things a pointer can be promising:
    *
-   *   grab     -- this moves if I press and move.
-   *   grabbing -- I am already moving it.
+   *   grab     -- this moves if I press and move.  A hollow hand.
+   *   grabbing -- I am already moving it.         The same hand, filled in.
    *   point    -- pressing this opens something.
    *   text     -- this is typeable, selectable text.
    *
+   * PNG rather than SVG, and that is not a preference. Cursor-image format support
+   * is a long tail -- PNG is required, static SVG is required "with an intrinsic
+   * size", animated SVG is a "may" -- and Chromium has deprecated cursors larger
+   * than 32x32 DIP that are not fully inside the viewport, so a cursor near the
+   * edge of a screen is exactly where an oversized image gets dropped. A raster
+   * image has none of those conditions.
+   *
    * The keyword after each comma is the fallback for a browser that cannot load
-   * the SVG. It is not decoration: it is why a missing file degrades to a system
+   * the PNG. It is not decoration: it is why a missing file degrades to a system
    * cursor instead of to nothing.
    *
    * Note what is *not* here: a replacement for the default arrow. An arrow means
    * "nothing to do here", and there is no better drawing of that than the one
    * every other program uses.
    */
-  --cc-cursor-grab: url('/cursors/grab.svg') 12 13, grab;
-  --cc-cursor-grabbing: url('/cursors/grabbing.svg') 12 13, grabbing;
-  --cc-cursor-point: url('/cursors/point.svg') 8 4, pointer;
-  --cc-cursor-text: url('/cursors/text.svg') 12 12, text;
+  --cc-cursor-grab: url('/cursors/grab.png') 16 17, grab;
+  --cc-cursor-grabbing: url('/cursors/grabbing.png') 16 17, grabbing;
+  --cc-cursor-point: url('/cursors/point.png') 11 5, pointer;
+  --cc-cursor-text: url('/cursors/text.png') 16 16, text;
 
   --cc-grid-dot: color-mix(in srgb, var(--cc-muted) 40%, transparent);
   --cc-grid-line: color-mix(in srgb, var(--cc-muted) 22%, transparent);

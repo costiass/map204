@@ -1,16 +1,47 @@
 // The cursor artwork, in one place.
 //
 // Shared by `gen-cursors.cjs` (which writes the files) and `test-cursors.cjs`
-// (which checks the files still match). Split out because a cursor's geometry and
-// the hotspot written in the stylesheet have to agree, and two copies of the
-// hotspot table is two chances to disagree.
+// (which checks the files still match). Split out because a cursor's shape and the
+// hotspot written in the stylesheet have to agree, and two copies of the hotspot
+// table is two chances to disagree.
 //
-// Cursors are the one piece of artwork on the site that cannot inherit a CSS
-// custom property: `cursor: url(...)` loads the file as an image, in its own
-// document, with no access to the page's variables. So the brand colour is baked
-// into the files -- which means a value baked by hand goes stale the moment the
-// theme changes, silently. Hence: read from CSS, generate, and let the test fail
-// if anyone edits the output instead of re-running the generator.
+// ## Why PNG, and not SVG
+//
+// The SVG version of this was correct in every way that can be checked from here:
+// the file was served, the content type was right, the intrinsic size was set, the
+// stylesheet pointed at it with a matching hotspot, and the built CSS contained the
+// rules. And the cursors still did not appear.
+//
+// Two things were wrong with it, and only one of them is a browser question:
+//
+//   * Chromium deprecated custom cursors larger than 32x32 DIP that are not fully
+//     inside the visual viewport, and cursor-image format support is a long tail of
+//     "required for PNG, should for SVG, may for animated SVG". A raster image is
+//     the format every browser that supports custom cursors at all supports, with
+//     no conditions attached. So the shipped file is a PNG.
+//   * The artwork was a 2px stroke in the brand colour behind a 4.5px white halo.
+//     On a white card that is a faint indigo outline -- present, technically
+//     visible, and not something anybody would describe as "working". A cursor is
+//     read at a glance and has to be solid.
+//
+// The SVG is still what the shapes are *authored* in, because path data is path
+// data; it is rasterized here rather than shipped, so there is one shape and one
+// hotspot and no chance of the stylesheet describing a different cursor from the
+// one on disk.
+//
+// ## Hollow hand to grab, solid hand when held
+//
+// The three hand cursors are the same shape, and the difference between "you can
+// pick this up" and "you are picking it up" is whether it is filled in. That is the
+// platform convention -- a hollow hand over a draggable thing, a solid one while
+// the button is down -- and it is one property rather than two drawings that have
+// to be kept in step.
+//
+// It is also the only version that renders. Lucide's `hand-fist` and `hand-grab`
+// were both tried for the dragging state and both fall apart at 32px: a stroked
+// halo closes over any enclosed gap narrower than half its width, so their finger
+// separations fill with white and the cursor comes out as a pale blob. An outline
+// of the open hand has no enclosed regions and survives the treatment.
 
 const fs = require('fs')
 const path = require('path')
@@ -26,107 +57,173 @@ if (!brand) {
 const INK = brand[1]
 
 /**
- * The shapes, lifted from lucide's icon data so the cursors and the icon set are
- * the same drawing rather than two hand-rolled near-misses.
+ * The largest cursor image browsers will reliably honour: 32x32.
  *
- * `hotspot` is the point that must land under the real pointer, in the SVG's own
- * 24x24 units. The stylesheet repeats it in the `cursor: url() x y` pair, and the
- * test compares the two.
+ * MDN notes that Firefox and Chromium restrict cursor images to 128x128 but
+ * *recommend* 32x32, and Chromium has deprecated anything larger that is not fully
+ * inside the visual viewport -- so an oversized cursor fails at the edge of a
+ * screen and nowhere else, which reads as flakiness rather than as a size.
+ *
+ * Declared separately from `PIXELS` on purpose. A test that checks the rendered
+ * image against the generator's own constant checks nothing: bump the constant to
+ * 64, regenerate, and the assertion moves with it and still passes. This is the
+ * limit, and it does not move because somebody changed a number.
  */
+const MAX_CURSOR_PIXELS = 32
+
+/**
+ * What we actually render: the limit, because 32 is also what an operating system
+ * cursor is at 1x, so this is the size people already read cursors at.
+ */
+const PIXELS = MAX_CURSOR_PIXELS
+
+/**
+ * The shapes are drawn in a 24-unit viewBox, because that is Lucide's grid.
+ * Rasterizing to 32 scales them by 4/3, and the hotspot scales with them -- see
+ * `hotspotFor`, which is the only place that conversion happens.
+ */
+const DESIGN = 24
+
+/** Lucide's `hand`, shared by the three hand cursors. */
+const HAND = [
+  { d: 'M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2' },
+  { d: 'M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2' },
+  { d: 'M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8' },
+  {
+    d: 'M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15',
+  },
+]
+
+/** The palm outline, which is the path that gets a fill. */
+const PALM = 3
+
 const CURSORS = {
-  // Open hand: over a zone you can drag. Lucide `hand`.
+  // Hollow hand: over a zone you can drag.
   grab: {
     lucide: 'hand',
-    hotspot: [12, 13],
-    paths: [
-      { d: 'M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2' },
-      { d: 'M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2' },
-      { d: 'M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8' },
-      {
-        d: 'M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15',
-      },
-    ],
+    design: [12, 13],
+    halo: 4,
+    weight: 2.4,
+    paths: HAND,
   },
 
-  // Closed hand: while a drag is in progress. Lucide `hand-fist`.
-  //
-  // Closed because the thing is held. An open hand during a drag reads as "you
-  // could pick this up again", which is the opposite of what is happening.
+  // Solid hand: while a drag is in progress. Same shape, filled in.
   grabbing: {
-    lucide: 'hand-fist',
-    hotspot: [12, 13],
-    paths: [
-      {
-        d: 'M12.035 17.012a3 3 0 0 0-3-3l-.311-.002a.72.72 0 0 1-.505-1.229l1.195-1.195A2 2 0 0 1 10.828 11H12a2 2 0 0 0 0-4H9.243a3 3 0 0 0-2.122.879l-2.707 2.707A4.83 4.83 0 0 0 3 14a8 8 0 0 0 8 8h2a8 8 0 0 0 8-8V7a2 2 0 1 0-4 0v2a2 2 0 1 0 4 0',
-      },
-      { d: 'M13.888 9.662A2 2 0 0 0 17 8V5A2 2 0 1 0 13 5' },
-      { d: 'M9 5A2 2 0 1 0 5 5V10' },
-      { d: 'M9 7V4A2 2 0 1 1 13 4V7.268' },
-    ],
+    lucide: 'hand',
+    design: [12, 13],
+    halo: 4,
+    weight: 3,
+    solid: [PALM],
+    paths: HAND,
   },
 
-  // Open hand at the fingertip: over something a click opens. Lucide `hand`.
+  // Solid hand at the fingertip: over something a click opens.
   //
   // The hotspot is the tip of the index finger -- the part that presses. Anywhere
   // else and the click lands somewhere other than where the finger is drawn, which
   // feels wrong in a way nobody can name.
   point: {
     lucide: 'hand',
-    hotspot: [8, 4],
-    paths: [
-      { d: 'M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2' },
-      { d: 'M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2' },
-      { d: 'M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8' },
-      {
-        d: 'M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15',
-      },
-    ],
+    design: [8, 4],
+    halo: 4,
+    weight: 3,
+    solid: [PALM],
+    paths: HAND,
   },
 
   // The I-beam: over text you can select or type into. Lucide `type`.
   //
-  // Hotspot is dead centre, which for a symmetric I-beam is exactly right.
+  // A stroke rather than a fill, because an I-beam filled solid is a blob. The
+  // serifs are what make it read as "text" and not "a line", so they stay thin and
+  // the halo does the legibility work. Hotspot dead centre, which for a symmetric
+  // I-beam is exactly right.
   text: {
     lucide: 'type',
-    hotspot: [12, 12],
+    design: [12, 12],
+    halo: 3.9,
+    weight: 2.6,
     paths: [{ d: 'M12 4v16' }, { d: 'M4 7V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v2' }, { d: 'M9 20h6' }],
   },
 }
 
-/** Render one cursor's SVG, with the comment header that explains it in place. */
-function render(name, spec) {
-  const paths = spec.paths
-    .map((p) => `    <path d="${p.d}" />`)
-    .join('\n')
-  const [hx, hy] = spec.hotspot
-
-  return `<!--
-  GENERATED by scripts/gen-cursors.cjs -- do not edit by hand.
-
-  The ${name} cursor, in the theme's primary colour (${INK}, read from
-  --cc-brand in src/index.css).
-
-  Hotspot: ${hx},${hy} in this file's own 24x24 units. The stylesheet repeats it
-  in the cursor: url(...) ${hx} ${hy} pair; test-cursors.cjs fails if the two
-  disagree.
-
-  Two passes, because a cursor cannot inherit a page colour: a 4.5px white stroke
-  underneath, then a 2px ${INK} stroke on top. The white reads against a dark card
-  and the brand colour against a white one. Drawn at 24 rather than snapshotted to
-  32 or 64, so it stays sharp on a HiDPI display instead of going soft.
-
-  Shape: lucide's "${spec.lucide}", so the cursors and the icon set are one
-  drawing rather than two near-misses.
--->
-<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
-  <g stroke="#ffffff" stroke-width="4.5">
-${paths}
-  </g>
-  <g stroke="${INK}" stroke-width="2">
-${paths}
-  </g>
-</svg>
-`
+/**
+ * The hotspot in the rasterized image's own pixels.
+ *
+ * The shapes are authored on Lucide's 24-unit grid and rasterized at 32, so the
+ * hotspot scales with everything else. Doing this in one place is the point: a
+ * hotspot left at its design value would be 25% off, which is several pixels, and
+ * several pixels of cursor error is felt immediately and can never be reported.
+ */
+function hotspotFor(spec) {
+  const scale = PIXELS / DESIGN
+  return [Math.round(spec.design[0] * scale), Math.round(spec.design[1] * scale)]
 }
 
-module.exports = { INK, CURSORS, render, root }
+/** The SVG the shape is authored in, and rasterized from. Never shipped. */
+function renderSvg(name, spec) {
+  const all = spec.paths
+  const solid = spec.solid ?? []
+
+  const drawn = (fill) =>
+    all.map((p, i) => `    <path d="${p.d}" fill="${solid.includes(i) ? fill : 'none'}" />`).join('\n')
+
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${PIXELS}" height="${PIXELS}"`,
+    ` viewBox="0 0 ${DESIGN} ${DESIGN}" fill="none"`,
+    ' stroke-linecap="round" stroke-linejoin="round">',
+    // Pass 1 -- the white underneath. What makes one drawing legible on a white card
+    // and on a dark one, with no second set of artwork.
+    //
+    // The solid paths are filled as well as stroked, which is what puts a body
+    // inside the outline. Stroking alone does not, and a fill here is the only way
+    // to get one.
+    `  <g stroke="#ffffff" stroke-width="${spec.halo}">`,
+    drawn(INK),
+    '  </g>',
+    // Pass 2 -- the brand on top, a little narrower than the halo so the white shows
+    // as a rim rather than as the body. The halo being wider than the brand is the
+    // whole mechanism; when they were close in size the cursor came out mostly
+    // white and read as "faint" rather than "styled".
+    `  <g stroke="${INK}" stroke-width="${spec.weight}">`,
+    drawn(INK),
+    '  </g>',
+    '</svg>',
+    '',
+  ].join('\n')
+}
+
+/** The PNG bytes for one cursor. */
+function renderPng(name, spec) {
+  // Required lazily, and with a message, because "cannot find module" from deep
+  // inside a generator tells nobody that the fix is `npm install`.
+  let Resvg
+  try {
+    ;({ Resvg } = require('@resvg/resvg-js'))
+  } catch {
+    console.error(
+      '@resvg/resvg-js is not installed. The cursors are rasterized from their ' +
+        'source shapes rather than drawn as PNGs by hand, so the artwork cannot be ' +
+        'edited directly. Run: npm install',
+    )
+    process.exit(1)
+  }
+
+  return new Resvg(renderSvg(name, spec), {
+    fitTo: { mode: 'width', value: PIXELS },
+    background: 'rgba(0,0,0,0)',
+  })
+    .render()
+    .asPng()
+}
+
+module.exports = {
+  INK,
+  CURSORS,
+  DESIGN,
+  PIXELS,
+  MAX_CURSOR_PIXELS,
+  hotspotFor,
+  renderSvg,
+  renderPng,
+  root,
+}
