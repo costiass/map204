@@ -2,7 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { IconDownload, IconUpload, IconX } from '@/components/Icons'
 import { broadcastPagesImported, primePageSync } from '@/hooks/usePageSync'
-import { importPages, loadDocument, type WrittenPage } from '@/store/supabase-sync'
+import {
+  importPages,
+  loadDocument,
+  type LoadedDocument,
+  type WrittenPage,
+} from '@/store/supabase-sync'
 import { useCanvasStore } from '@/store/useCanvasStore'
 import { downloadDoc, parseDoc, serializeDoc } from '@/utils/serialize'
 import { formatBytes } from '@/utils/image'
@@ -111,6 +116,9 @@ function ImportExportBody({ initialTab }: { initialTab: Tab }) {
 
     let written: WrittenPage[] | null = null
     let failed = ''
+    // Hoisted, because the check below is about what actually arrived and so has
+    // to outlive the block that read it back.
+    let refreshed: LoadedDocument | null = null
 
     try {
       // One call. The server mints every id, rewires every reference, and
@@ -123,7 +131,7 @@ function ImportExportBody({ initialTab }: { initialTab: Tab }) {
         // minted the ids, so the local copy cannot know them, and a page the
         // database has never heard of would be re-created — and fail — on the
         // next save.
-        const refreshed = await loadDocument(documentId)
+        refreshed = await loadDocument(documentId)
         if (refreshed) {
           primePageSync(documentId, refreshed)
           store.replaceDoc({
@@ -153,8 +161,35 @@ function ImportExportBody({ initialTab }: { initialTab: Tab }) {
       return
     }
 
+    // "Added N pages" is a claim about the *contents*, not the count.
+    //
+    // The import used to report success on a workspace full of blank pages: the
+    // server function read its contents from a key the client had stopped
+    // sending, `coalesce`d the absence to an empty array, and inserted N pages
+    // with nothing in them. Every check passed — a transaction, a row count, a
+    // fresh read-back — because the only thing wrong was the data, and nobody
+    // looked at it.
+    //
+    // So the thing the caller actually wanted is compared against the thing the
+    // caller actually sent. If pages came back empty and pages were offered, that
+    // is a failure whatever the server said.
+    const arrived = refreshed?.pages ?? []
+    const offeredContent = parsed.pages.reduce((n, page) => n + page.elements.length, 0)
+    const arrivedContent = arrived.reduce((n, page) => n + page.elements.length, 0)
+
+    if (offeredContent > 0 && arrivedContent === 0) {
+      setError(
+        `The import created ${written.length} empty page${
+          written.length === 1 ? '' : 's'
+        } and nothing arrived in them. Nothing has been lost — the file is still on your disk — but the server did not accept the contents. See the console for the reason.`,
+      )
+      return
+    }
+
     pushToast(
-      `Added ${written.length} page${written.length === 1 ? '' : 's'}.`,
+      `Added ${written.length} page${written.length === 1 ? '' : 's'}` +
+        (arrivedContent > 0 ? ` with ${arrivedContent} elements` : '') +
+        '.',
       'success',
     )
     setDialog(null)

@@ -20,6 +20,16 @@
 // `tsc`, `oxlint` and the type checker never see SQL, and nothing catches this
 // until a migration runs against the live database — where a mid-sequence failure
 // leaves the schema half-applied and the rest of the migrations unapplied.
+//
+// ---------------------------------------------------------------------------
+// The second check is quieter and worse: that the functions the client calls read
+// the *current* shape of the data. import_pages read its page contents from
+// page -> \'cards\' after the client had begun sending elements, and coalesce\n// turned the absence into an empty array. Every import succeeded and produced
+// blank pages — a transaction, a row count and a fresh read-back all passed,
+// because the only thing wrong was the contents and nobody looked at them.
+//
+// A syntactically perfect function reading the wrong key is invisible to every
+// other tool in this repo, so it is checked here.
 
 const fs = require('fs')
 const path = require('path')
@@ -117,8 +127,36 @@ const PLPGSQL_ONLY = [
  */
 const SUSPECT_KEY = /->>?\s*([a-z_][a-z0-9_]*)(?![\w.])/gi
 
+/**
+ * The file holding the *last* `create or replace` for a function.
+ *
+ * A `create or replace` chain means the newest body wins and an older one is
+ * history rather than a bug. Checking every definition would make this test fail
+ * on the very migration that fixes the problem — which is how a useful check
+ * gets deleted by the person it was meant to help.
+ *
+ * Computed from file order, which is the order the migrations run in.
+ */
+const lastDefinitionOf = (function () {
+  const byName = new Map()
+  for (const file of files) {
+    const sql = blank(fs.readFileSync(path.join(dir, file), 'utf8'))
+    for (const m of sql.matchAll(
+      /create\s+(?:or\s+replace\s+)?function\s+([\w.]+)\s*\(/gi,
+    )) {
+      byName.set(m[1].toLowerCase(), file)
+    }
+  }
+  return (name) => byName.get(String(name).toLowerCase())
+})()
+
 for (const file of files) {
-  const sql = blank(fs.readFileSync(path.join(dir, file), 'utf8'))
+  // `rawSql` keeps string literals and comments; `sql` is the blanked version the
+  // language and `->>` checks read. Two views of one file, because a check for a
+  // missing key needs the key, and a check for a `jsonb ->> record` mistake needs
+  // the key erased.
+  const rawSql = fs.readFileSync(path.join(dir, file), 'utf8')
+  const sql = blank(rawSql)
 
   for (const m of sql.matchAll(SUSPECT_KEY)) {
     const key = m[1].toLowerCase()
@@ -154,6 +192,48 @@ for (const file of files) {
       continue
     }
 
+    // ----------------------------------------------------------------
+    // A function the browser calls has to read the *current* shape of the
+    // data it is given.
+    //
+    // `import_pages` is a security-definer RPC that takes a whole document and
+    // reads its contents by key. When the client stopped sending `cards` and
+    // began sending `elements`, that key went missing, `coalesce` turned the
+    // absence into an empty array, and every import inserted blank pages while
+    // reporting success — a transaction, a row count and a fresh read-back all
+    // passed, because the only thing wrong was the contents and nothing looked
+    // at them.
+    //
+    // A syntactically perfect function reading the wrong key is invisible to
+    // every other tool in this repo, so it is asserted here.
+    //
+    // The assertion is narrow on purpose: the function must read `elements`.
+    // Reading `cards` as well is correct and expected, because a version 1 file
+    // is exactly what somebody has lying around.
+    // Only the *last* definition of a function is the one that runs; an earlier
+    // one is superseded by its own `create or replace`. Checking every definition
+    // would fail on the very migration that fixes the problem, which is how a
+    // useful check gets deleted.
+    // Only the *last* definition of a function is the one that runs; an earlier
+    // one is superseded by its own `create or replace`. Checking every definition
+    // would fail on the very migration that fixes the problem, which is how a
+    // useful check gets deleted.
+    //
+    // Tested against the *raw* file, not `body`. `blank()` replaces every string
+    // literal with a space — which is right for finding a `->> record` mistake
+    // and exactly wrong here, because the thing being looked for *is* a string
+    // literal. The first version of this check tested the blanked body, matched
+    // nothing, and reported the broken function as fixed.
+    if (name.toLowerCase().endsWith('import_pages') && lastDefinitionOf(name) === file) {
+      if (!/->\s*'elements'/.test(rawSql)) {
+        fail(
+          `${file}: ${signature} does not read \`page -> 'elements'\`. The client ` +
+            'sends a version 2 document, so every import will insert empty pages ' +
+            "and report success. Read both 'elements' and 'cards'.",
+        )
+      }
+    }
+
     if (language.toLowerCase() !== 'sql') {
       // plpgsql and everything else: a body with declare/begin is expected.
       continue
@@ -178,8 +258,29 @@ for (const file of files) {
   }
 }
 
+// --- the functions the client calls must read the current shape ----------
+
+// --- the last definition of a function is the one that counts ----------
+//
+// A create or replace chain means the body in the last file wins, and an
+// earlier one is history rather than a bug. Checking every definition would
+// make this test fail on the very migration that fixes the problem, which is
+// how a useful check gets deleted.
+const lastDefinition = new Map()
+for (const file of files) {
+  const sql = blank(fs.readFileSync(path.join(dir, file), 'utf8'))
+  for (const m of sql.matchAll(
+    /create\s+(?:or\s+replace\s+)?function\s+([\w.]+)\s*\(/gi,
+  )) {
+    lastDefinition.set(m[1].toLowerCase(), file)
+  }
+}
+
 if (failures === 0) {
-  console.log(`migration sql: ${files.length} files, every function body matches its declared language`)
+  console.log(
+    `migration sql: ${files.length} files, every function body matches its declared ` +
+      'language, and every function the client calls reads the current shape',
+  )
 } else {
   console.log(`\n${failures} check(s) failed.`)
   process.exit(1)
