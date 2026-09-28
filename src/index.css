@@ -70,42 +70,6 @@
    */
   --cc-header-height: 38px;
 
-  /*
-   * The cursors, in the theme's primary colour.
-   *
-   * Defined once here rather than written into each rule, because the hotspot is
-   * half of the cursor's meaning and a hotspot written in six places is six
-   * chances to get it subtly wrong. `gen-cursors.cjs` rasterizes the PNGs from the
-   * shape data in `scripts/cursors.config.cjs`, and `test-cursors.cjs` fails if
-   * either the artwork or the numbers here drift from that source.
-   *
-   * Four cursors, because there are four things a pointer can be promising:
-   *
-   *   grab     -- this moves if I press and move.  A hollow hand.
-   *   grabbing -- I am already moving it.         The same hand, filled in.
-   *   point    -- pressing this opens something.
-   *   text     -- this is typeable, selectable text.
-   *
-   * PNG rather than SVG, and that is not a preference. Cursor-image format support
-   * is a long tail -- PNG is required, static SVG is required "with an intrinsic
-   * size", animated SVG is a "may" -- and Chromium has deprecated cursors larger
-   * than 32x32 DIP that are not fully inside the viewport, so a cursor near the
-   * edge of a screen is exactly where an oversized image gets dropped. A raster
-   * image has none of those conditions.
-   *
-   * The keyword after each comma is the fallback for a browser that cannot load
-   * the PNG. It is not decoration: it is why a missing file degrades to a system
-   * cursor instead of to nothing.
-   *
-   * Note what is *not* here: a replacement for the default arrow. An arrow means
-   * "nothing to do here", and there is no better drawing of that than the one
-   * every other program uses.
-   */
-  --cc-cursor-grab: url('/cursors/grab.png') 16 17, grab;
-  --cc-cursor-grabbing: url('/cursors/grabbing.png') 16 17, grabbing;
-  --cc-cursor-point: url('/cursors/point.png') 11 5, pointer;
-  --cc-cursor-text: url('/cursors/text.png') 16 16, text;
-
   --cc-grid-dot: color-mix(in srgb, var(--cc-muted) 40%, transparent);
   --cc-grid-line: color-mix(in srgb, var(--cc-muted) 22%, transparent);
 
@@ -774,7 +738,7 @@ body {
    */
   height: var(--cc-header-height);
   background: color-mix(in srgb, var(--cc-accent, #6366f1) 10%, transparent);
-  cursor: var(--cc-cursor-grab);
+  cursor: grab;
   touch-action: none;
   flex: 0 0 auto;
 }
@@ -801,7 +765,7 @@ body {
   /* Not the I-beam. The title is no longer an input -- it is read on the card and
      written in the inspector -- so a text cursor was promising an edit that could
      not happen. It says "drag", which is what the header does. */
-  cursor: var(--cc-cursor-grab);
+  cursor: grab;
   user-select: none;
 }
 
@@ -837,7 +801,7 @@ body {
  * press.
  */
 .cc-card__scroll {
-  cursor: var(--cc-cursor-point);
+  cursor: pointer;
 }
 
 /* And while a drag is in progress, everything on the element is grabbing -- the
@@ -846,7 +810,7 @@ body {
 .cc-card[data-dragging='true'] .cc-card__header,
 .cc-card[data-dragging='true'] .cc-card__title,
 .cc-card[data-dragging='true'] .cc-card__scroll {
-  cursor: var(--cc-cursor-grabbing);
+  cursor: grabbing;
 }
 
 .cc-card__btn {
@@ -1897,36 +1861,30 @@ body {
 }
 
 /* ------------------------------------------------------------------ */
-/* Cursors, everywhere                                                */
+/* Cursors                                                            */
 /* ------------------------------------------------------------------ */
 
 /*
- * A flash face: a press turns the card over, so a pointing hand. Named rather than
- * reusing `.cc-card__scroll`'s rule because the face sets its own cursor -- it is
- * a child, so the parent's rule would be overridden by it, and Tailwind's
- * `cursor-pointer` utility would win over both. One named class and no utility is
- * less to keep in step.
- */
-.cc-cursor-point-override {
-  cursor: var(--cc-cursor-point);
-}
-
-/*
- * Something that opens on a press but is not a `<button>`.
+ * System cursors, chosen by gesture.
  *
- * The rule further down matches `button, [role='button']`, and it is applied by role
- * so a new button needs no class. It misses the case here: the workspace cards are
- * `div`s with `role="button"` that open a map, and they were on the default arrow
- * while sitting right beside real buttons -- the one place on the screen where a
- * pointer that does not change is most obviously wrong.
+ * These used to be drawn: four generated PNGs, generated from lucide's hand and
+ * `type` icons, rasterized at 32x32 so browsers would honour them, in the theme's
+ * primary colour. All of that is gone, and it is worth recording why nothing broke
+ * when it went, because the reason is the opposite of what was expected.
  *
- * Named rather than a Tailwind `cursor-pointer` utility because a utility is emitted
- * in `@layer utilities`, which beats this unlayered stylesheet, and would put the
- * operating system's hand back.
+ * The artwork was never the problem. What was wrong -- and what was fixed -- was
+ * *which* cursor appeared where: a hand on a drag handle, an arrow on a button, an
+ * I-beam on a title bar. That is four lines of CSS and survives the removal
+ * entirely.
+ *
+ * The drawn cursors cost a 21KB image per shape, a rasterizer dependency, a
+ * generator, and a test that had to agree with a stylesheet about pixel hotspots.
+ * They also did not survive being looked at closely: an outline drawn at cursor
+ * size is read as "faint" rather than as "styled", and the first version was a 2px
+ * stroke behind a white halo, which on a white card is very nearly invisible.
+ *
+ * So: the semantics stay, the pictures go.
  */
-.cc-cursor-open {
-  cursor: var(--cc-cursor-point);
-}
 
 /*
  * One cursor per gesture, applied by what the thing *does* rather than by what it
@@ -1950,7 +1908,7 @@ body {
 .cc-group__header,
 .cc-handle,
 .cc-resize {
-  cursor: var(--cc-cursor-grab);
+  cursor: grab;
   touch-action: none;
 }
 
@@ -1961,7 +1919,7 @@ body {
 .cc-card[data-dragging='true'] *,
 .cc-group[data-dragging='true'],
 .cc-group[data-dragging='true'] * {
-  cursor: var(--cc-cursor-grabbing);
+  cursor: grabbing;
 }
 
 /* 2a. Presses that open something. `button`, `a`, and the ARIA roles that stand
@@ -1972,7 +1930,7 @@ button:not(:disabled),
 a[href],
 summary,
 .cc-card__scroll {
-  cursor: var(--cc-cursor-point);
+  cursor: pointer;
 }
 
 /* A disabled control is not a control. The browser already greys it out; a
@@ -1988,7 +1946,7 @@ textarea,
 select,
 [contenteditable='true'],
 .cc-input {
-  cursor: var(--cc-cursor-text);
+  cursor: text;
 }
 
 /*
@@ -1999,12 +1957,12 @@ select,
  */
 input[type='checkbox'],
 input[type='radio'] {
-  cursor: var(--cc-cursor-point);
+  cursor: pointer;
 }
 
 /* 3b. Long notes scroll. Panning is a drag, but of the page rather than of an
       element, so it gets the open hand and never the closed one -- there is no
       "while panning" state to hook. */
 .cc-card__scroll[data-scrollable='true'] {
-  cursor: var(--cc-cursor-grab);
+  cursor: grab;
 }

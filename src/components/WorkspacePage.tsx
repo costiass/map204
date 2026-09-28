@@ -170,8 +170,11 @@ export function WorkspacePage({ userId, onOpenDocument }: WorkspacePageProps) {
         the heading, because neither of those is the first thing they are looking
         at — they are looking for the thing they left.
       */}
-      <div className="flex justify-center px-6 pt-8">
-        <Map204Logo className="h-9 w-auto" />
+      <div className="flex justify-center px-6 pt-10">
+        {/* h-12 rather than h-9. The mark is the first thing on the screen a person
+            arrives at, and at 36px it read as a small badge above a heading rather
+            than as the product's name. */}
+        <Map204Logo className="h-12 w-auto" />
       </div>
 
       <div className="mx-auto w-full max-w-4xl px-6 py-8">
@@ -367,20 +370,16 @@ function WorkspaceCard({
   return (
     <div
       /*
-       * A pointing hand, because the card is a `role="button"` that opens the map.
+       * The cursor is not set here, and that is deliberate.
        *
-       * The site's cursors are drawn, not taken from the operating system -- see the
-       * four `--cc-cursor-*` properties in index.css -- and every one of them is
-       * assigned by a rule. A `div` is not a button as far as those rules are
-       * concerned, because the selector is `button, [role='button']` and this is
-       * neither; so the whole card list was on the default arrow while looking
-       * exactly as clickable as the buttons beside it.
-       *
-       * `.cc-cursor-open` rather than a Tailwind `cursor-pointer`, for the same
-       * reason the rest of the app does it: the utility would win over the
-       * stylesheet's own rule and put the system hand back.
+       * This card opens the map, so it wants a pointing hand, and `role="button"`
+       * below is what gets it one: the gesture rules in index.css are written
+       * against `button` and `[role='button']`, so a new clickable thing is correct
+       * without remembering to give it a class. An explicit `cursor-pointer` here
+       * would be a second answer to a question that already has one, and the two
+       * would disagree the first time somebody changed the rule.
        */
-      className="cc-cursor-open group relative flex h-full flex-col rounded-xl border border-line bg-surface p-3 text-left shadow-sm transition hover:border-line-strong hover:shadow-md"
+      className="group relative flex h-full flex-col rounded-xl border border-line bg-surface p-3 text-left shadow-sm transition hover:border-line-strong hover:shadow-md"
       style={{ borderTopColor: accent.base, borderTopWidth: 2 }}
       role="button"
       tabIndex={0}
@@ -552,7 +551,7 @@ function WorkspaceRow({
 
   return (
     <div
-      className="cc-cursor-open group relative flex items-center gap-3 rounded-xl border border-line bg-surface p-3 shadow-sm transition hover:border-line-strong hover:shadow-md"
+      className="group relative flex items-center gap-3 rounded-xl border border-line bg-surface p-3 shadow-sm transition hover:border-line-strong hover:shadow-md"
       // The whole row is the button. A keyboard focus lands on this, and Enter
       // and Space both open, because it is a real <button>.
       role="button"

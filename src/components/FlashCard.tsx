@@ -150,7 +150,13 @@ export function FlashDeck({
               ? 'transition-transform duration-500 [transform-style:preserve-3d] ' +
                 (flipped ? '[transform:rotateY(180deg)]' : '')
               : '',
-            canFlip ? 'cc-cursor-point-override' : 'cursor-default',
+            canFlip ? 'cursor-pointer' : 'cursor-default',
+    /*
+     * A pointer because a press turns the card over. Set here rather than left to
+     * the inherited value because the face is what takes the press, and a cursor
+     * that does not change over a control that responds to a click is a cursor that
+     * has stopped saying what things do.
+     */
           ].join(' ')}
           role={canFlip ? 'button' : undefined}
           tabIndex={canFlip ? 0 : undefined}
