@@ -1210,6 +1210,15 @@ export function Canvas() {
               dimmed={dimmedCardIds.has(element.id)}
               spotlight={spotlightId === element.id}
               dragTarget={draft?.targetElementId === element.id}
+              // The grabbing cursor, and a heavier shadow, while this element is
+              // one of the ones being held. The attribute was in the stylesheet
+              // from the start and never rendered, so neither had ever applied.
+              dragging={
+                dragging &&
+                (preview?.kind === 'drag'
+                  ? preview.ids.includes(element.id)
+                  : selectedElementIds.includes(element.id))
+              }
               offset={dragOffsetFor(element.id)}
               size={
                 preview?.kind === 'resize' && preview.cardId === element.id

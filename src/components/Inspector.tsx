@@ -1,6 +1,6 @@
 import { CardContentTab } from '@/components/CardContentTab'
 import { ElementInspectorTab } from '@/components/ElementInspectorTab'
-import { CardSettingsTab } from '@/components/CardSettingsTab'
+import { ElementSettingsTab } from '@/components/ElementSettingsTab'
 import { ConnectionEditor } from '@/components/ConnectionEditor'
 import { GroupEditor } from '@/components/GroupEditor'
 import { IconFit, IconX } from '@/components/Icons'
@@ -144,11 +144,23 @@ export function Inspector() {
               are open. A note has a Markdown body, tags, a checklist and a
               style; a video has a link and a display mode. Showing the note tabs
               for a video would offer a colour picker for a thing with no colour. */}
-          {card.kind === 'note'
-            ? tab === 'content'
-              ? <CardContentTab key={card.id} card={card} />
-              : <CardSettingsTab key={card.id} card={card} />
-            : <ElementInspectorTab key={card.id} element={card} />}
+          {/*
+            Two panels for every kind, and only the *first* one is kind-specific.
+
+            Settings used to be a note's, because a style was a note's field. Style
+            and tags are on the base now, so colours, border and layout apply to a
+            video and a deck as much as to a note — and an element you cannot
+            restyle is one that looks like it was not made by whoever made the
+            others. So the settings panel is shared, and the content tab is where
+            the kinds differ: a note has a body, a video a link, a table a grid.
+          */}
+          {tab === 'settings' ? (
+            <ElementSettingsTab key={card.id} element={card} />
+          ) : card.kind === 'note' ? (
+            <CardContentTab key={card.id} card={card} />
+          ) : (
+            <ElementInspectorTab key={card.id} element={card} />
+          )}
         </>
       ) : null}
 

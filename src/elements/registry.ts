@@ -196,7 +196,20 @@ export const ELEMENT_KINDS: readonly ElementKind[] = [
     needsSource: false,
     container: false,
     layer: 'normal',
-    supported: false,
+    /*
+      Supported.
++
+      This was false when the registry was written, on the grounds that the
+      element did not exist yet. It does now: a maker in `elements/serialize`, a
+      body in `ElementNode`, a section in `ElementInspectorTab`, and the operations
+      it needs were already there because a table was the reason the column-major
+      `cells` array was designed that way.
++
+      Leaving the flag false hid a working kind behind "not implemented yet" and
+      made the app look like it could not do something it can. `link` is the one
+      still genuinely unimplemented, and its flag says so.
+    */
+    supported: true,
   },
 ] as const
 

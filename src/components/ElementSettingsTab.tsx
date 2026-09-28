@@ -12,17 +12,22 @@ import {
   MIN_CARD_HEIGHT,
   MIN_CARD_WIDTH,
   TEXT_COLORS,
-  type NoteElement,
+  type Element,
 } from '@/types'
 
 /**
- * The Settings tab for a note: how it looks and where it sits — colours, border,
- * shadow, size, position, z-order, its group, and the document's defaults.
+ * The Settings tab, and it is the *same* tab for every kind.
  *
- * Note-only. A style, a border radius and a shadow belong to a note; the other
- * kinds are routed to `ElementInspectorTab` by the inspector.
+ * Colours, border, shadow, size, position, z-order, group, and the document's
+ * defaults — none of which is a note's business specifically. A style and a set
+ * of tags are on the base precisely so this panel could stop being note-only, and
+ * it now takes an `Element` rather than a `NoteElement`.
+ *
+ * A video's frame can be recoloured, a flash deck's border changed, a table
+ * given a radius. That is not a nicety: an element you cannot restyle is an
+ * element that looks like it was not made by whoever made the other ones.
  */
-export function CardSettingsTab({ card }: { card: NoteElement }) {
+export function ElementSettingsTab({ element }: { element: Element }) {
   const updateElement = useCanvasStore((s) => s.updateElement)
   const updateElementStyle = useCanvasStore((s) => s.updateElementStyle)
   const applyElementZOrder = useCanvasStore((s) => s.applyElementZOrder)
@@ -45,13 +50,13 @@ export function CardSettingsTab({ card }: { card: NoteElement }) {
   )
 
   const isDefault =
-    defaultStyle.backgroundColor === card.style.backgroundColor &&
-    defaultStyle.accentColor === card.style.accentColor &&
-    defaultStyle.textColor === card.style.textColor &&
-    defaultStyle.borderColor === card.style.borderColor &&
-    defaultStyle.borderWidth === card.style.borderWidth &&
-    defaultStyle.borderRadius === card.style.borderRadius &&
-    defaultStyle.shadow === card.style.shadow
+    defaultStyle.backgroundColor === element.style.backgroundColor &&
+    defaultStyle.accentColor === element.style.accentColor &&
+    defaultStyle.textColor === element.style.textColor &&
+    defaultStyle.borderColor === element.style.borderColor &&
+    defaultStyle.borderWidth === element.style.borderWidth &&
+    defaultStyle.borderRadius === element.style.borderRadius &&
+    defaultStyle.shadow === element.style.shadow
   void isDefault
 
   return (
@@ -66,21 +71,21 @@ export function CardSettingsTab({ card }: { card: NoteElement }) {
         <div className="space-y-2.5">
           <ColorPicker
             label="Background"
-            value={card.style.backgroundColor}
+            value={element.style.backgroundColor}
             colors={CARD_BACKGROUNDS}
-            onChange={(backgroundColor) => updateElementStyle(card.id, { backgroundColor })}
+            onChange={(backgroundColor) => updateElementStyle(element.id, { backgroundColor })}
           />
           <ColorPicker
             label="Accent strip"
-            value={card.style.accentColor}
+            value={element.style.accentColor}
             colors={CARD_ACCENTS}
-            onChange={(accentColor) => updateElementStyle(card.id, { accentColor })}
+            onChange={(accentColor) => updateElementStyle(element.id, { accentColor })}
           />
           <ColorPicker
             label="Text"
-            value={card.style.textColor}
+            value={element.style.textColor}
             colors={TEXT_COLORS}
-            onChange={(textColor) => updateElementStyle(card.id, { textColor })}
+            onChange={(textColor) => updateElementStyle(element.id, { textColor })}
           />
         </div>
       </Section>
@@ -93,37 +98,37 @@ export function CardSettingsTab({ card }: { card: NoteElement }) {
               <input
                 type="color"
                 className="h-8 w-8 cursor-pointer rounded border border-line bg-white p-0.5"
-                value={/^#[0-9a-f]{6}$/i.test(card.style.borderColor) ? card.style.borderColor : '#e5e7eb'}
-                onChange={(event) => updateElementStyle(card.id, { borderColor: event.target.value.toUpperCase() })}
+                value={/^#[0-9a-f]{6}$/i.test(element.style.borderColor) ? element.style.borderColor : '#e5e7eb'}
+                onChange={(event) => updateElementStyle(element.id, { borderColor: event.target.value.toUpperCase() })}
               />
-              <span className="cc-kbd">{card.style.borderColor}</span>
+              <span className="cc-kbd">{element.style.borderColor}</span>
             </span>
           </label>
           <NumberField
             label="Border width (px)"
-            value={card.style.borderWidth}
+            value={element.style.borderWidth}
             min={MIN_CARD_BORDER_WIDTH}
             max={MAX_CARD_BORDER_WIDTH}
-            onCommit={(borderWidth) => updateElementStyle(card.id, { borderWidth })}
+            onCommit={(borderWidth) => updateElementStyle(element.id, { borderWidth })}
           />
         </div>
         <div className="mt-2">
           <SliderField
             label="Corner radius"
             suffix="px"
-            value={card.style.borderRadius}
+            value={element.style.borderRadius}
             min={0}
             max={32}
-            onChange={(borderRadius) => updateElementStyle(card.id, { borderRadius }, { silent: true })}
-            onCommit={(borderRadius) => updateElementStyle(card.id, { borderRadius })}
+            onChange={(borderRadius) => updateElementStyle(element.id, { borderRadius }, { silent: true })}
+            onCommit={(borderRadius) => updateElementStyle(element.id, { borderRadius })}
           />
         </div>
         <label className="mt-2 flex items-center gap-2 text-xs text-slate-600">
           <input
             type="checkbox"
             className="accent-indigo-500"
-            checked={card.style.shadow}
-            onChange={(event) => updateElementStyle(card.id, { shadow: event.target.checked })}
+            checked={element.style.shadow}
+            onChange={(event) => updateElementStyle(element.id, { shadow: event.target.checked })}
           />
           Drop shadow
         </label>
@@ -131,8 +136,8 @@ export function CardSettingsTab({ card }: { card: NoteElement }) {
           <input
             type="checkbox"
             className="accent-indigo-500"
-            checked={card.collapsed}
-            onChange={() => toggleElementCollapsed([card.id])}
+            checked={element.collapsed}
+            onChange={() => toggleElementCollapsed([element.id])}
           />
           Collapsed (links stay where they are)
         </label>
@@ -144,13 +149,13 @@ export function CardSettingsTab({ card }: { card: NoteElement }) {
         </p>
         <div
           className="mt-2 flex items-center gap-2 rounded-lg border border-line px-2 py-1.5"
-          style={{ background: card.style.backgroundColor, borderColor: card.style.borderColor }}
+          style={{ background: element.style.backgroundColor, borderColor: element.style.borderColor }}
         >
           <span
             className="h-4 w-1.5 shrink-0 rounded-full"
-            style={{ background: card.style.accentColor }}
+            style={{ background: element.style.accentColor }}
           />
-          <span className="text-[11px]" style={{ color: card.style.textColor }}>
+          <span className="text-[11px]" style={{ color: element.style.textColor }}>
             Preview
           </span>
           {isDefault ? (
@@ -165,27 +170,27 @@ export function CardSettingsTab({ card }: { card: NoteElement }) {
         <div className="grid grid-cols-2 gap-2">
           <NumberField
             label="X"
-            value={card.x}
-            onCommit={(x) => updateElement(card.id, { x })}
+            value={element.x}
+            onCommit={(x) => updateElement(element.id, { x })}
           />
           <NumberField
             label="Y"
-            value={card.y}
-            onCommit={(y) => updateElement(card.id, { y })}
+            value={element.y}
+            onCommit={(y) => updateElement(element.id, { y })}
           />
           <NumberField
             label="Width"
-            value={card.width}
+            value={element.width}
             min={MIN_CARD_WIDTH}
             max={MAX_CARD_WIDTH}
-            onCommit={(width) => updateElement(card.id, { width })}
+            onCommit={(width) => updateElement(element.id, { width })}
           />
           <NumberField
             label="Height"
-            value={card.height}
+            value={element.height}
             min={MIN_CARD_HEIGHT}
             max={MAX_CARD_HEIGHT}
-            onCommit={(height) => updateElement(card.id, { height })}
+            onCommit={(height) => updateElement(element.id, { height })}
           />
         </div>
         <p className="mt-1.5 text-[10.5px] text-slate-400">
@@ -196,13 +201,13 @@ export function CardSettingsTab({ card }: { card: NoteElement }) {
         <div className="mt-2 grid grid-cols-2 gap-2">
           <NumberField
             label="Z-index"
-            value={card.zIndex}
-            onCommit={(zIndex) => updateElement(card.id, { zIndex })}
+            value={element.zIndex}
+            onCommit={(zIndex) => updateElement(element.id, { zIndex })}
           />
           {/* A group, rather than the old "parent card" dropdown.
 
               Version 1 had two ways to say "this is inside that": the bounds of a
-              group, and a `parentId` on the card. They could disagree — a card
+              group, and a `parentId` on the element. They could disagree — a card
               parented to something it sat nowhere near. A group is one mechanism
               with one answer, and this dropdown is how a person puts a note in
               one. */}
@@ -210,14 +215,14 @@ export function CardSettingsTab({ card }: { card: NoteElement }) {
             <span className="cc-label">In group</span>
             <select
               className="cc-input"
-              value={groupOptions.find((g) => g.ids.includes(card.id))?.group.id ?? ''}
+              value={groupOptions.find((g) => g.ids.includes(element.id))?.group.id ?? ''}
               onChange={(event) => {
                 const next = event.target.value
                 // A note can be in one group at a time, so moving it out of the
                 // one it is in is a step, not a second thing to choose.
                 for (const group of groupOptions) {
-                  if (group.group.id === next) addElementToGroup(group.group.id, card.id)
-                  else removeElementFromGroup(group.group.id, card.id)
+                  if (group.group.id === next) addElementToGroup(group.group.id, element.id)
+                  else removeElementFromGroup(group.group.id, element.id)
                 }
               }}
             >
@@ -231,21 +236,21 @@ export function CardSettingsTab({ card }: { card: NoteElement }) {
           </label>
         </div>
         <div className="mt-2 flex flex-wrap gap-1.5">
-          <button type="button" className="cc-btn" onClick={() => applyElementZOrder([card.id], 'front')}>
+          <button type="button" className="cc-btn" onClick={() => applyElementZOrder([element.id], 'front')}>
             Bring to front
           </button>
-          <button type="button" className="cc-btn" onClick={() => applyElementZOrder([card.id], 'back')}>
+          <button type="button" className="cc-btn" onClick={() => applyElementZOrder([element.id], 'back')}>
             Send to back
           </button>
-          <button type="button" className="cc-btn" onClick={() => duplicateElements([card.id])}>
+          <button type="button" className="cc-btn" onClick={() => duplicateElements([element.id])}>
             <IconCopy size={13} /> Duplicate
           </button>
           <button
             type="button"
             className="cc-btn"
-            onClick={() => toggleElementCollapsed([card.id])}
+            onClick={() => toggleElementCollapsed([element.id])}
           >
-            <IconCollapse size={13} /> {card.collapsed ? 'Expand' : 'Collapse'}
+            <IconCollapse size={13} /> {element.collapsed ? 'Expand' : 'Collapse'}
           </button>
         </div>
       </Section>
@@ -254,20 +259,20 @@ export function CardSettingsTab({ card }: { card: NoteElement }) {
         <dl className="space-y-1 text-[11px] text-slate-500">
           <div className="flex justify-between gap-2">
             <dt>Card ID</dt>
-            <dd className="truncate font-mono text-[10px]">{card.id}</dd>
+            <dd className="truncate font-mono text-[10px]">{element.id}</dd>
           </div>
           <div className="flex justify-between gap-2">
             <dt>Updated</dt>
-            <dd>{new Date(card.updatedAt).toLocaleString()}</dd>
+            <dd>{new Date(element.updatedAt).toLocaleString()}</dd>
           </div>
         </dl>
         <button
           type="button"
           className="cc-btn mt-2"
           data-variant="danger"
-          onClick={() => deleteElements([card.id])}
+          onClick={() => deleteElements([element.id])}
         >
-          <IconTrash size={13} /> Delete card
+          <IconTrash size={13} /> Delete element
         </button>
       </Section>
     </div>

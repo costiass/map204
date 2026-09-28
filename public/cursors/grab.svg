@@ -1,0 +1,32 @@
+<!--
+  The drag cursor, as an SVG so it scales with the display rather than being a
+  1x bitmap that goes fuzzy on a HiDPI screen.
+
+  Hotspot is 12,12 — the centre of the 24x24 viewBox, and the middle of the
+  crosshair. A drag cursor is anchored on the thing you are picking up, not on
+  the corner of its own arrow, which is why it is a four-way move and not the
+  default arrow.
+
+  Stroke is doubled and offset by one pixel, then filled white, which is the
+  standard trick for making a thin light line visible on both a light and a dark
+  canvas: the dark copy reads on white, the light copy reads on black, and the
+  two are always both present.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="4">
+    <path d="M12 2v20" />
+    <path d="m15 19-3 3-3-3" />
+    <path d="m19 9 3 3-3 3" />
+    <path d="M2 12h20" />
+    <path d="m5 9-3 3 3 3" />
+    <path d="m9 5 3-3 3 3" />
+  </g>
+  <g fill="none" stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round" stroke-width="2">
+    <path d="M12 2v20" />
+    <path d="m15 19-3 3-3-3" />
+    <path d="m19 9 3 3-3 3" />
+    <path d="M2 12h20" />
+    <path d="m5 9-3 3 3 3" />
+    <path d="m9 5 3-3 3 3" />
+  </g>
+</svg>

@@ -28,6 +28,8 @@ export interface ElementNodeProps {
   /** Ringed, because a presentation step is pointing at this one. */
   spotlight?: boolean
   dragTarget: boolean
+  /** Is this element one of the ones currently being dragged? */
+  dragging?: boolean
   /** Live drag offset applied on top of the stored world position. */
   offset: Point | null
   /** Live resize override. */
@@ -49,6 +51,7 @@ function ElementNodeImpl({
   dimmed,
   spotlight = false,
   dragTarget,
+  dragging = false,
   offset,
   size,
   childTitles,
@@ -125,68 +128,24 @@ function ElementNodeImpl({
     </>
   )
 
-  /* ---------------------------------------------------------------- */
-  /* A flash deck is a different shape of thing                         */
-  /* ---------------------------------------------------------------- */
-
-  // A deck gets no header and no title input. The front *is* the question, so a
-  // title field above it would say the same thing twice and make the deck look
-  // like a note with a question on it. The controls move onto the face itself,
-  // where they sit on the card rather than above it.
-  if (element.kind === 'flash' && !element.collapsed) {
-    return (
-      <div
-        className="cc-card"
-        style={style}
-        data-card-id={element.id}
-        data-kind={element.kind}
-        data-selected={selected ? 'true' : undefined}
-        data-dimmed={dimmed ? 'true' : undefined}
-        data-spotlight={spotlight ? 'true' : undefined}
-        data-drag-target={dragTarget ? 'true' : undefined}
-        data-shadow={noteStyle.shadow ? 'true' : 'false'}
-        onPointerDown={(event) => onElementPointerDown(event, element.id)}
-        onContextMenu={(event) => onContextMenu(event, element.id)}
-      >
-        <span className="cc-card__accent" />
-
-        <FlashDeck
-          element={element}
-          editable={editable}
-          onDoubleClick={() => setInspectorTab('content')}
-        />
-
-        <div className="absolute right-1 top-1 flex gap-0.5">
-          <button
-            type="button"
-            className="cc-card__btn"
-            title="Collapse element"
-            data-no-drag=""
-            onPointerDown={stop}
-            onClick={() => toggleElementCollapsed([element.id])}
-          >
-            <IconChevron
-              size={14}
-              style={{ transform: 'rotate(-90deg)', transition: 'transform 140ms ease' }}
-            />
-          </button>
-          <button
-            type="button"
-            className="cc-card__btn"
-            title="Element menu"
-            data-no-drag=""
-            onPointerDown={stop}
-            onClick={openMenu}
-          >
-            <IconMore size={14} />
-          </button>
-        </div>
-
-        {handles}
-      </div>
-    )
-  }
-
+  /*
+   * One shell for every kind.
+   *
+   * A flash deck used to be a special case with its own outer element, no header
+   * and no title — so a deck was not a card. It could not be dragged by a title,
+   * its collapse chevron sat somewhere else, and its controls floated over the
+   * face. A deck is now a card with a deck inside it, which is what it is.
+   *
+   * The two gestures, and where they live:
+   *
+   *   - the *header* drags. `data-no-drag` is deliberately absent, so the
+   *     pointerdown reaches the element and starts a drag. The title is read
+   *     rather than edited, because an editable title put two gestures in the
+   *     same twenty pixels and which one you got depended on how far your hand
+   *     moved before the caret appeared.
+   *   - the *body* opens the inspector. `data-no-drag` is set, so a press there
+   *     selects without starting a drag, and a click opens the panel.
+   */
   return (
     <div
       className="cc-card"
@@ -198,25 +157,17 @@ function ElementNodeImpl({
       data-spotlight={spotlight ? 'true' : undefined}
       data-collapsed={element.collapsed ? 'true' : undefined}
       data-drag-target={dragTarget ? 'true' : undefined}
+      data-dragging={dragging ? 'true' : undefined}
       data-shadow={noteStyle.shadow ? 'true' : 'false'}
-      onPointerDown={(event) => onElementPointerDown(event, element.id)}
       onContextMenu={(event) => onContextMenu(event, element.id)}
     >
       <span className="cc-card__accent" />
 
-      {/*
-        The header is a *drag handle*, not a text field.
-
-        An editable title on the element meant two conflicting gestures on the
-        same 20 pixels: press and move is a drag, press and type is a rename, and
-        which one you got depended on how far your hand moved before the caret
-        appeared. So the title is read here and written in the inspector, where
-        there is a field that is plainly for editing.
-
-        `data-no-drag` is deliberately *not* on it, so the pointerdown reaches the
-        element and starts a drag.
-      */}
-      <header className="cc-card__header" title={element.title || 'Untitled'}>
+      <header
+        className="cc-card__header"
+        title={element.title || 'Untitled'}
+        onPointerDown={(event) => onElementPointerDown(event, element.id)}
+      >
         <span className="cc-card__title">{element.title || 'Untitled'}</span>
         <button
           type="button"
@@ -224,15 +175,16 @@ function ElementNodeImpl({
           title={element.collapsed ? 'Expand element' : 'Collapse element'}
           aria-label={element.collapsed ? 'Expand element' : 'Collapse element'}
           aria-expanded={!element.collapsed}
+          data-no-drag=""
           onPointerDown={stop}
           onClick={() => toggleElementCollapsed([element.id])}
         >
           {/*
-            The chevron points the way the *click* goes, not the way the element
-            is currently folded. Collapsed, it points down to unfold; expanded, it
+            The chevron points the way the *click* goes, not the way the element is
+            currently folded. Collapsed, it points down to unfold; expanded, it
             points up to fold. The old version rotated the other way, so a
-            collapsed card showed a down-chevron as though it were the thing to
-            press to collapse it.
+            collapsed card showed a down-chevron as though pressing it would
+            collapse it again.
           */}
           <IconChevron
             size={14}
@@ -246,6 +198,8 @@ function ElementNodeImpl({
           type="button"
           className="cc-card__btn"
           title="Element menu"
+          aria-label="Element menu"
+          data-no-drag=""
           onPointerDown={stop}
           onClick={openMenu}
         >
@@ -254,8 +208,27 @@ function ElementNodeImpl({
       </header>
 
       {!element.collapsed ? (
-        <div className="cc-card__scroll cc-scroll">
-          <ElementBody element={element} childTitles={childTitles} />
+        /*
+          `data-no-drag` on the body is the other half of the gesture split: a
+          press here selects the element and stops, so a click can open the
+          inspector without the pointer having moved enough to be a drag.
+
+          The deck is the exception and opts back in, because its whole face is a
+          control — a press turns the card over. It tracks pointer travel itself
+          and starts a drag only once the pointer has actually travelled, which is
+          why it does not need the marker.
+        */
+        <div
+          className="cc-card__scroll cc-scroll"
+          data-no-drag={element.kind === 'flash' ? undefined : ''}
+          onPointerDown={
+            element.kind === 'flash'
+              ? undefined
+              : (event) => onElementPointerDown(event, element.id)
+          }
+          onDoubleClick={element.kind === 'flash' ? undefined : () => setInspectorTab('content')}
+        >
+          <ElementBody element={element} childTitles={childTitles} editable={editable} />
         </div>
       ) : null}
 
@@ -268,16 +241,42 @@ function ElementNodeImpl({
 /* The body, which is the only part that varies by kind                  */
 /* ------------------------------------------------------------------ */
 
-function ElementBody({ element, childTitles }: { element: Element; childTitles: string[] }) {
+function ElementBody({
+  element,
+  childTitles,
+  editable,
+}: {
+  element: Element
+  childTitles: string[]
+  /** False in read-only and presentation, where a click is not a flip or a type. */
+  editable: boolean
+}) {
   switch (element.kind) {
     case 'note':
       return <NoteBody element={element} childTitles={childTitles} />
+    case 'flash':
+      /*
+        The deck, inside the card.
+
+        A deck is a card with a card inside it: the header above it is the same
+        header every other kind has, and the face below is the only part that
+        differs. That is what makes it draggable by its title, collapsible, and
+        openable in the inspector without any of those being special-cased.
+      */
+      return <FlashDeck element={element} editable={editable} />
     case 'video':
     case 'pdf':
       return (
         <>
-          {/* A video or a PDF leads with what it points at. */}
-          <div className="mb-2">
+          {/*
+            A video or a PDF leads with what it points at.
+
+            No wrapper margin for a *video*: the frame is the element, edge to
+            edge, and a margin is the padding that made it look like a video
+            sitting inside a card. A PDF keeps a little space, because it is a
+            document sitting on a card rather than being one.
+          */}
+          <div className={element.kind === 'video' ? '' : 'mb-2'}>
             <CardEmbedView element={element} />
           </div>
           {/* Only a PDF has a note. A video is the video; there is nothing to say

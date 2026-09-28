@@ -201,19 +201,26 @@ export function FlashDeck({
         >
           {/* The two faces, each with an *explicit* rotation including the front
               at 0°. A face with no transform of its own is not reliably culled
-              by `backface-visibility`, and both would show at once. */}
+              by `backface-visibility`, and both would show at once.
+
+              `showing` is which one is up. `turning` is only true while the
+              animation runs, and it is what decides whether the 3D transform is
+              applied at all — so at rest the visible face is flat and its text is
+              not rasterised at an angle. */}
           <Face
             key={`front-${question.id}`}
             side={question}
             role="front"
-            turned={turning && !flipped}
+            showing={!flipped}
+            turning={turning}
             className="[transform:rotateY(0deg)]"
           />
           <Face
             key={`back-${answer.id}`}
             side={answer}
             role="back"
-            turned={turning && flipped}
+            showing={flipped}
+            turning={turning}
             className="[transform:rotateY(180deg)]"
             fit={element.answerFit}
           />
@@ -260,14 +267,18 @@ export function FlashDeck({
 function Face({
   side,
   role,
-  turned,
+  showing,
+  turning,
   className,
   fit = 'center',
 }: {
   side: FlashSide
   role: 'front' | 'back'
-  /** True only while this face is the one being turned. */
-  turned: boolean
+  /** Is this the face currently showing? Decides visibility, not the transform. */
+  showing: boolean
+  /** Is the 3D turn running? Decides the transform, which is why text is crisp at
+   *  rest. */
+  turning: boolean
   className: string
   fit?: 'center' | 'top'
 }) {
@@ -281,8 +292,26 @@ function Face({
         fit === 'center' ? 'items-center justify-center text-center' : 'items-stretch',
         className,
       ].join(' ')}
-      style={turned ? undefined : { transform: undefined, opacity: 0, pointerEvents: 'none' }}
-      aria-hidden
+      /*
+        The bug this replaces.
+
+        The face used to be hidden with `opacity: 0` unless it was *mid-turn*, so
+        at rest neither face was visible: the content blinked out when the turn
+        ended and back when the next one began. "Turning" is not "showing" — the
+        two happen to coincide for 500ms and then diverge forever.
+
+        Visibility now follows `showing`, which is the only thing that describes
+        it. The face that is not showing is `display: none` rather than
+        transparent, so it is genuinely not on screen and cannot be seen through.
+      */
+      style={
+        showing
+          ? turning
+            ? undefined
+            : { transform: undefined }
+          : { display: 'none' }
+      }
+      aria-hidden={!showing}
       data-face-role={role}
       data-face-id={side.id}
     >

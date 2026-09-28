@@ -71,18 +71,26 @@ function VideoView({ element }: { element: VideoElement }) {
         data-no-drag=""
         onPointerDown={(event) => event.stopPropagation()}
         onClick={() => setPlaying(true)}
-        className="group relative block w-full cursor-pointer overflow-hidden rounded-lg border border-line bg-black"
-        style={{ aspectRatio: `${element.aspect || 16 / 9}` }}
+        // No padding, no border, no radius: the video *is* the element, edge to
+        // edge. Anything inset turns it into "a video inside a card", which is
+        // what the padding did — a grey frame around a picture, with the element's
+        // own colour in a stripe you could not remove.
+        className="group relative block h-full w-full cursor-pointer overflow-hidden bg-black"
+        style={element.aspect ? { aspectRatio: `${element.aspect}` } : undefined}
         title="Play this video"
       >
         {/*
-          `object-contain`, not `object-cover`.
+          `object-cover`, and that is only safe because the box is the video's
+          shape.
 
-          Cover fills the box and crops whatever does not fit, so a video whose
-          real shape differs from the element's is silently cut off at the sides
-          or the top — and the element looks correct because the box *is* the
-          element. Contain shows the whole frame; where the shapes disagree the
-          difference is letterboxing, which is visible and truthful.
+          Cover crops whatever does not fit, which is why it was wrong before: the
+          element was a fixed 16:9 and the thumbnail was letterboxed inside it, so
+          cover cut the sides off. Now the element's aspect is the video's real
+          aspect, learned from the thumbnail, and the two agree — so cover fills
+          without cropping anything.
+
+          If the aspect is not yet known there is no `aspect-ratio` on the box, so
+          the image's own shape sizes it and there is nothing to crop against.
         */}
         {thumbnail ? (
           <img
@@ -101,7 +109,7 @@ function VideoView({ element }: { element: VideoElement }) {
                 learnVideoAspect(element.id, measured)
               }
             }}
-            className="h-full w-full object-contain opacity-90 transition group-hover:opacity-100"
+            className="h-full w-full object-cover opacity-95 transition group-hover:opacity-100"
           />
         ) : null}
         <span className="absolute inset-0 grid place-items-center">

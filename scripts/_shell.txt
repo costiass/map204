@@ -1,0 +1,107 @@
+  /*
+   * One shell for every kind.
+   *
+   * A flash deck used to be a special case with its own outer element, no header
+   * and no title — so a deck was not a card. It could not be dragged by a title,
+   * its collapse chevron sat somewhere else, and its controls floated over the
+   * face. A deck is now a card with a deck inside it, which is what it is.
+   *
+   * The two gestures, and where they live:
+   *
+   *   - the *header* drags. `data-no-drag` is deliberately absent, so the
+   *     pointerdown reaches the element and starts a drag. The title is read
+   *     rather than edited, because an editable title put two gestures in the
+   *     same twenty pixels and which one you got depended on how far your hand
+   *     moved before the caret appeared.
+   *   - the *body* opens the inspector. `data-no-drag` is set, so a press there
+   *     selects without starting a drag, and a click opens the panel.
+   */
+  return (
+    <div
+      className="cc-card"
+      style={style}
+      data-card-id={element.id}
+      data-kind={element.kind}
+      data-selected={selected ? 'true' : undefined}
+      data-dimmed={dimmed ? 'true' : undefined}
+      data-spotlight={spotlight ? 'true' : undefined}
+      data-collapsed={element.collapsed ? 'true' : undefined}
+      data-drag-target={dragTarget ? 'true' : undefined}
+      data-shadow={noteStyle.shadow ? 'true' : 'false'}
+      onContextMenu={(event) => onContextMenu(event, element.id)}
+    >
+      <span className="cc-card__accent" />
+
+      <header
+        className="cc-card__header"
+        title={element.title || 'Untitled'}
+        onPointerDown={(event) => onElementPointerDown(event, element.id)}
+      >
+        <span className="cc-card__title">{element.title || 'Untitled'}</span>
+        <button
+          type="button"
+          className="cc-card__btn"
+          title={element.collapsed ? 'Expand element' : 'Collapse element'}
+          aria-label={element.collapsed ? 'Expand element' : 'Collapse element'}
+          aria-expanded={!element.collapsed}
+          data-no-drag=""
+          onPointerDown={stop}
+          onClick={() => toggleElementCollapsed([element.id])}
+        >
+          {/*
+            The chevron points the way the *click* goes, not the way the element is
+            currently folded. Collapsed, it points down to unfold; expanded, it
+            points up to fold. The old version rotated the other way, so a
+            collapsed card showed a down-chevron as though pressing it would
+            collapse it again.
+          */}
+          <IconChevron
+            size={14}
+            style={{
+              transform: element.collapsed ? 'none' : 'rotate(180deg)',
+              transition: 'transform 140ms ease',
+            }}
+          />
+        </button>
+        <button
+          type="button"
+          className="cc-card__btn"
+          title="Element menu"
+          aria-label="Element menu"
+          data-no-drag=""
+          onPointerDown={stop}
+          onClick={openMenu}
+        >
+          <IconMore size={14} />
+        </button>
+      </header>
+
+      {!element.collapsed ? (
+        /*
+          `data-no-drag` on the body is the other half of the gesture split: a
+          press here selects the element and stops, so a click can open the
+          inspector without the pointer having moved enough to be a drag.
+
+          The deck is the exception and opts back in, because its whole face is a
+          control — a press turns the card over. It tracks pointer travel itself
+          and starts a drag only once the pointer has actually travelled, which is
+          why it does not need the marker.
+        */
+        <div
+          className="cc-card__scroll cc-scroll"
+          data-no-drag={element.kind === 'flash' ? undefined : ''}
+          onPointerDown={
+            element.kind === 'flash'
+              ? undefined
+              : (event) => onElementPointerDown(event, element.id)
+          }
+          onDoubleClick={element.kind === 'flash' ? undefined : () => setInspectorTab('content')}
+        >
+          <ElementBody element={element} childTitles={childTitles} />
+        </div>
+      ) : null}
+
+      {handles}
+    </div>
+  )
+}

@@ -695,13 +695,40 @@ body {
   background: var(--cc-accent, #6366f1);
 }
 
+/*
+ * Cursors, as images rather than keywords.
+ *
+ * The keywords say the right thing and look like the operating system's, which
+ * on a canvas full of cards reads as "this is a document" rather than "this is
+ * a board you are moving things on". The SVGs are the lucide `move` and a hand,
+ * drawn at 24px with a doubled stroke so a thin light line is visible against
+ * both a white card and a dark one.
+ *
+ * The hotspots are the point: `grab` and `grabbing` are centred on the thing
+ * being held, and `point` is at the tip of the finger. A cursor whose hotspot
+ * is off by a few pixels is felt long before it is noticed.
+ */
+.cc-cursor-grab {
+  cursor: url('/cursors/grab.svg') 12 12, grab;
+}
+
+.cc-cursor-grabbing {
+  cursor: url('/cursors/grabbing.svg') 12 12, grabbing;
+}
+
+.cc-cursor-point {
+  cursor: url('/cursors/point.svg') 5 2, pointer;
+}
+
 .cc-card__header {
   display: flex;
   align-items: center;
   gap: 0.25rem;
   padding: 0.5rem 0.5rem 0.35rem 1rem;
   background: color-mix(in srgb, var(--cc-accent, #6366f1) 10%, transparent);
-  cursor: grab;
+  /* The header is the drag handle, so it says so — as a four-way move rather
+     than the OS's open hand. */
+  cursor: url('/cursors/grab.svg') 12 12, grab;
   touch-action: none;
   flex: 0 0 auto;
 }
@@ -719,12 +746,37 @@ body {
   line-height: 1.3;
   padding: 0.1rem 0.15rem;
   border-radius: 6px;
-  cursor: text;
+  /* `grab`, not `text`. The title is no longer an input — it is read on the card
+     and written in the inspector — so the old `text` cursor was promising an
+     edit that could not happen. A move says "drag", which is what the header
+     does, and the body says something different. */
+  cursor: url('/cursors/grab.svg') 12 12, grab;
+  user-select: none;
 }
 
 .cc-card__title::placeholder {
   color: color-mix(in srgb, currentColor 45%, transparent);
   font-weight: 500;
+}
+
+/*
+ * The body of an element is a *button*, not a label.
+ *
+ * Clicking it opens the inspector, which is the thing a pointing hand promises.
+ * The header says "drag" and the body says "press", so the cursor tells you
+ * which of the two you would get before you press.
+ */
+.cc-card__scroll {
+  cursor: url('/cursors/point.svg') 5 2, pointer;
+}
+
+/* And while a drag is in progress, everything on the element is grabbing — the
+   pointer is being held, and a pointing hand mid-drag is a lie. */
+.cc-card[data-dragging='true'],
+.cc-card[data-dragging='true'] .cc-card__header,
+.cc-card[data-dragging='true'] .cc-card__title,
+.cc-card[data-dragging='true'] .cc-card__scroll {
+  cursor: url('/cursors/grabbing.svg') 12 12, grabbing;
 }
 
 .cc-card__btn {
@@ -765,6 +817,25 @@ body {
   /* The canvas sets `touch-action: none` for dragging; the card body opts back
      in to vertical panning so long notes can be read on a touch screen. */
   touch-action: pan-y;
+}
+
+/*
+ * A kind that is *exactly* its contents cannot scroll.
+ *
+ * A video's frame is the video: there is nothing above or below it to scroll to,
+ * and a scroll region around one produces a bar that appears for no reason and
+ * disappears on a nudge. `overflow: hidden` and no padding make the case
+ * structural rather than conditional — there is no scrollbar because there is
+ * nothing to scroll, not because something chose to hide it.
+ */
+.cc-card[data-kind='video'] .cc-card__scroll,
+.cc-card[data-kind='pdf'] .cc-card__scroll,
+.cc-card[data-kind='table'] .cc-card__scroll,
+.cc-card[data-kind='link'] .cc-card__scroll,
+.cc-card[data-kind='flash'] .cc-card__scroll {
+  overflow: hidden;
+  padding: 0;
+  touch-action: none;
 }
 
 .cc-card__image {
