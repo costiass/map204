@@ -1,4 +1,5 @@
-import { createDefaultSettings, type CanvasDoc, type Card, type Connection, type Group, type Page, type Position } from '@/types'
+import { migrateToV2 } from '@/elements/migrate'
+import { createDefaultSettings, type CanvasDoc } from '@/types'
 
 function svgDataUri(svg: string): string {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg.replace(/\s+/g, ' ').trim())}`
@@ -36,7 +37,7 @@ const chloroplastImage = svgDataUri(`
 
 const T = '2026-09-26T00:00:00.000Z'
 
-const cards: Card[] = [
+const cards = [
   {
     id: 'card_01',
     type: 'note',
@@ -186,11 +187,11 @@ const cards: Card[] = [
   },
 ]
 
-const connections: Connection[] = [
+const connections = [
   {
     id: 'connection_01',
-    source: { kind: 'card', id: 'card_01' },
-    target: { kind: 'card', id: 'card_02' },
+    source: { kind: 'element', id: 'card_01' },
+    target: { kind: 'element', id: 'card_02' },
     sourceAnchor: 'left',
     targetAnchor: 'right',
     label: 'happens inside',
@@ -207,8 +208,8 @@ const connections: Connection[] = [
   },
   {
     id: 'connection_02',
-    source: { kind: 'card', id: 'card_02' },
-    target: { kind: 'card', id: 'card_03' },
+    source: { kind: 'element', id: 'card_02' },
+    target: { kind: 'element', id: 'card_03' },
     sourceAnchor: 'right',
     targetAnchor: 'left',
     label: 'captures light',
@@ -225,8 +226,8 @@ const connections: Connection[] = [
   },
   {
     id: 'connection_03',
-    source: { kind: 'card', id: 'card_03' },
-    target: { kind: 'card', id: 'card_04' },
+    source: { kind: 'element', id: 'card_03' },
+    target: { kind: 'element', id: 'card_04' },
     sourceAnchor: 'right',
     targetAnchor: 'left',
     label: 'supplies ATP + NADPH',
@@ -243,8 +244,8 @@ const connections: Connection[] = [
   },
   {
     id: 'connection_04',
-    source: { kind: 'card', id: 'card_01' },
-    target: { kind: 'card', id: 'card_05' },
+    source: { kind: 'element', id: 'card_01' },
+    target: { kind: 'element', id: 'card_05' },
     sourceAnchor: 'right',
     targetAnchor: 'left',
     label: 'rate is set by',
@@ -261,8 +262,8 @@ const connections: Connection[] = [
   },
   {
     id: 'connection_05',
-    source: { kind: 'card', id: 'card_05' },
-    target: { kind: 'card', id: 'card_04' },
+    source: { kind: 'element', id: 'card_05' },
+    target: { kind: 'element', id: 'card_04' },
     sourceAnchor: 'bottom',
     targetAnchor: 'top',
     label: 'CO₂ supply',
@@ -280,7 +281,7 @@ const connections: Connection[] = [
   {
     id: 'connection_06',
     source: { kind: 'group', id: 'group_01' },
-    target: { kind: 'card', id: 'card_04' },
+    target: { kind: 'element', id: 'card_04' },
     sourceAnchor: 'right',
     targetAnchor: 'left',
     label: 'feeds into',
@@ -297,7 +298,7 @@ const connections: Connection[] = [
   },
 ]
 
-const respirationCards: Card[] = [
+const respirationCards = [
   {
     id: 'card_10',
     type: 'note',
@@ -348,11 +349,11 @@ const respirationCards: Card[] = [
   },
 ]
 
-const respirationConnections: Connection[] = [
+const respirationConnections = [
   {
     id: 'connection_10',
-    source: { kind: 'card', id: 'card_10' },
-    target: { kind: 'card', id: 'card_11' },
+    source: { kind: 'element', id: 'card_10' },
+    target: { kind: 'element', id: 'card_11' },
     sourceAnchor: 'right',
     targetAnchor: 'left',
     label: 'occurs in',
@@ -369,24 +370,23 @@ const respirationConnections: Connection[] = [
   },
 ]
 
-const groups: Group[] = [
+const groups = [
   {
     id: 'group_01',
     title: 'Light-dependent stage',
     position: { x: 380, y: 360, width: 780, height: 340, zIndex: 0 },
     color: '#0EA5E9',
-    memberCardIds: ['card_02', 'card_03'],
+    memberIds: ['card_02', 'card_03'],
     memberGroupIds: [],
     createdAt: T,
     updatedAt: T,
   },
 ]
 
-const pages: Page[] = [
+const pages = [
   {
     id: 'page_01',
     title: 'Photosynthesis',
-    position: { x: 0, y: 0, width: 1920, height: 1080, zIndex: 0 } satisfies Position,
     viewport: { x: 40, y: 20, zoom: 0.9 },
     cards,
     groups,
@@ -397,7 +397,6 @@ const pages: Page[] = [
   {
     id: 'page_02',
     title: 'Cell Respiration',
-    position: { x: 0, y: 0, width: 1920, height: 1080, zIndex: 0 } satisfies Position,
     viewport: { x: 0, y: 0, zoom: 1 },
     cards: respirationCards,
     groups: [],
@@ -407,10 +406,25 @@ const pages: Page[] = [
   },
 ]
 
+/**
+ * The tutorial document, as the first thing a new user sees.
+ *
+ * **This is written as a version 1 document and migrated on the way out**, and
+ * that is deliberate rather than lazy. The sample is the largest hand-written
+ * document in the app, so keeping it in the old format makes it a permanent
+ * regression test: if `migrateToV2` ever breaks, the first screen a new user
+ * sees is visibly wrong, and it happens at first paint rather than on the import
+ * of a file they have not got yet.
+ *
+ * Rewriting it as v2 by hand would make it readable and would throw that away.
+ * When the v1 format is finally dropped from the codebase, this is the file that
+ * gets rewritten — and the migration gets deleted with it.
+ */
 export function createSampleDoc(): CanvasDoc {
-  return {
+  const v1 = {
     version: 1,
     pages,
     settings: createDefaultSettings(),
   }
+  return migrateToV2(v1).doc
 }

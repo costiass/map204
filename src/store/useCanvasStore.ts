@@ -6,12 +6,7 @@ import {
   COLLAPSED_HEADER_HEIGHT,
   createDefaultSettings,
   createDefaultStep,
-  MAX_CARD_HEIGHT,
-  MAX_CARD_WIDTH,
-  MIN_CARD_HEIGHT,
-  MIN_CARD_WIDTH,
   type Anchor,
-  type Card,
   type CardImage,
   type CardStyle,
   type CanvasDoc,
@@ -27,10 +22,35 @@ import {
   type StepTransition,
   type Viewport,
 } from '@/types'
-import { centerOn, clamp, screenToWorld, stepViewport, visualCardRect } from '@/utils/geometry'
+import {
+  createConnection,
+  createElement,
+  createGroup,
+  normalizeDoc,
+} from '@/elements/serialize'
+import {
+  addElementToGroup as addElementToGroupOps,
+  applyZOrder as applyZOrderOps,
+  applyPatch,
+  deleteElements as deleteElementsOps,
+  duplicateElements as duplicateElementsOps,
+  editNote,
+  editTable as editTableOps,
+  findElement,
+  moveElements as moveElementsOps,
+  moveGroupWithMembers,
+  nextZIndex as nextZIndexOps,
+  placeElement,
+  removeElementFromGroup as removeElementFromGroupOps,
+  resizeElement as resizeElementOps,
+  resizeGroupMembers,
+  setTableCell as setTableCellOps,
+  toggleCollapsed as toggleCollapsedOps,
+  type ZOrderMode,
+} from '@/store/elementOps'
+import { centerOn, screenToWorld, stepViewport } from '@/utils/geometry'
 import { DEFAULT_WORKSPACE_ACCENT, DEFAULT_WORKSPACE_ICON } from '@/theme'
 import { clone, uid } from '@/utils/id'
-import { createCard, createConnection, createGroup, normalizeDoc } from '@/utils/serialize'
 
 const HISTORY_LIMIT = 80
 const COMMIT_DELAY_MS = 700
@@ -51,7 +71,9 @@ export interface ContextMenuState {
   groupId: string | null
 }
 
-export type ZOrderMode = 'front' | 'back' | 'forward' | 'backward'
+// `ZOrderMode` is re-exported from `elementOps` above rather than declared here.
+// The order the four modes actually perform is the store's business, but the
+// *set* of them belongs with the operation, and two lists drift.
 
 export interface CanvasStore {
   /* --- document ---------------------------------------------------- */
@@ -87,7 +109,7 @@ export interface CanvasStore {
   setStatus: (status: { message: string; detail?: string; busy?: boolean } | null) => void
 
   /* --- selection --------------------------------------------------- */
-  selectedCardIds: string[]
+  selectedElementIds: string[]
   selectedConnectionIds: string[]
   selectedGroupId: string | null
 
@@ -227,30 +249,88 @@ export interface CanvasStore {
   inspectorTab: 'content' | 'settings'
   setInspectorTab: (tab: 'content' | 'settings') => void
 
-  /* --- cards ------------------------------------------------------- */
-  addCard: (
-    input?: Partial<Card>,
+  /* --- elements ----------------------------------------------------- */
+  /**
+   * Makes an element of `kind` and returns its id, or `''` if there is no page.
+   *
+   * `kind` is a plain `string` rather than the union on purpose. The registry is
+   * what says which kinds exist and which are implemented, and a menu that
+   * iterates it produces a `string` — so typing this as the union would mean
+   * every such call site needs a cast, and the cast is where a `table` from a
+   * half-migrated menu would quietly become a note.
+   *
+   * The alternative is enforced where it matters: `createElement` has a
+   * `default` case that refuses a kind it does not implement rather than
+   * inventing one.
+   */
+  addElement: (
+    kind: string,
+    input?: Record<string, unknown>,
     options?: { select?: boolean; silent?: boolean; atScreen?: Point },
   ) => string
-  updateCard: (cardId: string, patch: Partial<Omit<Card, 'id'>>, options?: { silent?: boolean }) => void
-  updateCardStyle: (cardId: string, patch: Partial<CardStyle>, options?: { silent?: boolean }) => void
-  commitCardPositions: (entries: Array<{ id: string; x: number; y: number }>) => void
-  resizeCard: (cardId: string, size: { width: number; height: number }) => void
-  duplicateCards: (cardIds: string[]) => string[]
-  deleteCards: (cardIds: string[]) => void
-  applyZOrder: (cardIds: string[], mode: ZOrderMode) => void
-  toggleCollapsed: (cardIds: string[]) => void
-  setCardParent: (cardId: string, parentId: string | null) => void
-  setCardImage: (cardId: string, image: CardImage) => void
-  addChecklistItem: (cardId: string, text?: string) => void
-  updateChecklistItem: (cardId: string, itemId: string, patch: { text?: string; done?: boolean }) => void
-  removeChecklistItem: (cardId: string, itemId: string) => void
-  addTag: (cardId: string, tag: string) => void
-  removeTag: (cardId: string, tag: string) => void
+  updateElement: (
+    elementId: string,
+    patch: Record<string, unknown>,
+    options?: { silent?: boolean },
+  ) => void
+  moveElements: (entries: Array<{ id: string; x: number; y: number }>) => void
+  /**
+   * `aspect` is a video's shape and is read from the element when left out.
+   * `leading` is which dimension the pointer is describing — 'width' unless a
+   * handle that moves the height was dragged.
+   */
+  resizeElement: (
+    elementId: string,
+    size: { width: number; height: number },
+    options?: { aspect?: number | null; leading?: 'width' | 'height' },
+  ) => void
+  duplicateElements: (elementIds: string[]) => string[]
+  deleteElements: (elementIds: string[]) => void
+  applyElementZOrder: (elementIds: string[], mode: ZOrderMode) => void
+  toggleElementCollapsed: (elementIds: string[]) => void
+
+  /**
+   * Merges a patch into a note's style.
+   *
+   * Not the same as `updateElement(id, { style })`, which *replaces* the whole
+   * style object and would drop every field the caller did not mention. Every
+   * caller here means "change this one colour", so this is the action they want
+   * and the one that cannot be got wrong by forgetting a field.
+   *
+   * Note-only: a video or a table has no style to change.
+   */
+  updateElementStyle: (
+    elementId: string,
+    patch: Partial<CardStyle>,
+    options?: { silent?: boolean },
+  ) => void
+
+  /** Note-only. Each of these refuses a non-note rather than writing a field
+   *  no renderer reads - a checklist item on a video is a thing that cannot
+   *  happen, and the type says so before it runs. */
+  setNoteImage: (elementId: string, image: CardImage) => void
+  addChecklistItem: (elementId: string, text?: string) => void
+  updateChecklistItem: (
+    elementId: string,
+    itemId: string,
+    patch: { text?: string; done?: boolean },
+  ) => void
+  removeChecklistItem: (elementId: string, itemId: string) => void
+  addTag: (elementId: string, tag: string) => void
+  removeTag: (elementId: string, tag: string) => void
+
+  setTableCell: (elementId: string, row: number, column: number, value: string) => void
+  editTable: (elementId: string, patch: Record<string, unknown>) => void
+
+  /** A flash deck. A deck of one is a single card, and always has been. */
+  stepFlashDeck: (elementId: string, delta: number) => void
+  setFlashFacing: (elementId: string, facing: 'front' | 'back') => void
+  addFlashCard: (elementId: string) => void
+  removeFlashCard: (elementId: string, at: number) => void
 
   /* --- document settings -------------------------------------------- */
-  /** Stores the look of `style` as the default for every new card. */
-  setDefaultCardStyle: (style: Partial<CardStyle>) => void
+  /** Stores the look of `style` as the default for every new note. */
+  setDefaultNoteStyle: (style: Partial<CardStyle>) => void
   /**
    * Stores a link's look and/or relationship as the default for every new link.
    * `relationshipType: ''` is a valid default and means new links carry no
@@ -287,19 +367,25 @@ export interface CanvasStore {
   /* --- groups ------------------------------------------------------ */
   addGroup: (input?: Partial<Group>, options?: { select?: boolean }) => string
   updateGroup: (groupId: string, patch: Partial<Omit<Group, 'id'>>, options?: { silent?: boolean }) => void
-  commitGroupPositions: (entries: Array<{ id: string; x: number; y: number }>) => void
+  /** Moves each group *and what is inside it*. A group is a container, not a
+   *  frame drawn around its contents. */
+  moveGroups: (entries: Array<{ id: string; x: number; y: number }>) => void
+  /**
+   * Rescales members relative to where the group's corner *was*, so the contents
+   * keep their arrangement rather than staying the same size inside a different
+   * box. One scale, not per-axis: a video keeps its aspect.
+   */
+  resizeGroup: (groupId: string, size: { width: number; height: number }) => void
   deleteGroups: (groupIds: string[]) => void
-  addCardToGroup: (groupId: string, cardId: string) => void
-  removeCardFromGroup: (groupId: string, cardId: string) => void
-  addGroupToGroup: (parentGroupId: string, childGroupId: string) => void
-  removeGroupFromGroup: (parentGroupId: string, childGroupId: string) => void
+  addElementToGroup: (groupId: string, elementId: string) => void
+  removeElementFromGroup: (groupId: string, elementId: string) => void
   selectGroup: (groupId: string | null) => void
 
   /* --- selection ---------------------------------------------------- */
-  selectCards: (cardIds: string[], additive?: boolean) => void
-  toggleCardSelection: (cardId: string) => void
+  selectElements: (elementIds: string[], additive?: boolean) => void
+  toggleElementSelection: (elementId: string) => void
   selectConnection: (connectionId: string | null) => void
-  selectAllCards: () => void
+  selectAllElements: () => void
   clearSelection: () => void
   deleteSelection: () => void
 
@@ -347,13 +433,8 @@ let commitTimer: ReturnType<typeof setTimeout> | null = null
  */
 const initialDoc = createSampleDoc()
 
-function nextZIndex(page: Page): number {
-  return page.cards.reduce((max, card) => Math.max(max, card.position.zIndex), 0) + 1
-}
-
-function lowestZIndex(page: Page): number {
-  return page.cards.reduce((min, card) => Math.min(min, card.position.zIndex), 1) - 1
-}
+// `nextZIndex` and `lowestZIndex` live in `elementOps`, where they are covered by
+// `test:element-ops`. Two copies of "the next z-index" is one of them wrong.
 
 export const useCanvasStore = create<CanvasStore>()(
   immer((set, get) => {
@@ -401,14 +482,6 @@ export const useCanvasStore = create<CanvasStore>()(
       })
     }
 
-    const touchCard = (page: Page, cardId: string, fn: (card: Card) => void) => {
-      const card = page.cards.find((c) => c.id === cardId)
-      if (!card) return false
-      fn(card)
-      card.updatedAt = new Date().toISOString()
-      return true
-    }
-
     return {
       doc: initialDoc,
       activePageId: initialDoc.pages[0]?.id ?? '',
@@ -419,7 +492,7 @@ export const useCanvasStore = create<CanvasStore>()(
       documentRole: null,
       status: null,
 
-      selectedCardIds: [],
+      selectedElementIds: [],
       selectedConnectionIds: [],
       selectedGroupId: null,
 
@@ -484,16 +557,15 @@ export const useCanvasStore = create<CanvasStore>()(
           const existing = state.doc.pages.find((p) => p.id === pageId)
           if (!existing) return
           existing.title = page.title
-          existing.position = page.position
           existing.viewport = page.viewport
-          existing.cards = page.cards
+          existing.elements = page.elements
           existing.groups = page.groups
           existing.connections = page.connections
           existing.updatedAt = page.updatedAt
           // Selections may point at objects that no longer exist.
-          const cardIds = new Set(page.cards.map((c) => c.id))
+          const cardIds = new Set(page.elements.map((c) => c.id))
           const groupIds = new Set(page.groups.map((g) => g.id))
-          state.selectedCardIds = state.selectedCardIds.filter((id) => cardIds.has(id))
+          state.selectedElementIds = state.selectedElementIds.filter((id) => cardIds.has(id))
           if (state.selectedGroupId && !groupIds.has(state.selectedGroupId)) {
             state.selectedGroupId = null
           }
@@ -546,7 +618,7 @@ export const useCanvasStore = create<CanvasStore>()(
         if (!get().doc.pages.some((p) => p.id === pageId)) return
         set((state) => {
           state.activePageId = pageId
-          state.selectedCardIds = []
+          state.selectedElementIds = []
           state.selectedConnectionIds = []
           state.contextMenu = null
         })
@@ -558,9 +630,13 @@ export const useCanvasStore = create<CanvasStore>()(
         const page: Page = {
           id: pageId,
           title: title?.trim() || `Page ${get().doc.pages.length + 1}`,
-          position: { x: 0, y: 0, width: 1920, height: 1080, zIndex: 0 },
+          // Page order. This replaces v1's `position`, which held an x/y/width/
+          // height nothing ever read — the sidebar sorted by array order and the
+          // database has always had an `ordinal` column. The real field finally
+          // made it into the document.
+          ordinal: get().doc.pages.length,
           viewport: { x: 0, y: 0, zoom: 1 },
-          cards: [],
+          elements: [],
           groups: [],
           connections: [],
           createdAt: new Date().toISOString(),
@@ -569,7 +645,7 @@ export const useCanvasStore = create<CanvasStore>()(
         set((state) => {
           state.doc.pages.push(page)
           state.activePageId = pageId
-          state.selectedCardIds = []
+          state.selectedElementIds = []
           state.selectedConnectionIds = []
         })
         return pageId
@@ -593,7 +669,7 @@ export const useCanvasStore = create<CanvasStore>()(
           draft.doc.pages = draft.doc.pages.filter((p) => p.id !== pageId)
           if (draft.activePageId === pageId) {
             draft.activePageId = draft.doc.pages[0].id
-            draft.selectedCardIds = []
+            draft.selectedElementIds = []
             draft.selectedConnectionIds = []
           }
         })
@@ -725,17 +801,27 @@ export const useCanvasStore = create<CanvasStore>()(
         set({ stepIndex: clamped })
 
         // The target is resolved *now*, from the live document, rather than
-        // stored on the step. A step pointing at a card that was since deleted
-        // then falls back to an establishing shot instead of flying the camera
-        // to nowhere.
+        // stored on the step. A step pointing at an element that was since
+        // deleted then falls back to an establishing shot instead of flying the
+        // camera to nowhere.
         const page = state.doc.pages.find((p) => p.id === state.activePageId)
         let bounds: Rect | null = null
-        if (page && step.targetKind === 'card' && step.targetId) {
-          const card = page.cards.find((c) => c.id === step.targetId)
-          if (card) bounds = visualCardRect(card)
+        if (page && step.targetKind === 'element' && step.targetId) {
+          const element = page.elements.find((c) => c.id === step.targetId)
+          // A collapsed element presents as its title bar, so the camera frames
+          // what is on screen rather than the full height it would occupy
+          // expanded.
+          if (element) {
+            bounds = {
+              x: element.x,
+              y: element.y,
+              width: element.width,
+              height: element.collapsed ? COLLAPSED_HEADER_HEIGHT : element.height,
+            }
+          }
         } else if (page && step.targetKind === 'group' && step.targetId) {
           const group = page.groups.find((g) => g.id === step.targetId)
-          if (group) bounds = group.position
+          if (group) bounds = { x: group.x, y: group.y, width: group.width, height: group.height }
         }
 
         const viewport = stepViewport(bounds, state.viewportSize, step.zoom)
@@ -805,10 +891,10 @@ export const useCanvasStore = create<CanvasStore>()(
       toggleDarkMode: () => set((state) => { state.darkMode = !state.darkMode }),
 
       /* ------------------------------------------------------------ */
-      /* cards                                                        */
+      /* elements                                                     */
       /* ------------------------------------------------------------ */
 
-      addCard: (input, options) => {
+      addElement: (kind, input, options) => {
         const silent = options?.silent ?? false
         if (!silent) pushHistory()
 
@@ -816,294 +902,306 @@ export const useCanvasStore = create<CanvasStore>()(
         const page = state.doc.pages.find((p) => p.id === state.activePageId)
         if (!page) return ''
 
-        // A right-click insert means *here* — the point you clicked, not the
-        // middle of the window. A new card appearing somewhere else is a small
-        // lie about where you asked for it, and on a wide screen it is a long
-        // walk to find.
-        const anchor =
-          input?.position ??
-          (options?.atScreen
-            ? screenToWorld(options.atScreen, page.viewport)
-            : screenToWorld(
-                { x: state.viewportSize.width / 2, y: state.viewportSize.height / 2 },
-                page.viewport,
-              ))
+        // A right-click insert means *here* — the point clicked, not the middle
+        // of the window. A new element appearing somewhere else is a small lie
+        // about where it was asked for.
+        const anchor = options?.atScreen
+          ? screenToWorld(options.atScreen, page.viewport)
+          : screenToWorld(
+              { x: state.viewportSize.width / 2, y: state.viewportSize.height / 2 },
+              page.viewport,
+            )
 
-        // Nudge new cards so repeated presses do not stack them exactly.
-        let x = input?.position?.x ?? Math.round(anchor.x - 140)
-        let y = input?.position?.y ?? Math.round(anchor.y - 110)
-        if (!input?.position) {
-          const occupied = page.cards.some(
-            (card) => Math.abs(card.position.x - x) < 24 && Math.abs(card.position.y - y) < 24,
-          )
-          if (occupied) {
-            for (let i = 1; i <= 8; i++) {
-              x = Math.round(anchor.x - 140) + i * 32
-              y = Math.round(anchor.y - 110) + i * 28
-              const clash = page.cards.some(
-                (card) => Math.abs(card.position.x - x) < 24 && Math.abs(card.position.y - y) < 24,
-              )
-              if (!clash) break
-            }
-          }
-        }
+        // A new note starts from the document's own default, so "set as default"
+        // sticks for what is made after it and not for what already exists.
+        const built = createElement(
+          kind,
+          kind === 'note'
+            ? {
+                ...input,
+                style: {
+                  ...state.doc.settings.defaultNoteStyle,
+                  ...((input as { style?: object } | undefined)?.style as object),
+                },
+              }
+            : input,
+          { x: anchor.x, y: anchor.y },
+        )
 
-        const card = createCard({
-          ...input,
-          style: { ...state.doc.settings.defaultCardStyle, ...input?.style },
-          position: {
-            x,
-            y,
-            width: input?.position?.width ?? 280,
-            height: input?.position?.height ?? 220,
-            zIndex: input?.position?.zIndex ?? nextZIndex(page),
-          },
-        })
-
+        let id = ''
         set((draft) => {
           const target = draft.doc.pages.find((p) => p.id === draft.activePageId)
-          target?.cards.push(card)
+          if (!target) return
+          id = placeElement(target, built, { x: anchor.x, y: anchor.y }).id
         })
+        if (!id) return ''
 
         if (options?.select !== false) {
           set((draft) => {
-            draft.selectedCardIds = [card.id]
+            draft.selectedElementIds = [id]
             draft.selectedConnectionIds = []
           })
         }
-        return card.id
+        return id
       },
 
-      updateCard: (cardId, patch, options) => {
-        const silent = options?.silent ?? false
-        if (silent) markDirty()
+      updateElement: (elementId, patch, options) => {
+        if (options?.silent ?? false) markDirty()
         else pushHistory()
 
         withPage((page) => {
-          touchCard(page, cardId, (card) => {
-            Object.assign(card, patch)
-          })
+          const element = findElement(page, elementId)
+          if (element) applyPatch(element, patch)
+          page.updatedAt = new Date().toISOString()
         })
       },
 
-      updateCardStyle: (cardId, patch, options) => {
-        const existing = findCard(get(), cardId)
-        if (!existing) return
-        get().updateCard(cardId, { style: { ...existing.style, ...patch } }, options)
-      },
-
-      commitCardPositions: (entries) => {
+      moveElements: (entries) => {
         if (entries.length === 0) return
         pushHistory()
         withPage((page) => {
-          for (const entry of entries) {
-            touchCard(page, entry.id, (card) => {
-              card.position.x = entry.x
-              card.position.y = entry.y
-            })
-          }
+          moveElementsOps(page, entries)
         })
       },
 
-      resizeCard: (cardId, size) => {
+      /**
+       * A video keeps its aspect; `leading` is which dimension the pointer is
+       * describing, because dragging a left handle means the *width* is the one
+       * being asked for. Left out, `resizeElement` falls back to the video's own
+       * aspect, so a caller that does not care does not have to know.
+       */
+      resizeElement: (elementId, size, options) => {
         pushHistory()
         withPage((page) => {
-          touchCard(page, cardId, (card) => {
-            card.position.width = clamp(size.width, MIN_CARD_WIDTH, MAX_CARD_WIDTH)
-            card.position.height = card.collapsed
-              ? COLLAPSED_HEADER_HEIGHT
-              : clamp(size.height, MIN_CARD_HEIGHT, MAX_CARD_HEIGHT)
-          })
+          const element = findElement(page, elementId)
+          // A collapsed element's height is the title bar. Resizing it open to
+          // some other height would leave an element whose height nobody chose.
+          const target =
+            element?.collapsed === true
+              ? { width: size.width, height: COLLAPSED_HEADER_HEIGHT }
+              : size
+          resizeElementOps(
+            page,
+            elementId,
+            target,
+            options?.aspect != null ? { aspect: options.aspect } : {},
+            options?.leading ?? 'width',
+          )
         })
       },
 
-      duplicateCards: (cardIds) => {
+      duplicateElements: (elementIds) => {
+        if (elementIds.length === 0) return []
         pushHistory()
         const created: string[] = []
         set((state) => {
           const page = state.doc.pages.find((p) => p.id === state.activePageId)
           if (!page) return
-          for (const id of cardIds) {
-            const source = page.cards.find((c) => c.id === id)
-            if (!source) continue
-            const copy = clone(source)
-            copy.id = uid('card')
-            copy.title = `${source.title} copy`
-            copy.position.x += 32
-            copy.position.y += 32
-            copy.position.zIndex = nextZIndex(page)
-            copy.createdAt = new Date().toISOString()
-            copy.updatedAt = copy.createdAt
-            copy.parentId = null
-            copy.checklist = copy.checklist.map((item) => ({ ...item, id: uid('item') }))
-            page.cards.push(copy)
-            created.push(copy.id)
-          }
+          created.push(...duplicateElementsOps(page, elementIds, uid))
         })
         if (created.length > 0) {
           set((state) => {
-            state.selectedCardIds = created
+            state.selectedElementIds = created
             state.selectedConnectionIds = []
           })
         }
         return created
       },
 
-      deleteCards: (cardIds) => {
-        if (cardIds.length === 0) return
+      deleteElements: (elementIds) => {
+        if (elementIds.length === 0) return
         pushHistory()
-        const doomed = new Set(cardIds)
         set((state) => {
           const page = state.doc.pages.find((p) => p.id === state.activePageId)
           if (!page) return
-          page.cards = page.cards.filter((card) => !doomed.has(card.id))
-          // Connections are stored by id, so removing a card must remove the
-          // edges that referenced it.
-          page.connections = page.connections.filter(
-            (conn) =>
-              !(
-                (conn.source.kind === 'card' && doomed.has(conn.source.id)) ||
-                (conn.target.kind === 'card' && doomed.has(conn.target.id))
-              ),
-          )
-          // Remove deleted cards from group memberships.
-          for (const group of page.groups) {
-            group.memberCardIds = group.memberCardIds.filter((id) => !doomed.has(id))
-          }
-          state.selectedCardIds = []
+          // Takes the connections and the group memberships with it. Both are
+          // stored by id, and would otherwise point at nothing — which shows up
+          // as a line drawn to nowhere with nothing on screen to explain it.
+          deleteElementsOps(page, elementIds)
+          state.selectedElementIds = []
           state.selectedConnectionIds = []
           state.contextMenu = null
         })
       },
 
-      applyZOrder: (cardIds, mode) => {
-        if (cardIds.length === 0) return
+      applyElementZOrder: (elementIds, mode) => {
+        if (elementIds.length === 0) return
         pushHistory()
         withPage((page) => {
-          if (mode === 'front') {
-            let z = nextZIndex(page)
-            for (const id of cardIds) {
-              touchCard(page, id, (card) => {
-                card.position.zIndex = z
-                z += 1
-              })
-            }
-            return
-          }
-          if (mode === 'back') {
-            let z = lowestZIndex(page)
-            for (const id of cardIds) {
-              touchCard(page, id, (card) => {
-                card.position.zIndex = z
-                z += 1
-              })
-            }
-            return
-          }
-          const ordered = [...page.cards].sort((a, b) => a.position.zIndex - b.position.zIndex)
-          const selected = new Set(cardIds)
-          if (mode === 'forward') {
-            for (let i = ordered.length - 2; i >= 0; i--) {
-              if (selected.has(ordered[i].id) && !selected.has(ordered[i + 1].id)) {
-                const tmp = ordered[i].position.zIndex
-                ordered[i].position.zIndex = ordered[i + 1].position.zIndex
-                ordered[i + 1].position.zIndex = tmp
-              }
-            }
-          } else {
-            for (let i = 1; i < ordered.length; i++) {
-              if (selected.has(ordered[i].id) && !selected.has(ordered[i - 1].id)) {
-                const tmp = ordered[i].position.zIndex
-                ordered[i].position.zIndex = ordered[i - 1].position.zIndex
-                ordered[i - 1].position.zIndex = tmp
-              }
-            }
-          }
+          applyZOrderOps(page, elementIds, mode)
         })
       },
 
-      toggleCollapsed: (cardIds) => {
+      toggleElementCollapsed: (elementIds) => {
+        if (elementIds.length === 0) return
         pushHistory()
         withPage((page) => {
-          const shouldCollapse = cardIds.some((id) => {
-            const card = page.cards.find((c) => c.id === id)
-            return card ? !card.collapsed : false
-          })
-          for (const id of cardIds) {
-            touchCard(page, id, (card) => {
-              card.collapsed = shouldCollapse
-            })
-          }
+          toggleCollapsedOps(page, elementIds)
         })
       },
 
-      setCardParent: (cardId, parentId) => {
-        pushHistory()
+      /* --- note-only -------------------------------------------------- */
+      //
+      // Each of these refuses a non-note rather than writing a field no renderer
+      // reads. Adding a checklist item to a video is a thing that cannot happen,
+      // and the type says so before it runs.
+
+      updateElementStyle: (elementId, patch, options) => {
+        if (options?.silent ?? false) markDirty()
+        else pushHistory()
         withPage((page) => {
-          touchCard(page, cardId, (card) => {
-            card.parentId = parentId === cardId ? null : parentId
-          })
+          const element = findElement(page, elementId)
+          if (!element || element.kind !== 'note') return
+          // Merged, not assigned. Assigning would replace the whole style with
+          // the two fields the caller mentioned.
+          element.style = { ...element.style, ...patch }
+          element.updatedAt = new Date().toISOString()
+          page.updatedAt = new Date().toISOString()
         })
       },
 
-      setCardImage: (cardId, image) => {
+      setNoteImage: (elementId, image) => {
         pushHistory()
         withPage((page) => {
-          touchCard(page, cardId, (card) => {
-            card.image = image
-          })
+          editNote(page, elementId, { image })
         })
       },
 
-      addChecklistItem: (cardId, text) => {
+      addChecklistItem: (elementId, text) => {
         pushHistory()
         withPage((page) => {
-          touchCard(page, cardId, (card) => {
-            card.checklist.push({ id: uid('item'), text: text ?? '', done: false })
-          })
+          const element = findElement(page, elementId)
+          if (!element || element.kind !== 'note') return
+          element.checklist.push({ id: uid('item'), text: text ?? '', done: false })
+          element.updatedAt = new Date().toISOString()
+          page.updatedAt = new Date().toISOString()
         })
       },
 
-      updateChecklistItem: (cardId, itemId, patch) => {
+      updateChecklistItem: (elementId, itemId, patch) => {
         pushHistory()
         withPage((page) => {
-          const item = page.cards.find((c) => c.id === cardId)?.checklist.find((i) => i.id === itemId)
+          const element = findElement(page, elementId)
+          if (!element || element.kind !== 'note') return
+          const item = element.checklist.find((i) => i.id === itemId)
           if (!item) return
           if (patch.text !== undefined) item.text = patch.text
           if (patch.done !== undefined) item.done = patch.done
+          element.updatedAt = new Date().toISOString()
+          page.updatedAt = new Date().toISOString()
         })
       },
 
-      removeChecklistItem: (cardId, itemId) => {
+      removeChecklistItem: (elementId, itemId) => {
         pushHistory()
         withPage((page) => {
-          touchCard(page, cardId, (card) => {
-            card.checklist = card.checklist.filter((item) => item.id !== itemId)
-          })
+          const element = findElement(page, elementId)
+          if (!element || element.kind !== 'note') return
+          element.checklist = element.checklist.filter((item) => item.id !== itemId)
+          element.updatedAt = new Date().toISOString()
+          page.updatedAt = new Date().toISOString()
         })
       },
 
-      addTag: (cardId, tag) => {
+      addTag: (elementId, tag) => {
         const clean = tag.trim().toLowerCase().replace(/\s+/g, '-')
         if (!clean) return
         pushHistory()
         withPage((page) => {
-          touchCard(page, cardId, (card) => {
-            if (!card.tags.includes(clean)) card.tags.push(clean)
-          })
+          const element = findElement(page, elementId)
+          if (!element || element.kind !== 'note') return
+          if (!element.tags.includes(clean)) element.tags.push(clean)
+          element.updatedAt = new Date().toISOString()
+          page.updatedAt = new Date().toISOString()
         })
       },
 
-      removeTag: (cardId, tag) => {
+      removeTag: (elementId, tag) => {
         pushHistory()
         withPage((page) => {
-          touchCard(page, cardId, (card) => {
-            card.tags = card.tags.filter((t) => t !== tag)
-          })
+          const element = findElement(page, elementId)
+          if (!element || element.kind !== 'note') return
+          element.tags = element.tags.filter((t) => t !== tag)
+          element.updatedAt = new Date().toISOString()
+          page.updatedAt = new Date().toISOString()
         })
       },
 
-      /* ------------------------------------------------------------ */
+      setTableCell: (elementId, row, column, value) => {
+        pushHistory()
+        withPage((page) => {
+          const element = findElement(page, elementId)
+          if (!element || element.kind !== 'table') return
+          setTableCellOps(element, row, column, value)
+          page.updatedAt = new Date().toISOString()
+        })
+      },
+
+      /** Headers, column count, row count — anything but a cell's own text. */
+      editTable: (elementId, patch) => {
+        pushHistory()
+        withPage((page) => {
+          editTableOps(page, elementId, patch)
+        })
+      },
+
+      /* --- flash decks ------------------------------------------------ */
+
+      stepFlashDeck: (elementId, delta) => {
+        pushHistory()
+        withPage((page) => {
+          const element = findElement(page, elementId)
+          if (!element || element.kind !== 'flash') return
+          if (element.cards.length === 0) return
+          // Wraps: a deck is something you flick through, and a deck that
+          // stopped at the end would need a key to get back from.
+          element.cardIndex =
+            (element.cardIndex + delta + element.cards.length) % element.cards.length
+          // Stepping shows the question again. Staying on the answer after moving
+          // on means the next card is never asked.
+          element.showing = 'front'
+          element.updatedAt = new Date().toISOString()
+          page.updatedAt = new Date().toISOString()
+        })
+      },
+
+      setFlashFacing: (elementId, facing) => {
+        withPage((page) => {
+          const element = findElement(page, elementId)
+          if (!element || element.kind !== 'flash') return
+          element.showing = facing
+          element.updatedAt = new Date().toISOString()
+        })
+      },
+
+      addFlashCard: (elementId) => {
+        pushHistory()
+        withPage((page) => {
+          const element = findElement(page, elementId)
+          if (!element || element.kind !== 'flash') return
+          element.cards.push([
+            { id: uid('face'), text: '' },
+            { id: uid('face'), text: '' },
+          ])
+          element.updatedAt = new Date().toISOString()
+          page.updatedAt = new Date().toISOString()
+        })
+      },
+
+      removeFlashCard: (elementId, at) => {
+        pushHistory()
+        withPage((page) => {
+          const element = findElement(page, elementId)
+          if (!element || element.kind !== 'flash') return
+          // A deck with no cards cannot be stepped through, and an element that
+          // renders as an empty frame is not a useful starting point.
+          if (element.cards.length <= 1) return
+          element.cards.splice(at, 1)
+          if (element.cardIndex >= element.cards.length) element.cardIndex = 0
+          element.updatedAt = new Date().toISOString()
+          page.updatedAt = new Date().toISOString()
+        })
+      },
       /* connections                                                  */
       /* ------------------------------------------------------------ */
 
@@ -1199,15 +1297,16 @@ export const useCanvasStore = create<CanvasStore>()(
           page.viewport,
         )
 
+        // Flat, not a nested `position`. In v1 the geometry sat behind an
+        // object that every element and group repeated identically, and two of
+        // them could disagree about where something was.
         const group = createGroup({
           ...input,
-          position: {
-            x: input?.position?.x ?? Math.round(center.x - 200),
-            y: input?.position?.y ?? Math.round(center.y - 150),
-            width: input?.position?.width ?? 400,
-            height: input?.position?.height ?? 300,
-            zIndex: input?.position?.zIndex ?? nextZIndex(page),
-          },
+          x: input?.x ?? Math.round(center.x - 200),
+          y: input?.y ?? Math.round(center.y - 150),
+          width: input?.width ?? 400,
+          height: input?.height ?? 300,
+          zIndex: input?.zIndex ?? nextZIndexOps(page),
         })
 
         set((draft) => {
@@ -1218,7 +1317,7 @@ export const useCanvasStore = create<CanvasStore>()(
         if (options?.select !== false) {
           set((draft) => {
             draft.selectedGroupId = group.id
-            draft.selectedCardIds = []
+            draft.selectedElementIds = []
             draft.selectedConnectionIds = []
           })
         }
@@ -1238,36 +1337,43 @@ export const useCanvasStore = create<CanvasStore>()(
         })
       },
 
-      commitGroupPositions: (entries) => {
+      /**
+       * Moves each group *and what is inside it*.
+       *
+       * The old code moved the rectangle and left the contents where they were,
+       * which is a frame drawn around things rather than a container. Moving a
+       * group that visibly does not move its contents reads as a bug even when
+       * the members are only implied by their position.
+       */
+      moveGroups: (entries) => {
         if (entries.length === 0) return
         pushHistory()
         withPage((page) => {
           for (const entry of entries) {
-            const group = page.groups.find((g) => g.id === entry.id)
-            if (group) {
-              group.position.x = entry.x
-              group.position.y = entry.y
-              group.updatedAt = new Date().toISOString()
-              // Auto-detect cards fully inside the group bounds.
-              const gx = group.position.x
-              const gy = group.position.y
-              const gw = group.position.width
-              const gh = group.position.height
-              for (const card of page.cards) {
-                const cx = card.position.x
-                const cy = card.position.y
-                const cw = card.position.width
-                const ch = card.position.height
-                const fullyInside =
-                  cx >= gx && cy >= gy && cx + cw <= gx + gw && cy + ch <= gy + gh
-                if (fullyInside && !group.memberCardIds.includes(card.id)) {
-                  group.memberCardIds.push(card.id)
-                } else if (!fullyInside && group.memberCardIds.includes(card.id)) {
-                  group.memberCardIds = group.memberCardIds.filter((id) => id !== card.id)
-                }
-              }
-            }
+            moveGroupWithMembers(page, entry.id, entry.x, entry.y)
           }
+        })
+      },
+
+      /**
+       * Rescales members relative to where the group's corner *was*.
+       *
+       * One scale rather than one per axis, so a video inside a group keeps its
+       * aspect instead of being stretched into the group's proportions.
+       */
+      resizeGroup: (groupId, size) => {
+        pushHistory()
+        withPage((page) => {
+          const group = page.groups.find((g) => g.id === groupId)
+          if (!group) return
+          // The old bounds have to be captured *before* they change, because the
+          // scale is defined as how much the box grew.
+          const before = { x: group.x, y: group.y, width: group.width, height: group.height }
+          group.width = size.width
+          group.height = size.height
+          group.updatedAt = new Date().toISOString()
+          page.updatedAt = new Date().toISOString()
+          resizeGroupMembers(page, group, before)
         })
       },
 
@@ -1287,57 +1393,22 @@ export const useCanvasStore = create<CanvasStore>()(
                 (conn.target.kind === 'group' && doomed.has(conn.target.id))
               ),
           )
-          // Remove deleted groups from other groups' member lists.
-          for (const g of page.groups) {
-            g.memberGroupIds = g.memberGroupIds.filter((id) => !doomed.has(id))
-          }
           state.selectedGroupId = null
           state.contextMenu = null
         })
       },
 
-      addCardToGroup: (groupId, cardId) => {
+      addElementToGroup: (groupId, elementId) => {
         pushHistory()
         withPage((page) => {
-          const group = page.groups.find((g) => g.id === groupId)
-          if (group && !group.memberCardIds.includes(cardId)) {
-            group.memberCardIds.push(cardId)
-            group.updatedAt = new Date().toISOString()
-          }
+          addElementToGroupOps(page, groupId, elementId)
         })
       },
 
-      removeCardFromGroup: (groupId, cardId) => {
+      removeElementFromGroup: (groupId, elementId) => {
         pushHistory()
         withPage((page) => {
-          const group = page.groups.find((g) => g.id === groupId)
-          if (group) {
-            group.memberCardIds = group.memberCardIds.filter((id) => id !== cardId)
-            group.updatedAt = new Date().toISOString()
-          }
-        })
-      },
-
-      addGroupToGroup: (parentGroupId, childGroupId) => {
-        if (parentGroupId === childGroupId) return
-        pushHistory()
-        withPage((page) => {
-          const parent = page.groups.find((g) => g.id === parentGroupId)
-          if (parent && !parent.memberGroupIds.includes(childGroupId)) {
-            parent.memberGroupIds.push(childGroupId)
-            parent.updatedAt = new Date().toISOString()
-          }
-        })
-      },
-
-      removeGroupFromGroup: (parentGroupId, childGroupId) => {
-        pushHistory()
-        withPage((page) => {
-          const parent = page.groups.find((g) => g.id === parentGroupId)
-          if (parent) {
-            parent.memberGroupIds = parent.memberGroupIds.filter((id) => id !== childGroupId)
-            parent.updatedAt = new Date().toISOString()
-          }
+          removeElementFromGroupOps(page, groupId, elementId)
         })
       },
 
@@ -1345,7 +1416,7 @@ export const useCanvasStore = create<CanvasStore>()(
         set((state) => {
           state.selectedGroupId = groupId
           if (groupId) {
-            state.selectedCardIds = []
+            state.selectedElementIds = []
             state.selectedConnectionIds = []
           }
         })
@@ -1364,10 +1435,12 @@ export const useCanvasStore = create<CanvasStore>()(
 
         if (state.selectedGroupId) {
           const group = page.groups.find((g) => g.id === state.selectedGroupId)
-          if (group) rect = group.position
-        } else if (state.selectedCardIds.length === 1) {
-          const card = page.cards.find((c) => c.id === state.selectedCardIds[0])
-          if (card) rect = card.position
+          if (group) rect = { x: group.x, y: group.y, width: group.width, height: group.height }
+        } else if (state.selectedElementIds.length === 1) {
+          const element = page.elements.find((c) => c.id === state.selectedElementIds[0])
+          if (element) {
+            rect = { x: element.x, y: element.y, width: element.width, height: element.height }
+          }
         }
 
         if (!rect) return
@@ -1384,11 +1457,11 @@ export const useCanvasStore = create<CanvasStore>()(
       /* document settings                                            */
       /* ------------------------------------------------------------ */
 
-      setDefaultCardStyle: (style) => {
+      setDefaultNoteStyle: (style) => {
         pushHistory()
         set((state) => {
-          state.doc.settings.defaultCardStyle = {
-            ...state.doc.settings.defaultCardStyle,
+          state.doc.settings.defaultNoteStyle = {
+            ...state.doc.settings.defaultNoteStyle,
             ...style,
           }
         })
@@ -1420,26 +1493,20 @@ export const useCanvasStore = create<CanvasStore>()(
       /* selection                                                    */
       /* ------------------------------------------------------------ */
 
-      selectCards: (cardIds, additive = false) => {
+      selectElements: (elementIds, additive = false) => {
         set((state) => {
-          if (additive) {
-            const merged = new Set([...state.selectedCardIds, ...cardIds])
-            state.selectedCardIds = [...merged]
-          } else {
-            state.selectedCardIds = cardIds
-          }
+          state.selectedElementIds = additive
+            ? [...new Set([...state.selectedElementIds, ...elementIds])]
+            : elementIds
           state.selectedConnectionIds = []
         })
       },
 
-      toggleCardSelection: (cardId) => {
+      toggleElementSelection: (elementId) => {
         set((state) => {
-          const index = state.selectedCardIds.indexOf(cardId)
-          if (index === -1) {
-            state.selectedCardIds = [...state.selectedCardIds, cardId]
-          } else {
-            state.selectedCardIds = state.selectedCardIds.filter((id) => id !== cardId)
-          }
+          state.selectedElementIds = state.selectedElementIds.includes(elementId)
+            ? state.selectedElementIds.filter((id) => id !== elementId)
+            : [...state.selectedElementIds, elementId]
           state.selectedConnectionIds = []
         })
       },
@@ -1447,23 +1514,23 @@ export const useCanvasStore = create<CanvasStore>()(
       selectConnection: (connectionId) => {
         set((state) => {
           state.selectedConnectionIds = connectionId ? [connectionId] : []
-          if (connectionId) state.selectedCardIds = []
+          if (connectionId) state.selectedElementIds = []
         })
       },
 
-      selectAllCards: () => {
+      selectAllElements: () => {
         const state = get()
         const page = state.doc.pages.find((p) => p.id === state.activePageId)
-        const ids = page?.cards.map((card) => card.id) ?? []
+        const ids = page?.elements.map((element) => element.id) ?? []
         set((draft) => {
-          draft.selectedCardIds = ids
+          draft.selectedElementIds = ids
           draft.selectedConnectionIds = []
         })
       },
 
       clearSelection: () => {
         set((state) => {
-          state.selectedCardIds = []
+          state.selectedElementIds = []
           state.selectedConnectionIds = []
           state.selectedGroupId = null
           state.contextMenu = null
@@ -1471,8 +1538,15 @@ export const useCanvasStore = create<CanvasStore>()(
       },
 
       deleteSelection: () => {
-        const { selectedCardIds, selectedConnectionIds, selectedGroupId, deleteCards, deleteConnections, deleteGroups } = get()
-        if (selectedCardIds.length > 0) deleteCards(selectedCardIds)
+        const {
+          selectedElementIds,
+          selectedConnectionIds,
+          selectedGroupId,
+          deleteElements,
+          deleteConnections,
+          deleteGroups,
+        } = get()
+        if (selectedElementIds.length > 0) deleteElements(selectedElementIds)
         else if (selectedConnectionIds.length > 0) deleteConnections(selectedConnectionIds)
         else if (selectedGroupId) deleteGroups([selectedGroupId])
       },
@@ -1574,8 +1648,8 @@ export const useCanvasStore = create<CanvasStore>()(
           if (!draft.doc.pages.some((p) => p.id === draft.activePageId)) {
             draft.activePageId = draft.doc.pages[0]?.id ?? ''
           }
-          draft.selectedCardIds = draft.selectedCardIds.filter((id) =>
-            previous.pages.some((p) => p.cards.some((c) => c.id === id)),
+          draft.selectedElementIds = draft.selectedElementIds.filter((id) =>
+            previous.pages.some((p) => p.elements.some((c) => c.id === id)),
           )
           draft.selectedConnectionIds = draft.selectedConnectionIds.filter((id) =>
             previous.pages.some((p) => p.connections.some((c) => c.id === id)),
@@ -1608,7 +1682,7 @@ export const useCanvasStore = create<CanvasStore>()(
         set((state) => {
           state.doc = next
           state.activePageId = next.pages[0]?.id ?? ''
-          state.selectedCardIds = []
+          state.selectedElementIds = []
           state.selectedConnectionIds = []
           state.past = []
           state.future = []
@@ -1626,10 +1700,10 @@ export const useCanvasStore = create<CanvasStore>()(
               state.doc.pages.push(page)
               continue
             }
-            const cardIds = new Set(existing.cards.map((c) => c.id))
-            for (const card of page.cards) {
+            const cardIds = new Set(existing.elements.map((c) => c.id))
+            for (const card of page.elements) {
               if (cardIds.has(card.id)) continue
-              existing.cards.push(card)
+              existing.elements.push(card)
               cardIds.add(card.id)
             }
             const groupIds = new Set(existing.groups.map((g) => g.id))
@@ -1642,10 +1716,10 @@ export const useCanvasStore = create<CanvasStore>()(
             for (const connection of page.connections) {
               if (connectionIds.has(connection.id)) continue
               const sourceExists =
-                (connection.source.kind === 'card' && cardIds.has(connection.source.id)) ||
+                (connection.source.kind === 'element' && cardIds.has(connection.source.id)) ||
                 (connection.source.kind === 'group' && groupIds.has(connection.source.id))
               const targetExists =
-                (connection.target.kind === 'card' && cardIds.has(connection.target.id)) ||
+                (connection.target.kind === 'element' && cardIds.has(connection.target.id)) ||
                 (connection.target.kind === 'group' && groupIds.has(connection.target.id))
               if (!sourceExists || !targetExists) continue
               existing.connections.push(connection)
@@ -1659,11 +1733,11 @@ export const useCanvasStore = create<CanvasStore>()(
 
       resetToSample: () => {
         pushHistory()
-        const sample = normalizeDoc(createSampleDoc()).doc
+        const sample = normalizeDoc(createSampleDoc())
         set((state) => {
           state.doc = sample
           state.activePageId = sample.pages[0].id
-          state.selectedCardIds = []
+          state.selectedElementIds = []
           state.selectedConnectionIds = []
         })
       },
@@ -1674,11 +1748,6 @@ export const useCanvasStore = create<CanvasStore>()(
 /* ------------------------------------------------------------------ */
 /* Read-only helpers                                                   */
 /* ------------------------------------------------------------------ */
-
-function findCard(state: CanvasStore, cardId: string): Card | undefined {
-  const page = state.doc.pages.find((p) => p.id === state.activePageId)
-  return page?.cards.find((c) => c.id === cardId)
-}
 
 function findConnection(state: CanvasStore, connectionId: string): Connection | undefined {
   const page = state.doc.pages.find((p) => p.id === state.activePageId)

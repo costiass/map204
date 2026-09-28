@@ -1,7 +1,6 @@
-import type { CardEmbed, CardType } from '@/types'
-
 /**
- * Everything a card that points at something else needs to know about that URL.
+ * Everything an element that points at something else needs to know about that
+ * URL.
  *
  * The rule throughout: **never put an unchecked string into an `iframe src`.**
  * A card body is Markdown and is sanitised on render, but an embed is a live
@@ -181,59 +180,30 @@ export function youtubeWatchUrl(url: string): string {
 /* Choosing a kind                                                      */
 /* ------------------------------------------------------------------ */
 
-export const CARD_TYPES: Array<{ id: CardType; label: string; hint: string }> = [
-  { id: 'note', label: 'Note', hint: 'A title and some Markdown' },
-  { id: 'flash', label: 'Flash', hint: 'Two sides, turns over on click' },
-  { id: 'youtube', label: 'Video', hint: 'A YouTube link, played in place' },
-  { id: 'pdf', label: 'PDF', hint: 'A document, referenced by link' },
-]
-
-export function isCardType(value: unknown): value is CardType {
-  return value === 'note' || value === 'flash' || value === 'youtube' || value === 'pdf'
-}
-
-/** The kind a pasted URL most likely wants to be. */
-export function guessCardType(url: string): CardType {
-  if (youtubeVideoId(url)) return 'youtube'
-  if (looksLikePdf(url)) return 'pdf'
-  return 'note'
-}
-
-/**
- * A card, ready to drop on the canvas, pointing at `url` as `type`.
+/*
+ * There is deliberately nothing here about *which kinds exist*.
  *
- * Called with whatever the user pasted, so the kind is inferred and a title is
- * taken from the URL when they did not give one.
+ * v1 had `CARD_TYPES`, `isCardType`, `guessCardType` and `embedFor` in this file,
+ * which meant a fourth copy of the list of kinds — the fourth to drift from the
+ * other three. A video is not a card with an embed attached; it is a kind, and
+ * the kinds live in `elements/registry`, which also says which of them need a
+ * source and which are implemented yet.
+ *
+ * What stays here is the part that is genuinely about URLs: is this safe to
+ * load, which video is it, does it look like a PDF. That knowledge is the same
+ * whoever is asking.
+ *
+ * `guessKind` below is the one exception, and it earns its place by answering a
+ * question only a URL can answer: *what is this link?* It returns a kind name
+ * and nothing else decides whether that kind is on offer.
  */
-export function embedFor(type: CardType, rawUrl: string, title?: string): {
-  type: CardType
-  embed: CardEmbed | null
-  title: string
-} {
-  if (type === 'note' || type === 'flash') {
-    return { type, embed: null, title: title?.trim() || (type === 'flash' ? 'Question' : 'Untitled card') }
-  }
 
-  const url = (rawUrl ?? '').trim()
-  const id = type === 'youtube' ? youtubeVideoId(url) : null
-
-  if (type === 'youtube' && !id) {
-    // Not a YouTube link, so it is not a video card. Falling back to a note keeps
-    // the pasted link in the body rather than dropping it.
-    return {
-      type: 'note',
-      embed: null,
-      title: title?.trim() || 'Untitled card',
-    }
-  }
-
-  const meta: Record<string, string | number | boolean> = {}
-  const start = youtubeStartSeconds(url)
-  if (type === 'youtube' && start) meta.start = start
-
-  return {
-    type,
-    embed: { url, ...(Object.keys(meta).length > 0 ? { meta } : {}) },
-    title: title?.trim() || (type === 'youtube' ? `Video ${id}` : embedHost(url) || 'Document'),
-  }
+/** The kind a pasted URL most likely is, or `null` if it says nothing. */
+export function guessKind(url: string): 'video' | 'pdf' | null {
+  const trimmed = url.trim()
+  if (!trimmed) return null
+  if (youtubeVideoId(trimmed)) return 'video'
+  if (looksLikePdf(trimmed)) return 'pdf'
+  return null
 }
+

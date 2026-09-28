@@ -194,6 +194,56 @@ if (linked.connections[0].source.kind !== 'element') {
   fail(\`a connection to a card is now "\${linked.connections[0].source.kind}"\`)
 }
 
+/* --- a connection's *style* survives, not just its endpoints ------------ */
+//
+// A connection that kept its endpoints but lost its routing would look correct
+// in a test about endpoints and be wrong on the canvas. This happened: version 1
+// called the right-angled routing "stepped" and the migration only knew the new
+// name, so every stepped connection in every saved document quietly became a
+// curve.
+const styled = run({
+  version: 1,
+  pages: [{
+    id: 'p1',
+    title: 'T',
+    // Real cards, because a connection to a card that is not there is dropped —
+    // which is the correct behaviour and would otherwise look like a failure of
+    // the style assertions below.
+    cards: [
+      { id: 'a', type: 'note', title: 'A', content: '', style: {}, tags: [], checklist: [],
+        position: { x: 0, y: 0, width: 200, height: 100, zIndex: 1 },
+        createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+      { id: 'b', type: 'note', title: 'B', content: '', style: {}, tags: [], checklist: [],
+        position: { x: 400, y: 0, width: 200, height: 100, zIndex: 2 },
+        createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+      { id: 'c', type: 'note', title: 'C', content: '', style: {}, tags: [], checklist: [],
+        position: { x: 0, y: 300, width: 200, height: 100, zIndex: 3 },
+        createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+    ],
+    groups: [],
+    connections: [
+      { id: 'c1', source: { kind: 'card', id: 'a' }, target: { kind: 'card', id: 'b' },
+        label: '', relationshipType: 'related to', sourceAnchor: null, targetAnchor: null,
+        style: { routing: 'stepped', lineStyle: 'dashed', arrowStart: 'none', arrowEnd: 'diamond' } },
+      { id: 'c2', source: { kind: 'card', id: 'a' }, target: { kind: 'card', id: 'c' },
+        label: '', relationshipType: 'related to', sourceAnchor: null, targetAnchor: null,
+        style: { routing: 'straight', lineStyle: 'solid', arrowStart: 'circle', arrowEnd: 'arrow' } },
+    ],
+  }],
+}).doc.pages[0].connections
+
+if (styled[0].style.routing !== 'orthogonal') {
+  fail(\`a stepped connection became "\${styled[0].style.routing}"\`)
+}
+if (styled[0].style.lineStyle !== 'dashed') fail('a dashed line became solid')
+if (styled[0].style.arrowEnd !== 'diamond') {
+  fail(\`a diamond arrowhead became "\${styled[0].style.arrowEnd}"\`)
+}
+if (styled[1].style.routing !== 'straight') fail('a straight connection changed routing')
+if (styled[1].style.arrowStart !== 'circle') {
+  fail(\`a circle arrowhead became "\${styled[1].style.arrowStart}"\`)
+}
+
 /* --- things that cannot be translated are dropped, loudly ------------ */
 const broken = run({
   version: 1,

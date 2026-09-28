@@ -284,13 +284,13 @@ import(pathToFileURL(process.argv[2]).href)
       // must be off rather than aimed at the world origin.
       fail(\`a page step dimmed everything: \${s().focusTargetId}\`)
     }
-    const cardId = s().addCard({ title: 'A card' })
-    s().updateStep(dimmed, { targetId: cardId, targetKind: 'card', focus: 'dim' })
+    const cardId = s().addElement('note', { title: 'A card' })
+    s().updateStep(dimmed, { targetId: cardId, targetKind: 'element', focus: 'dim' })
     s().goToStep(s().steps().findIndex((step) => step.id === dimmed))
     if (s().focusTargetId !== cardId) fail(\`a dim step did not aim at its card: \${s().focusTargetId}\`)
     if (s().focusMode !== 'dim') fail(\`the focus mode was "\${s().focusMode}"\`)
 
-    const plain = s().addStep({ targetId: cardId, targetKind: 'card', focus: 'none' })
+    const plain = s().addStep({ targetId: cardId, targetKind: 'element', focus: 'none' })
     s().goToStep(s().steps().findIndex((step) => step.id === plain))
     if (s().focusTargetId !== null) {
       fail(\`a step with no focus left the previous step's dim behind: \${s().focusTargetId}\`)

@@ -12,16 +12,16 @@ import {
   IconTrash,
   IconUpload,
 } from '@/components/Icons'
-import { openInsertCard } from '@/components/InsertCardDialog'
+import { openInsertElement } from '@/components/InsertCardDialog'
 import { useCanvasStore } from '@/store/useCanvasStore'
-import { CARD_ACCENTS, CARD_BACKGROUNDS, type CardType } from '@/types'
+import { CARD_ACCENTS, CARD_BACKGROUNDS } from '@/types'
 import { insertableKinds, needsSource } from '@/elements/registry'
 
 export function ContextMenu() {
   const menu = useCanvasStore((s) => s.contextMenu)
   const card = useCanvasStore((s) => {
     if (!s.contextMenu?.cardId) return undefined
-    return s.doc.pages.find((p) => p.id === s.activePageId)?.cards.find((c) => c.id === s.contextMenu?.cardId)
+    return s.doc.pages.find((p) => p.id === s.activePageId)?.elements.find((c) => c.id === s.contextMenu?.cardId)
   })
   const group = useCanvasStore((s) => {
     if (!s.contextMenu?.groupId) return undefined
@@ -33,24 +33,24 @@ export function ContextMenu() {
       .find((p) => p.id === s.activePageId)
       ?.connections.find((c) => c.id === s.contextMenu?.connectionId)
   })
-  const selectedCardIds = useCanvasStore((s) => s.selectedCardIds)
+  const selectedElementIds = useCanvasStore((s) => s.selectedElementIds)
   const page = useCanvasStore((s) => s.doc.pages.find((p) => p.id === s.activePageId))
   const setContextMenu = useCanvasStore((s) => s.setContextMenu)
   const close = () => setContextMenu(null)
 
-  const addCard = useCanvasStore((s) => s.addCard)
+  const addElement = useCanvasStore((s) => s.addElement)
   const addGroup = useCanvasStore((s) => s.addGroup)
-  const selectAllCards = useCanvasStore((s) => s.selectAllCards)
+  const selectAllElements = useCanvasStore((s) => s.selectAllElements)
   const requestFitView = useCanvasStore((s) => s.requestFitView)
   const setDialog = useCanvasStore((s) => s.setDialog)
-  const updateCardStyle = useCanvasStore((s) => s.updateCardStyle)
-  const setDefaultCardStyle = useCanvasStore((s) => s.setDefaultCardStyle)
+  const updateElementStyle = useCanvasStore((s) => s.updateElementStyle)
+  const setDefaultNoteStyle = useCanvasStore((s) => s.setDefaultNoteStyle)
   const setDefaultConnectionPreset = useCanvasStore((s) => s.setDefaultConnectionPreset)
   const pushToast = useCanvasStore((s) => s.pushToast)
-  const applyZOrder = useCanvasStore((s) => s.applyZOrder)
-  const duplicateCards = useCanvasStore((s) => s.duplicateCards)
-  const deleteCards = useCanvasStore((s) => s.deleteCards)
-  const toggleCollapsed = useCanvasStore((s) => s.toggleCollapsed)
+  const applyElementZOrder = useCanvasStore((s) => s.applyElementZOrder)
+  const duplicateElements = useCanvasStore((s) => s.duplicateElements)
+  const deleteElements = useCanvasStore((s) => s.deleteElements)
+  const toggleElementCollapsed = useCanvasStore((s) => s.toggleElementCollapsed)
   const deleteConnections = useCanvasStore((s) => s.deleteConnections)
   const updateConnectionStyle = useCanvasStore((s) => s.updateConnectionStyle)
   const deleteGroups = useCanvasStore((s) => s.deleteGroups)
@@ -63,8 +63,8 @@ export function ContextMenu() {
   const top = Math.min(menu.y, window.innerHeight - 340)
 
   const targetIds = menu.cardId
-    ? selectedCardIds.includes(menu.cardId)
-      ? selectedCardIds
+    ? selectedElementIds.includes(menu.cardId)
+      ? selectedElementIds
       : [menu.cardId]
     : []
 
@@ -74,30 +74,30 @@ export function ContextMenu() {
       <div className="cc-menu" style={{ left, top }} onPointerDown={(event) => event.stopPropagation()}>
         {card ? (
           <>
-            <button type="button" onClick={() => { duplicateCards(targetIds); close() }}>
-              <IconCopy size={14} /> Duplicate {targetIds.length > 1 ? `${targetIds.length} cards` : 'card'}
+            <button type="button" onClick={() => { duplicateElements(targetIds); close() }}>
+              <IconCopy size={14} /> Duplicate {targetIds.length > 1 ? `${targetIds.length} elements` : 'element'}
             </button>
-            <button type="button" onClick={() => { applyZOrder(targetIds, 'front'); close() }}>
+            <button type="button" onClick={() => { applyElementZOrder(targetIds, 'front'); close() }}>
               <IconBringFront size={14} /> Bring to front
             </button>
-            <button type="button" onClick={() => { applyZOrder(targetIds, 'back'); close() }}>
+            <button type="button" onClick={() => { applyElementZOrder(targetIds, 'back'); close() }}>
               <IconSendBack size={14} /> Send to back
             </button>
-            <button type="button" onClick={() => { toggleCollapsed(targetIds); close() }}>
+            <button type="button" onClick={() => { toggleElementCollapsed(targetIds); close() }}>
               <IconCollapse size={14} /> {card.collapsed ? 'Expand' : 'Collapse'}
             </button>
             <button
               type="button"
               onClick={() => {
                 const source = targetIds[0]
-                const other = page?.cards.find((c) => !targetIds.includes(c.id))
+                const other = page?.elements.find((c) => !targetIds.includes(c.id))
                 if (other) {
                   useCanvasStore.getState().addConnection({
-                    source: { kind: 'card', id: source },
-                    target: { kind: 'card', id: other.id },
+                    source: { kind: 'element', id: source },
+                    target: { kind: 'element', id: other.id },
                   })
                 } else {
-                  useCanvasStore.getState().pushToast('Add another card first, then drag between card edges.', 'info')
+                  useCanvasStore.getState().pushToast('Add another element first, then drag between element edges.', 'info')
                 }
                 close()
               }}
@@ -117,7 +117,7 @@ export function ContextMenu() {
                       className="cc-swatch"
                       style={{ background: color }}
                       onClick={() => {
-                        for (const id of targetIds) updateCardStyle(id, { backgroundColor: color })
+                        for (const id of targetIds) updateElementStyle(id, { backgroundColor: color })
                         close()
                       }}
                     />
@@ -132,7 +132,7 @@ export function ContextMenu() {
                       className="cc-swatch"
                       style={{ background: color }}
                       onClick={() => {
-                        for (const id of targetIds) updateCardStyle(id, { accentColor: color })
+                        for (const id of targetIds) updateElementStyle(id, { accentColor: color })
                         close()
                       }}
                     />
@@ -141,25 +141,30 @@ export function ContextMenu() {
               </div>
             ) : null}
             <hr />
-            <button
-              type="button"
-              onClick={() => {
-                setDefaultCardStyle(card.style)
-                pushToast('New cards will use this style.', 'success')
-                close()
-              }}
-            >
-              <IconPalette size={14} /> Set as default card style
-            </button>
+            {/* Only a note has a style to copy. A video's "set as default" would
+                mean nothing, so it is not offered rather than offered and
+                silently doing nothing. */}
+            {card?.kind === 'note' ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setDefaultNoteStyle(card.style)
+                  pushToast('New notes will use this style.', 'success')
+                  close()
+                }}
+              >
+                <IconPalette size={14} /> Set as default note style
+              </button>
+            ) : null}
             <button
               type="button"
               data-danger="true"
               onClick={() => {
-                deleteCards(targetIds)
+                deleteElements(targetIds)
                 close()
               }}
             >
-              <IconTrash size={14} /> Delete {targetIds.length > 1 ? `${targetIds.length} cards` : 'card'}
+              <IconTrash size={14} /> Delete {targetIds.length > 1 ? `${targetIds.length} elements` : 'element'}
             </button>
           </>
         ) : null}
@@ -167,7 +172,7 @@ export function ContextMenu() {
         {group ? (
           <>
             <div className="px-2 py-1 text-[11px] text-slate-500">
-              {group.memberCardIds.length} card{group.memberCardIds.length === 1 ? '' : 's'} · {group.memberGroupIds.length} group{group.memberGroupIds.length === 1 ? '' : 's'}
+              {group.memberIds.length} element{group.memberIds.length === 1 ? '' : 's'}
             </div>
             <button
               type="button"
@@ -263,11 +268,12 @@ export function ContextMenu() {
                       // until somebody says to what. The dialog opens with the
                       // kind already chosen.
                       close()
-                      openInsertCard(menu.x, menu.y, kind.id as CardType)
+                      openInsertElement(menu.x, menu.y, kind.id)
                       return
                     }
-                    addCard(
-                      { type: kind.id as CardType },
+                    addElement(
+                      kind.id,
+                      {},
                       { atScreen: { x: menu.x, y: menu.y } },
                     )
                     close()
@@ -285,7 +291,7 @@ export function ContextMenu() {
 
             <hr />
             <p className="cc-menu-label">The page</p>
-            <button type="button" onClick={() => { selectAllCards(); close() }}>
+            <button type="button" onClick={() => { selectAllElements(); close() }}>
               <CheckSquare size={14} className="shrink-0 opacity-70" /> Select all cards
             </button>
             <button type="button" onClick={() => { requestFitView(); close() }}>

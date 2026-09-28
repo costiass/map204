@@ -2,8 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 import { supabase, supabaseAnonKey, supabaseUrl } from '@/lib/supabase'
 import { handleWriteError } from '@/store/writeErrors'
-import type { DocSettings, LineStyle, Routing, ArrowStyle } from '@/types'
-import type { Card, Connection, Group, Page, Position, Viewport } from '@/types'
+import type { Connection, DocSettings, Element, Group, Page, Rect, Viewport } from '@/types'
 
 /**
  * Supabase data layer — every REST call the app makes against PostgREST.
@@ -39,13 +38,23 @@ export interface DocumentRow {
   updated_at: string
 }
 
+/**
+ * A row of the `pages` table.
+ *
+ * `cards` is the *column name* and is not going away in this change: the database
+ * has always called it that, and renaming it is part of the reset in Phase I. The
+ * value in it is a list of v2 `Element`s — the wire name and the in-memory type
+ * differ here on purpose, and the two ends of that mismatch are this file and
+ * `rowToPage` below. Do not "fix" the column name without renaming the column.
+ */
 export interface PageRow {
   id: string
   document_id: string
   title: string
-  position: Position
+  /** The page's place in the sidebar. Not canvas geometry. */
+  position: Rect
   viewport: Viewport
-  cards: Card[]
+  cards: Element[]
   groups: Group[]
   connections: Connection[]
   version: number
@@ -70,7 +79,7 @@ export interface CollaboratorRow {
 }
 
 export const DEFAULT_DOC_SETTINGS: DocSettings = {
-  defaultCardStyle: {
+  defaultNoteStyle: {
     backgroundColor: '#ffffff',
     accentColor: '#6366F1',
     textColor: '#111827',
@@ -79,13 +88,18 @@ export const DEFAULT_DOC_SETTINGS: DocSettings = {
     borderRadius: 12,
     shadow: true,
   },
+  // The v2 vocabulary: `orthogonal` rather than `stepped`, and three arrowheads
+  // rather than five. The extra v1 shapes (`diamond`, `triangle`) were never
+  // rendered — the schema listed what the editor offered, not what the canvas
+  // could draw, and offering a choice that silently does nothing is worse than
+  // not offering it.
   defaultConnectionStyle: {
     color: '#6366F1',
     width: 2,
-    lineStyle: 'solid' as LineStyle,
-    routing: 'curved' as Routing,
-    arrowStart: 'none' as ArrowStyle,
-    arrowEnd: 'arrow' as ArrowStyle,
+    lineStyle: 'solid',
+    routing: 'curved',
+    arrowStart: 'none',
+    arrowEnd: 'arrow',
     animated: false,
   },
   defaultRelationshipType: 'related to',
@@ -93,23 +107,21 @@ export const DEFAULT_DOC_SETTINGS: DocSettings = {
   steps: [],
 }
 
-export const DEFAULT_PAGE_POSITION: Position = {
-  x: 0,
-  y: 0,
-  width: 1920,
-  height: 1080,
-  zIndex: 0,
-}
-
 export const DEFAULT_PAGE_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 }
+
+/**
+ * The `position` column, which the `pages` table still has and still requires.
+ *
+ * v2's `Page` has no `position`, because nothing ever read it: the sidebar orders
+ * pages by `ordinal` and the canvas geometry lives on the elements themselves.
+ * The column stays until the Phase I reset drops it, and until then it gets a
+ * constant — writing a value derived from a field that does not exist would be
+ * inventing data to satisfy a `not null` nobody reads.
+ */
+const LEGACY_PAGE_POSITION: Rect = { x: 0, y: 0, width: 1920, height: 1080 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-/** `position` was an integer before it became a JSON rect; old rows survive it. */
-function asPosition(value: unknown): Position {
-  return isRecord(value) ? (value as unknown as Position) : DEFAULT_PAGE_POSITION
 }
 
 function asViewport(value: unknown): Viewport {
@@ -125,13 +137,21 @@ function asArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : []
 }
 
+/**
+ * Wire shape to in-memory shape.
+ *
+ * The asymmetry on the `cards` line is the whole point of the comment on
+ * `PageRow`: the column is called `cards` and always has been, and what comes
+ * out of it is a list of elements. Renaming only one side of that is how a
+ * document's entire contents becomes an empty array, silently, on first sync.
+ */
 export function rowToPage(row: PageRow): Page {
   return {
     id: row.id,
     title: row.title || 'Untitled Page',
-    position: asPosition(row.position),
+    ordinal: typeof row.ordinal === 'number' ? row.ordinal : 0,
     viewport: asViewport(row.viewport),
-    cards: asArray<Card>(row.cards),
+    elements: asArray<Element>(row.cards),
     groups: asArray<Group>(row.groups),
     connections: asArray<Connection>(row.connections),
     createdAt: row.created_at,
@@ -407,9 +427,9 @@ export async function createPage(
       document_id: documentId,
       title: page.title,
       ordinal,
-      position: page.position ?? DEFAULT_PAGE_POSITION,
+      position: LEGACY_PAGE_POSITION,
       viewport: page.viewport ?? DEFAULT_PAGE_VIEWPORT,
-      cards: page.cards ?? [],
+      cards: page.elements ?? [],
       groups: page.groups ?? [],
       connections: page.connections ?? [],
       version: 0,
@@ -481,9 +501,9 @@ export async function savePageSnapshot(page: Page, baseVersion: number): Promise
     .from('pages')
     .update({
       title: page.title,
-      position: page.position,
+      position: LEGACY_PAGE_POSITION,
       viewport: page.viewport,
-      cards: page.cards,
+      cards: page.elements,
       groups: page.groups,
       connections: page.connections,
       version: nextVersion,
@@ -530,9 +550,9 @@ export async function savePageSnapshotKeepalive(
       },
       body: JSON.stringify({
         title: page.title,
-        position: page.position,
+        position: LEGACY_PAGE_POSITION,
         viewport: page.viewport,
-        cards: page.cards,
+        cards: page.elements,
         groups: page.groups,
         connections: page.connections,
         version: nextVersion,

@@ -138,6 +138,13 @@ export interface FlashElement extends ElementBase {
   cards: FlashSide[][]
   /** Which side is showing. `front` is the question. */
   showing: 'front' | 'back'
+  /**
+   * Which card of the deck is showing. Wraps, because a deck is something you
+   * flick through. Clamped on load — a file saying card 900 of a two-card deck is
+   * a bug in the file, and a deck that shows nothing is a worse outcome than
+   * showing the first one.
+   */
+  cardIndex: number
   /** Whether the deck is stepped through on the canvas or only in the inspector. */
   presentation: 'carousel' | 'single'
   /** Whether the answer is hidden until the card is clicked. */
@@ -208,14 +215,24 @@ export interface TableElement extends ElementBase {
   kind: 'table'
   title: string
   columns: TableColumn[]
-  /** One string per cell, in column-major order. A grid of text, not a grid of objects. */
+  /**
+   * One string per cell, in column-major order — so a cell is
+   * `cells[column * rowCount + row]`. Storing strings rather than objects is the
+   * point: a grid of text is a grid of text, and a cell is not a thing with a
+   * `text` field, a `bold` field and a colour that nothing reads.
+   */
   cells: string[]
+  /**
+   * How many rows. Derivable from `cells.length / columns.length`, but stored so
+   * an empty table has a height to render rather than collapsing to nothing.
+   */
+  rowCount: number
   /**
    * Where a click lands. A table is for reading; making it editable in place is
    * a mode you enter deliberately, not the default state of a thing on a canvas.
    */
   editing: boolean
-  /** Whether the header row is repeated and styled as a header. */
+  /** Whether the first row is repeated and styled as a header. */
   header: boolean
 }
 
@@ -273,22 +290,53 @@ export type ElementKindName = Element['kind']
 /* Page                                                                */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Which side of a box an edge leaves from.
+ *
+ * Defined here rather than in `types.ts` because a connection stores two of
+ * them, and a document type should not depend on a file that depends on it.
+ */
+export type Anchor = 'top' | 'right' | 'bottom' | 'left'
+
 export interface Connection {
   id: string
   source: { kind: 'element' | 'group'; id: string }
   target: { kind: 'element' | 'group'; id: string }
+  /**
+   * Which side of each end the edge leaves from, or `null` to let the renderer
+   * choose.
+   *
+   * Kept from version 1. They are optional on purpose: `null` means "pick the
+   * sensible side", which is what an edge wants when the thing it points at
+   * moves. A stored anchor is a person overriding that, and it is wrong the
+   * moment either end is dragged somewhere else.
+   */
+  sourceAnchor: Anchor | null
+  targetAnchor: Anchor | null
   label: string
   relationshipType: string
   style: ConnectionStyle
 }
 
+/**
+ * How a connection is drawn.
+ *
+ * Every value here is one `utils/edges.ts` actually draws. A version of this
+ * schema briefly narrowed `routing` and dropped two arrowheads; the renderer
+ * implemented all of them and the editor offered all of them, so the narrowing
+ * would have removed working features during a data migration. A schema is not
+ * the place to decide what the product should support.
+ *
+ * `orthogonal` is the name the schema uses for what the renderer calls `stepped`
+ * and what the old editor called `stepped` too. The rename is the only change.
+ */
 export interface ConnectionStyle {
   color: string
   width: number
   lineStyle: 'solid' | 'dashed' | 'dotted'
   routing: 'straight' | 'curved' | 'orthogonal'
-  arrowStart: 'none' | 'arrow' | 'circle'
-  arrowEnd: 'none' | 'arrow' | 'circle'
+  arrowStart: 'none' | 'arrow' | 'triangle' | 'circle' | 'diamond'
+  arrowEnd: 'none' | 'arrow' | 'triangle' | 'circle' | 'diamond'
   animated: boolean
 }
 

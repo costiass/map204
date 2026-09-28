@@ -3,13 +3,13 @@ import { useMemo } from 'react'
 import { IconX } from '@/components/Icons'
 import { useCanvasStore } from '@/store/useCanvasStore'
 import type { Connection } from '@/types'
-import { cardRect, centerOn, rectCenter } from '@/utils/geometry'
+import { rectOf, centerOn, rectCenter } from '@/utils/geometry'
 
 interface NodeData {
   id: string
   title: string
   color: string
-  kind: 'card' | 'group'
+  kind: 'element' | 'group'
   connection: Connection | null
   direction: 'in' | 'out'
   groupId?: string
@@ -27,21 +27,21 @@ interface GroupBox {
  * Cards belonging to the same group are wrapped in a shared box with padding.
  */
 export function ConnectionTree() {
-  const selectedCardIds = useCanvasStore((s) => s.selectedCardIds)
+  const selectedElementIds = useCanvasStore((s) => s.selectedElementIds)
   const page = useCanvasStore((s) => s.doc.pages.find((p) => p.id === s.activePageId))
-  const selectCards = useCanvasStore((s) => s.selectCards)
+  const selectElements = useCanvasStore((s) => s.selectElements)
   const setViewport = useCanvasStore((s) => s.setViewport)
   const viewportSize = useCanvasStore((s) => s.viewportSize)
   const clearSelection = useCanvasStore((s) => s.clearSelection)
 
-  const cardId = selectedCardIds.length === 1 ? selectedCardIds[0] : null
+  const cardId = selectedElementIds.length === 1 ? selectedElementIds[0] : null
 
   // Build a map of cardId -> group for cards that belong to a group.
   const cardGroupMap = useMemo(() => {
     if (!page) return new Map<string, { groupId: string; color: string; title: string }>()
     const map = new Map<string, { groupId: string; color: string; title: string }>()
     for (const group of page.groups) {
-      for (const memberCardId of group.memberCardIds) {
+      for (const memberCardId of group.memberIds) {
         map.set(memberCardId, { groupId: group.id, color: group.color, title: group.title })
       }
     }
@@ -50,13 +50,13 @@ export function ConnectionTree() {
 
   const { incoming, outgoing } = useMemo(() => {
     if (!cardId || !page) return { incoming: [], outgoing: [] }
-    const card = page.cards.find((c) => c.id === cardId)
+    const card = page.elements.find((c) => c.id === cardId)
     if (!card) return { incoming: [], outgoing: [] }
 
     const connections = page.connections.filter(
       (conn) =>
-        (conn.source.kind === 'card' && conn.source.id === cardId) ||
-        (conn.target.kind === 'card' && conn.target.id === cardId),
+        (conn.source.kind === 'element' && conn.source.id === cardId) ||
+        (conn.target.kind === 'element' && conn.target.id === cardId),
     )
 
     const incomingNodes: NodeData[] = []
@@ -64,22 +64,25 @@ export function ConnectionTree() {
     const seen = new Set<string>()
 
     for (const conn of connections) {
-      const isSource = conn.source.kind === 'card' && conn.source.id === cardId
+      const isSource = conn.source.kind === 'element' && conn.source.id === cardId
       const endpoint = isSource ? conn.target : conn.source
       const key = `${endpoint.kind}-${endpoint.id}`
       if (seen.has(key)) continue
       seen.add(key)
 
       let node: NodeData | null = null
-      if (endpoint.kind === 'card') {
-        const c = page.cards.find((card) => card.id === endpoint.id)
+      if (endpoint.kind === 'element') {
+        const c = page.elements.find((card) => card.id === endpoint.id)
         if (c) {
           const groupInfo = cardGroupMap.get(c.id)
           node = {
             id: c.id,
             title: c.title || 'Untitled',
-            color: c.style.accentColor,
-            kind: 'card',
+            // Only a note has an accent colour. The tree falls back to a neutral
+            // so a video in a link list is the same shape as a note without
+            // pretending to carry a colour it does not have.
+            color: c.kind === 'note' ? c.style.accentColor : '#94A3B8',
+            kind: 'element',
             connection: conn,
             direction: isSource ? 'out' : 'in',
             groupId: groupInfo?.groupId,
@@ -110,12 +113,12 @@ export function ConnectionTree() {
   if (!cardId || (incoming.length === 0 && outgoing.length === 0)) return null
 
   const jumpToCard = (node: NodeData) => {
-    if (!page || node.kind !== 'card') return
-    const target = page.cards.find((c) => c.id === node.id)
+    if (!page || node.kind !== 'element') return
+    const target = page.elements.find((c) => c.id === node.id)
     if (!target) return
-    selectCards([node.id])
+    selectElements([node.id])
     const zoom = Math.min(Math.max(page.viewport.zoom, 0.7), 1.2)
-    setViewport(centerOn(rectCenter(cardRect(target)), viewportSize, zoom))
+    setViewport(centerOn(rectCenter(rectOf(target)), viewportSize, zoom))
   }
 
   const lineStyle = (style: string) => {
@@ -133,7 +136,7 @@ export function ConnectionTree() {
     const result: Array<NodeData | GroupBox> = []
 
     for (const node of nodes) {
-      if (node.groupId && node.kind === 'card') {
+      if (node.groupId && node.kind === 'element') {
         const groupInfo = cardGroupMap.get(node.id)
         if (groupInfo) {
           let box = groups.get(node.groupId)
@@ -182,7 +185,7 @@ export function ConnectionTree() {
             {node.title}
           </span>
           <span className="shrink-0 text-[10px] text-muted">
-            {node.kind === 'card' ? 'card' : 'group'}
+            {node.kind === 'element' ? 'element' : 'group'}
           </span>
         </button>
         {/* Direction arrow */}

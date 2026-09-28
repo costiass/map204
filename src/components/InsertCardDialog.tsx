@@ -1,60 +1,61 @@
-import { useEffect, useRef, useState } from 'react'
-import { FileText, Layers, Play, StickyNote } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { useCanvasStore } from '@/store/useCanvasStore'
-import type { CardType } from '@/types'
-import {
-  CARD_TYPES,
-  embedFor,
-  guessCardType,
-  isCardType,
-  safeEmbedUrl,
-  youtubeThumbnailUrl,
-  youtubeVideoId,
-} from '@/utils/embeds'
+import { elementKind, insertableKinds } from '@/elements/registry'
+import { guessKind, safeEmbedUrl, youtubeThumbnailUrl, youtubeVideoId } from '@/utils/embeds'
 
 /**
- * Insert a card of a chosen kind.
+ * Insert an element of a chosen kind.
  *
- * One dialog rather than three, because the work is the same for each: pick a
- * kind, give it a link, drop it on the canvas. Asking for the kind first and the
- * link second would mean three near-identical dialogs.
+ * One dialog rather than one per kind, because the work is the same for each:
+ * pick a kind, give it a link, drop it on the canvas. Asking for the kind first
+ * and the link second would mean several near-identical dialogs.
+ *
+ * The kinds come from `elements/registry` — the same list the toolbar, the
+ * context menu and the keyboard read — so this dialog cannot offer something the
+ * canvas cannot store. That was the whole reason for moving the list out of this
+ * codebase and into one place, and it is why the dialog has no icons of its own.
  *
  * The kind is *guessed* from whatever is pasted. Somebody pasting a YouTube link
- * has already said what they want, and being asked to choose a type first is
- * the kind of question a form should answer on its own.
+ * has already said what they want, and being asked to choose a type first is the
+ * kind of question a form should answer on its own.
  */
 
-let request: { x: number; y: number; type: CardType | null } | null = null
+type InsertKind = string
+
+let request: { x: number; y: number; kind: InsertKind | null } | null = null
 let notify: (() => void) | null = null
 
 /**
  * Ask the dialog to open.
  *
- * `type` is a suggestion, not a decision: the link still gets the last word, so
- * a YouTube URL pasted into a card meant to be a PDF turns it into a video. Only
- * `note` and `flash` are ever locked, because nothing about a link can make a
- * note a video.
+ * `kind` is a suggestion, not a decision: the link still gets the last word, so a
+ * YouTube URL pasted where a PDF was going turns it into a video. Only a kind
+ * that needs no link is ever locked, because nothing about a URL can make a note
+ * a video.
  */
-export function openInsertCard(x: number, y: number, type: CardType | null = null): void {
-  request = { x, y, type }
+export function openInsertElement(x: number, y: number, kind: InsertKind | null = null): void {
+  request = { x, y, kind }
   notify?.()
 }
 
-const ICONS = { note: StickyNote, flash: Layers, youtube: Play, pdf: FileText }
-
 export function InsertCardDialog() {
   const [open, setOpen] = useState(false)
-  const [type, setType] = useState<CardType>('youtube')
+  const [kind, setKind] = useState<InsertKind>('video')
   const [url, setUrl] = useState('')
   const [title, setTitle] = useState('')
   const urlRef = useRef<HTMLInputElement>(null)
+
+  // Only the kinds the model can actually store, and only the ones that are
+  // *made* rather than containing. A menu that offers a table the data layer
+  // cannot write is worse than a menu without it: it fails after the click.
+  const kinds = useMemo(() => insertableKinds(), [])
 
   useEffect(() => {
     notify = () => {
       // A kind chosen on the way in wins over the previous value, so opening
       // "PDF" after a "Video" does not start from the wrong field.
-      if (request?.type) setType(request.type)
+      if (request?.kind) setKind(request.kind)
       setOpen(true)
       // Focus after paint, so the field is there to receive it.
       requestAnimationFrame(() => urlRef.current?.focus())
@@ -75,50 +76,58 @@ export function InsertCardDialog() {
 
   if (!open) return null
 
-  const guessed = url.trim() ? guessCardType(url.trim()) : null
-  const effective: CardType = guessed ?? type
-  const Icon = ICONS[effective]
-  // A note and a flash card are made of text, so there is nothing to ask for.
-  // Only the two kinds that point at something need a link to point with.
-  const needsUrl = effective === 'youtube' || effective === 'pdf'
-  const valid = !needsUrl || (effective === 'youtube' ? !!youtubeVideoId(url) : !!safeEmbedUrl(url))
+  const guessed = url.trim() ? guessKind(url.trim()) : null
+  const effective: InsertKind = guessed ?? kind
+  const meta = elementKind(effective)
+  const Icon = meta.icon
+
+  // A kind that needs a source has nothing to show without one, so the form asks
+  // for it. The registry knows which those are, rather than this file repeating
+  // the list.
+  const needsUrl = meta.needsSource
+
+  const valid = !needsUrl || (effective === 'video' ? !!youtubeVideoId(url) : !!safeEmbedUrl(url))
 
   const insert = () => {
-    const at = request
     request = null
     setOpen(false)
     setUrl('')
     setTitle('')
 
-    const built = embedFor(effective, url, title)
     const store = useCanvasStore.getState()
 
     if (needsUrl && !valid) {
       store.pushToast(
-        effective === 'youtube'
-          ? 'That is not a YouTube link, so no video card was created.'
-          : 'That is not a web address, so no card was created.',
+        effective === 'video'
+          ? 'That is not a YouTube link, so no video was created.'
+          : 'That is not a web address, so nothing was created.',
         'error',
       )
       return
     }
 
-    const id = store.addCard({
-      type: built.type,
-      title: built.title,
-      content: '',
-      embed: built.embed,
+    // A title is only offered when there is a sensible default to suggest — a
+    // video's comes from its id, a PDF's from its host, and both are better than
+    // a blank field the reader has to fill in.
+    const trimmedTitle = title.trim()
+    const id = store.addElement(effective, {
+      ...(trimmedTitle ? { title: trimmedTitle } : {}),
+      ...(needsUrl ? { url: url.trim() } : {}),
     })
 
-    // A note or a flash card is nothing but text, so it starts empty and waits
-    // to be typed into — selecting it means the next thing you do is type. A
-    // video or PDF starts with its link in place, which is the only reason to
-    // have made it, so it is left unselected rather than inviting typing.
-    if (id && !needsUrl) {
-      store.selectCards([id])
-    }
-    void at
+    // A note or a flash deck is nothing but text, so it starts empty and waits to
+    // be typed into — selecting it means the next thing you do is type. A video
+    // or PDF starts with its link in place, which is the only reason to have made
+    // it, so it is left unselected rather than inviting typing.
+    if (id && !needsUrl) store.selectElements([id])
   }
+
+  const urlLabel =
+    effective === 'video' ? 'YouTube link' : effective === 'pdf' ? 'Document link' : 'Link'
+  const urlPlaceholder =
+    effective === 'video'
+      ? 'https://youtube.com/watch?v=…'
+      : 'https://example.com/lecture.pdf'
 
   return (
     <div
@@ -133,27 +142,30 @@ export function InsertCardDialog() {
         onPointerDown={(event) => event.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label="Insert a card"
+        aria-label="Insert an element"
       >
         <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
           <Icon size={15} className="text-brand" />
-          <h2 className="text-sm font-bold text-ink-strong">Insert a card</h2>
+          <h2 className="text-sm font-bold text-ink-strong">Insert an element</h2>
         </div>
 
         <div className="space-y-3 px-4 py-3">
           <div>
             <span className="cc-label">Kind</span>
-            <div className="mt-1 grid grid-cols-4 gap-1.5">
-              {CARD_TYPES.map((option) => {
-                const OptionIcon = ICONS[option.id]
+            <div
+              className="mt-1 grid gap-1.5"
+              style={{ gridTemplateColumns: `repeat(${Math.min(kinds.length, 4)}, minmax(0, 1fr))` }}
+            >
+              {kinds.map((option) => {
+                const OptionIcon = option.icon
                 const active = effective === option.id
                 return (
                   <button
                     key={option.id}
                     type="button"
                     onClick={() => {
-                      setType(option.id)
-                      if (option.id === 'note') setUrl('')
+                      setKind(option.id)
+                      if (!elementKind(option.id).needsSource) setUrl('')
                     }}
                     disabled={!!guessed && guessed !== option.id}
                     className={`flex flex-col items-center gap-1 rounded-lg border px-2 py-2 text-[11px] transition disabled:opacity-40 ${
@@ -161,7 +173,11 @@ export function InsertCardDialog() {
                         ? 'border-brand bg-brand-soft font-semibold text-brand-ink'
                         : 'border-line hover:bg-surface-alt'
                     }`}
-                    title={guessed && guessed !== option.id ? `${option.label} — overridden by the link` : option.hint}
+                    title={
+                      guessed && guessed !== option.id
+                        ? `${option.label} — overridden by the link`
+                        : option.blurb
+                    }
                   >
                     <OptionIcon size={15} />
                     {option.label}
@@ -173,17 +189,11 @@ export function InsertCardDialog() {
 
           {needsUrl ? (
             <label className="block">
-              <span className="cc-label">
-                {effective === 'youtube' ? 'YouTube link' : 'PDF link'}
-              </span>
+              <span className="cc-label">{urlLabel}</span>
               <input
                 ref={urlRef}
                 className="cc-input mt-1 w-full"
-                placeholder={
-                  effective === 'youtube'
-                    ? 'https://youtube.com/watch?v=…'
-                    : 'https://example.com/lecture.pdf'
-                }
+                placeholder={urlPlaceholder}
                 value={url}
                 onChange={(event) => {
                   const next = event.target.value
@@ -192,8 +202,8 @@ export function InsertCardDialog() {
                   // go on, and it must never fight the reader: a half-typed link
                   // that happens to parse should not change the kind under them.
                   if (next.trim().length > 8) {
-                    const guess = guessCardType(next.trim())
-                    if (isCardType(guess) && guess !== 'note') setType(guess)
+                    const guess = guessKind(next.trim())
+                    if (guess) setKind(guess)
                   }
                 }}
                 onKeyDown={(event) => {
@@ -202,12 +212,12 @@ export function InsertCardDialog() {
               />
               {url.trim() && !valid ? (
                 <p className="mt-1 text-[11px] text-danger">
-                  {effective === 'youtube'
+                  {effective === 'video'
                     ? 'No video id found in that link.'
                     : 'That is not an http(s) address.'}
                 </p>
               ) : null}
-              {effective === 'youtube' && youtubeThumbnailUrl(url) ? (
+              {effective === 'video' && youtubeThumbnailUrl(url) ? (
                 <img
                   src={youtubeThumbnailUrl(url) ?? ''}
                   alt=""
@@ -221,7 +231,7 @@ export function InsertCardDialog() {
             <span className="cc-label">Title (optional)</span>
             <input
               className="cc-input mt-1 w-full"
-              placeholder={effective === 'note' ? 'New card' : ''}
+              placeholder={needsUrl ? '' : 'Untitled'}
               value={title}
               onChange={(event) => setTitle(event.target.value)}
               onKeyDown={(event) => {

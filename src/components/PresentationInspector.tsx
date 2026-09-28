@@ -30,7 +30,7 @@ import type { PresentationStep, StepFocus, StepTransition, StepTrigger } from '@
 export function PresentationInspector({ onClose }: { onClose: () => void }) {
   const steps = useCanvasStore((s) => s.doc.settings.steps)
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const cards = useCanvasStore((s) => s.doc.pages.find((p) => p.id === s.activePageId)?.cards ?? [])
+  const cards = useCanvasStore((s) => s.doc.pages.find((p) => p.id === s.activePageId)?.elements ?? [])
   const groups = useCanvasStore((s) => s.doc.pages.find((p) => p.id === s.activePageId)?.groups ?? [])
 
   // Default to the first step, so the panel is never showing "pick one" the
@@ -44,19 +44,19 @@ export function PresentationInspector({ onClose }: { onClose: () => void }) {
   const addStep = useCanvasStore((s) => s.addStep)
   const startPresenting = useCanvasStore((s) => s.startPresenting)
   const requestFitView = useCanvasStore((s) => s.requestFitView)
-  const selectedCardIds = useCanvasStore((s) => s.selectedCardIds)
+  const selectedElementIds = useCanvasStore((s) => s.selectedElementIds)
   const selectedGroupId = useCanvasStore((s) => s.selectedGroupId)
 
   const titleOf = (target: PresentationStep) => {
     if (target.targetKind === 'page' || !target.targetId) return 'The whole page'
-    if (target.targetKind === 'card') {
+    if (target.targetKind === 'element') {
       return cards.find((c) => c.id === target.targetId)?.title || 'A card that was deleted'
     }
     return groups.find((g) => g.id === target.targetId)?.title || 'A group that was deleted'
   }
 
   const addForSelection = () => {
-    const chosen = selectedCardIds.filter((id) => cards.some((c) => c.id === id))
+    const chosen = selectedElementIds.filter((id) => cards.some((c) => c.id === id))
     if (chosen.length === 0) {
       if (selectedGroupId) {
         setSelectedId(addStep({ targetId: selectedGroupId, targetKind: 'group' }))
@@ -67,7 +67,7 @@ export function PresentationInspector({ onClose }: { onClose: () => void }) {
     }
     // The first one is opened for editing; the rest are made in the order they
     // were selected, which is the order the presenter put them in.
-    const ids = chosen.map((id) => addStep({ targetId: id, targetKind: 'card' }))
+    const ids = chosen.map((id) => addStep({ targetId: id, targetKind: 'element' }))
     setSelectedId(ids[0] ?? null)
   }
 
@@ -154,7 +154,7 @@ export function PresentationInspector({ onClose }: { onClose: () => void }) {
               {titleOf(step)}
             </p>
             <p className="mt-0.5 text-[11px] leading-snug text-muted">
-              {step.targetKind === 'card'
+              {step.targetKind === 'element'
                 ? 'A card. Pick a different one by selecting it on the canvas and adding a step.'
                 : step.targetKind === 'group'
                   ? 'A group — the natural way to frame a section of a map.'

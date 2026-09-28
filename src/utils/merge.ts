@@ -1,5 +1,3 @@
-import type { Card, Connection, Group, Page } from '@/types'
-
 /**
  * Merge helpers for multi-user collaboration.
  *
@@ -9,49 +7,68 @@ import type { Card, Connection, Group, Page } from '@/types'
  *    authoritative: replace, so deletions made by the other person stick.
  *  - **Both sides changed at the same time** → union, so nothing anybody typed
  *    disappears. The next server write reconciles the two.
+ *
+ * A page's *contents* — `PageContent` — is kept separate from the page itself,
+ * because the wire protocol sends contents and metadata as different concerns
+ * and the merge only ever arbitrates the contents.
  */
+
+import type { Connection, Element, Group, Page } from '@/types'
 
 function byId<T extends { id: string }>(items: T[]): Map<string, T> {
   return new Map(items.map((item) => [item.id, item]))
 }
 
 export interface PageContent {
-  cards: Card[]
+  elements: Element[]
   groups: Group[]
   connections: Connection[]
 }
 
 export function contentOf(page: Page): PageContent {
-  return { cards: page.cards, groups: page.groups, connections: page.connections }
+  return { elements: page.elements, groups: page.groups, connections: page.connections }
 }
 
+/**
+ * A connection survives a union only if both of its ends still exist.
+ *
+ * Either end may be an element of any kind or a group, so this checks against
+ * the union of both id sets rather than one or the other. A connection whose end
+ * was deleted on one side would otherwise reappear pointing at nothing — which
+ * draws as a line to nowhere with nothing on screen to explain it.
+ */
 function connectionIsAnchored(connection: Connection, ids: Set<string>): boolean {
-  return (
-    (connection.source.kind === 'card' || connection.source.kind === 'group') &&
-    (connection.target.kind === 'card' || connection.target.kind === 'group') &&
-    ids.has(connection.source.id) &&
-    ids.has(connection.target.id)
-  )
+  return ids.has(connection.source.id) && ids.has(connection.target.id)
 }
 
 /** Union of two snapshots, keyed by id, dropping dangling connections. */
 export function unionContent(local: PageContent, remote: PageContent): PageContent {
-  const cards = byId([...local.cards, ...remote.cards])
+  const elements = byId([...local.elements, ...remote.elements])
   const groups = byId([...local.groups, ...remote.groups])
-  const ids = new Set<string>([...cards.keys(), ...groups.keys()])
+  const ids = new Set<string>([...elements.keys(), ...groups.keys()])
 
   const connections = byId(
     [...local.connections, ...remote.connections].filter((c) => connectionIsAnchored(c, ids)),
   )
 
-  return { cards: [...cards.values()], groups: [...groups.values()], connections: [...connections.values()] }
+  return {
+    elements: [...elements.values()],
+    groups: [...groups.values()],
+    connections: [...connections.values()],
+  }
 }
 
+/**
+ * What one collaborator sends.
+ *
+ * `position` is the page's place in the sidebar, not canvas geometry — it is
+ * sent separately because two people renaming pages should not conflict over it.
+ */
 export interface RemoteSnapshot {
   title: string
-  position: Page['position']
+  ordinal: number
   viewport: Page['viewport']
-  cards: Card[]
+  elements: Element[]
   groups: Group[]
   connections: Connection[]
   /** Sender's wall clock (ms) — decides who wins. */
@@ -66,20 +83,19 @@ export type MergeMode = 'replace' | 'union'
  * `union` when the two may have diverged.
  */
 export function applySnapshot(local: Page, remote: RemoteSnapshot, mode: MergeMode): Page {
-  const stamp = new Date().toISOString()
   const content =
     mode === 'replace'
-      ? { cards: remote.cards, groups: remote.groups, connections: remote.connections }
+      ? { elements: remote.elements, groups: remote.groups, connections: remote.connections }
       : unionContent(contentOf(local), remote)
 
   return {
     ...local,
     title: remote.title,
-    position: remote.position,
+    ordinal: remote.ordinal,
     viewport: remote.viewport,
-    cards: content.cards,
+    elements: content.elements,
     groups: content.groups,
     connections: content.connections,
-    updatedAt: stamp,
+    updatedAt: new Date().toISOString(),
   }
 }

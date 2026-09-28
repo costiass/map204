@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { ExternalLink, FileText, Play } from 'lucide-react'
 
-import type { Card } from '@/types'
+import type { PdfElement, VideoElement } from '@/types'
 import {
   embedHost,
   safeEmbedUrl,
@@ -11,7 +11,12 @@ import {
 } from '@/utils/embeds'
 
 /**
- * The body of a card that points at something: a YouTube video, or a PDF.
+ * The body of an element that points at something: a YouTube video, or a PDF.
+ *
+ * In version 1 a card carried an optional `embed`, and *this component* decided
+ * what to draw from the card's `type`. In version 2 a video and a PDF are kinds
+ * in their own right with their own payloads, so there is no embed to interpret
+ * and no type to switch on here — the caller already knows which it has.
  *
  * Two rules, both about not trusting a pasted URL:
  *
@@ -19,40 +24,38 @@ import {
  *     it is http(s). `javascript:` and `data:` parse as URLs, and putting either
  *     in an `src` is code execution in the reader's session.
  *   * a YouTube player URL is *built* from the extracted video id, never taken
- *     from the card. A card that says it is a video but points somewhere else
- *     shows a link, not that somewhere.
- *
- * A note renders neither, so this is only mounted for the other two kinds.
+ *     from the element. A video element that points somewhere that is not a
+ *     video shows a link, not that somewhere.
  */
-export function CardEmbedView({ card }: { card: Card }) {
-  if (card.type === 'youtube') return <YouTubeEmbed card={card} />
-  if (card.type === 'pdf') return <PdfEmbed card={card} />
-  return null
+export function CardEmbedView({ element }: { element: VideoElement | PdfElement }) {
+  if (element.kind === 'video') return <VideoView element={element} />
+  return <PdfView element={element} />
 }
 
-function YouTubeEmbed({ card }: { card: Card }) {
-  const url = card.embed?.url ?? ''
+function VideoView({ element }: { element: VideoElement }) {
   const [playing, setPlaying] = useState(false)
 
-  const player = youtubeEmbedUrl(url, Number(card.embed?.meta?.start) || null)
-  const thumbnail = youtubeThumbnailUrl(url)
-  const videoId = youtubeVideoId(url)
+  // The element's own `display` says whether it wants a live player. A document
+  // set to "player" starts playing; the default is a thumbnail, because a page
+  // of ten videos is ten third-party iframes and a canvas that is meant to stay
+  // light.
+  const wantsPlayer = element.display === 'player'
+
+  const player = youtubeEmbedUrl(element.url, element.startSeconds)
+  const thumbnail = youtubeThumbnailUrl(element.url)
+  const videoId = youtubeVideoId(element.url)
 
   if (!videoId) {
     return (
       <BrokenLink
-        card={card}
+        title={element.title}
         reason="That does not look like a YouTube link."
-        fallback={url}
+        fallback={element.url}
       />
     )
   }
 
-  // A thumbnail first, and the player only once asked for. Every visible video
-  // on a page would otherwise be a live YouTube iframe — a dozen third-party
-  // documents, each running its own player, on a canvas that is meant to stay
-  // light.
-  if (!playing) {
+  if (!playing && !wantsPlayer) {
     return (
       <button
         type="button"
@@ -60,7 +63,7 @@ function YouTubeEmbed({ card }: { card: Card }) {
         onPointerDown={(event) => event.stopPropagation()}
         onClick={() => setPlaying(true)}
         className="group relative block w-full cursor-pointer overflow-hidden rounded-lg border border-line bg-black"
-        style={{ aspectRatio: '16 / 9' }}
+        style={{ aspectRatio: `${element.aspect || 16 / 9}` }}
         title="Play this video"
       >
         {thumbnail ? (
@@ -90,11 +93,11 @@ function YouTubeEmbed({ card }: { card: Card }) {
     <div
       data-no-drag=""
       className="w-full overflow-hidden rounded-lg border border-line bg-black"
-      style={{ aspectRatio: '16 / 9' }}
+      style={{ aspectRatio: `${element.aspect || 16 / 9}` }}
     >
       <iframe
         src={player ?? undefined}
-        title={card.title || 'YouTube video'}
+        title={element.title || 'YouTube video'}
         className="h-full w-full"
         allow="accelerometer; clipboard-write; encrypted-media; picture-in-picture"
         allowFullScreen
@@ -106,14 +109,19 @@ function YouTubeEmbed({ card }: { card: Card }) {
   )
 }
 
-function PdfEmbed({ card }: { card: Card }) {
-  const url = card.embed?.url ?? ''
-  const safe = safeEmbedUrl(url)
-  const [inline, setInline] = useState(false)
+function PdfView({ element }: { element: PdfElement }) {
+  const safe = safeEmbedUrl(element.url)
+  // `display: 'preview'` is the element's own standing instruction to show the
+  // document rather than only link to it. The toggle below is for the rest.
+  const [inline, setInline] = useState(element.display === 'preview')
 
   if (!safe) {
     return (
-      <BrokenLink card={card} reason="That does not look like a web address." fallback={url} />
+      <BrokenLink
+        title={element.title}
+        reason="That does not look like a web address."
+        fallback={element.url}
+      />
     )
   }
 
@@ -139,7 +147,7 @@ function PdfEmbed({ card }: { card: Card }) {
       {inline ? (
         <iframe
           src={safe}
-          title={card.title || 'PDF'}
+          title={element.title || 'PDF'}
           className="h-56 w-full rounded-lg border border-line"
           onError={() => setInline(false)}
         />
@@ -158,12 +166,19 @@ function PdfEmbed({ card }: { card: Card }) {
   )
 }
 
+/**
+ * Something was expected here and there is nothing to show.
+ *
+ * The URL is shown as *text* when it is safe to link, and never loaded — a
+ * `javascript:` url that was pasted is worth seeing, because knowing what a file
+ * tried to do is the whole point of showing it.
+ */
 function BrokenLink({
-  card,
+  title,
   reason,
   fallback,
 }: {
-  card: Card
+  title: string
   reason: string
   fallback: string
 }) {
@@ -187,7 +202,7 @@ function BrokenLink({
         </a>
       ) : (
         <p className="mt-0.5 opacity-50">
-          {card.title ? 'Open the inspector to set a link for this card.' : 'No link set.'}
+          {title ? 'Open the inspector to set a link for this element.' : 'No link set.'}
         </p>
       )}
     </div>

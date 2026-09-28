@@ -108,15 +108,17 @@ export function useKeyboardShortcuts() {
           case 'a':
             if (typing) return
             event.preventDefault()
-            store.selectAllCards()
+            store.selectAllElements()
             return
           case 'd':
             event.preventDefault()
             if (!store.canEdit()) return
-            if (store.selectedCardIds.length > 0) {
-              const created = store.duplicateCards(store.selectedCardIds)
+            if (store.selectedElementIds.length > 0) {
+              const created = store.duplicateElements(store.selectedElementIds)
               store.pushToast(
-                created.length > 0 ? `Duplicated ${created.length} card(s).` : 'Nothing to duplicate.',
+                created.length > 0
+                  ? `Duplicated ${created.length} element${created.length === 1 ? '' : 's'}.`
+                  : 'Nothing to duplicate.',
                 'info',
               )
             }
@@ -157,10 +159,10 @@ export function useKeyboardShortcuts() {
       if (event.key === 'Delete' || event.key === 'Backspace') {
         event.preventDefault()
         if (!store.canEdit()) return
-        if (store.selectedCardIds.length > 0) {
-          const count = store.selectedCardIds.length
-          store.deleteCards(store.selectedCardIds)
-          store.pushToast(`Deleted ${count} card${count === 1 ? '' : 's'}.`, 'info')
+        if (store.selectedElementIds.length > 0) {
+          const count = store.selectedElementIds.length
+          store.deleteElements(store.selectedElementIds)
+          store.pushToast(`Deleted ${count} element${count === 1 ? '' : 's'}.`, 'info')
         } else if (store.selectedConnectionIds.length > 0) {
           const count = store.selectedConnectionIds.length
           store.deleteConnections(store.selectedConnectionIds)
@@ -185,7 +187,9 @@ export function useKeyboardShortcuts() {
       switch (key) {
         case 'c':
           event.preventDefault()
-          store.addCard()
+          // A note, specifically — the fast path. `I` opens the menu for the
+          // other kinds.
+          store.addElement('note')
           break
         case 'g':
           event.preventDefault()

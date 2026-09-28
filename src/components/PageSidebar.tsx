@@ -37,8 +37,8 @@ export function PageSidebar({ onClose }: PageSidebarProps) {
   }, {})
 
   const activePage = pages.find((page) => page.id === activePageId)
-  const tags = activePage ? collectTags(activePage.cards) : []
-  const colors = activePage ? collectColors(activePage.cards) : []
+  const tags = activePage ? collectTags(activePage.elements) : []
+  const colors = activePage ? collectColors(activePage.elements) : []
   const filtering = isFiltering({ query: '', tags: filterTags, color: filterColor })
 
   return (
@@ -70,10 +70,10 @@ export function PageSidebar({ onClose }: PageSidebarProps) {
                     onClose?.()
                   }}
                   onDoubleClick={() => setRenamingId(page.id)}
-                  title={`${page.title} · ${page.cards.length} cards`}
+                  title={`${page.title} · ${page.elements.length} cards`}
                 >
                   {page.title || 'Untitled page'}
-                  <span className="ml-1.5 text-[11px] font-normal text-muted">{page.cards.length}</span>
+                  <span className="ml-1.5 text-[11px] font-normal text-muted">{page.elements.length}</span>
                 </button>
 
                 {/* Who is on this page. On your own page it is redundant with

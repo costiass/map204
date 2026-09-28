@@ -49,3 +49,15 @@ export const DEFAULT_VIDEO_ASPECT = 16 / 9
  *  a mistake, and a table is the thing you are most likely to want to write into. */
 export const DEFAULT_TABLE_COLUMNS = 3
 export const DEFAULT_TABLE_ROWS = 3
+
+/** A group's outline. Muted, because a group is a container and should not
+ *  compete with what it contains for attention. */
+export const DEFAULT_GROUP_COLOR = '#94A3B8'
+
+/** A connection with no relationship word: drawn, but with nothing written on
+ *  it. Distinct from the default, which is a word — an empty label is a choice
+ *  and a missing one is an oversight. */
+export const NO_RELATIONSHIP = ''
+
+/** The relationship a brand-new connection gets before any default is set. */
+export const DEFAULT_RELATIONSHIP = 'related to'

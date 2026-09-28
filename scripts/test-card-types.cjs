@@ -73,16 +73,19 @@ Promise.all([
     })
 
     // --- a card with no type at all, from before this existed ------------
+    //
+    // Version 1. The migration decides this becomes a note, because a card with
+    // no type is a note — that is what it was before kinds existed.
     const legacy = m.parseDoc(JSON.stringify({ version: 1, pages: [{ id: 'p1', cards: [base({})] }] }))
-    const legacyCard = legacy.doc.pages[0].cards[0]
-    if (legacyCard.type !== 'note') {
-      fail(\`a card with no type came back as "\${legacyCard.type}", expected "note"\`)
+    const legacyCard = legacy.doc.pages[0].elements[0]
+    if (legacyCard.kind !== 'note') {
+      fail(\`a card with no type became "\${legacyCard.kind}", expected "note"\`)
     }
-    if (legacyCard.embed !== null) {
-      fail('a card with no type gained an embed')
+    if (legacyCard.url !== undefined) {
+      fail('a card with no type gained a url')
     }
-    if (legacyCard.title !== 'A card' || legacyCard.content !== 'some text') {
-      fail('an old card lost its title or content')
+    if (legacyCard.title !== 'A card' || legacyCard.body !== 'some text') {
+      fail('an old card lost its title or its text')
     }
 
     // --- a video card, round-tripped -------------------------------------
@@ -93,32 +96,46 @@ Promise.all([
       embed: { url: 'https://youtu.be/dQw4w9WgXcQ', meta: { start: 90 } },
     })
     const json = JSON.stringify({ version: 1, pages: [{ id: 'p1', title: 'T', cards: [video] }] })
-    const back = m.parseDoc(json).doc.pages[0].cards[0]
-    if (back.type !== 'youtube') fail(\`video card came back as "\${back.type}"\`)
-    if (back.embed?.url !== 'https://youtu.be/dQw4w9WgXcQ') {
-      fail(\`the link did not survive: \${back.embed?.url}\`)
+    const back = m.parseDoc(json).doc.pages[0].elements[0]
+    if (back.kind !== 'video') fail(\`a video card became "\${back.kind}"\`)
+    if (back.url !== 'https://youtu.be/dQw4w9WgXcQ') {
+      fail(\`the link did not survive: \${back.url}\`)
     }
-    if (Number(back.embed?.meta?.start) !== 90) {
-      fail(\`the timestamp did not survive: \${JSON.stringify(back.embed?.meta)}\`)
+    if (back.startSeconds !== 90) {
+      fail(\`the timestamp did not survive: \${back.startSeconds}\`)
     }
 
     // Exporting and importing must be the same document.
-    const reExported = m.serializeDoc(back ? { version: 1, pages: [{ ...m.parseDoc(json).doc.pages[0] }], settings: {} } : null)
+    const reExported = m.serializeDoc(m.parseDoc(json).doc)
     if (!reExported.includes('youtu.be/dQw4w9WgXcQ')) {
       fail('the link is missing from the re-exported file')
+    }
+    // And a second round trip must be a fixed point, or an export is lossy in a
+    // way nobody finds out about until a file has been saved three times.
+    const twice = m.parseDoc(reExported)
+    if (m.serializeDoc(twice.doc) !== reExported) {
+      fail('a second export of the same document differs from the first')
     }
 
     // --- a pdf card -------------------------------------------------------
     const pdf = m.parseDoc(JSON.stringify({
       version: 1,
       pages: [{ id: 'p1', cards: [base({ type: 'pdf', embed: { url: 'https://x.test/a.pdf' } })] }],
-    })).doc.pages[0].cards[0]
-    if (pdf.type !== 'pdf' || pdf.embed?.url !== 'https://x.test/a.pdf') {
-      fail('a pdf card did not survive')
+    })).doc.pages[0].elements[0]
+    if (pdf.kind !== 'pdf' || pdf.url !== 'https://x.test/a.pdf') {
+      fail(\`a pdf card did not survive: \${pdf.kind} \${pdf.url}\`)
     }
 
     // --- hostile input in a file -----------------------------------------
     // An imported file is untrusted input, and it can carry anything.
+    //
+    // Note what the migration does with each of these, because "dropped" is the
+    // right answer for all four and it is worth saying why. A video element is a
+    // promise that something will play, and a card whose url is not a video
+    // cannot keep that promise. Inventing a video element for it — or quietly
+    // demoting it to a note — would each be showing the user something they did
+    // not write. The file says what it was, the migration says what it could not
+    // do, and no element is created.
     const hostile = m.parseDoc(JSON.stringify({
       version: 1,
       pages: [{
@@ -130,24 +147,51 @@ Promise.all([
           base({ id: 'c4', type: 'youtube', embed: { url: 'https://a.test', meta: { start: 'nope', n: 1.5, b: true } } }),
         ],
       }],
-    })).doc.pages[0].cards
+    }))
 
-    if (hostile[0].type !== 'note') fail(\`an unknown kind became "\${hostile[0].type}"\`)
-    if (hostile[0].embed !== null) fail('an unknown kind kept its embed')
-    if (hostile[1].embed?.url !== 'javascript:alert(1)') {
-      // The URL is kept verbatim on purpose — it is displayed as text, never
-      // loaded, and the renderer validates again at the point of use. What must
-      // not happen is it being silently trusted.
-      if (hostile[1].type !== 'youtube') fail('a hostile url changed the card kind unexpectedly')
+    if (hostile.doc.pages[0].elements.length !== 0) {
+      fail(\`\${hostile.doc.pages[0].elements.length} elements were invented from untranslatable cards\`)
     }
-    if (hostile[2].embed !== null) fail('a non-string url produced an embed')
-    if (typeof hostile[3].embed?.meta?.start !== 'string') {
-      fail(\`a non-numeric start was not dropped: \${JSON.stringify(hostile[3].embed?.meta)}\`)
+    // Every drop is reported. Silently losing a card is the failure this whole
+    // suite exists to prevent, so a drop that produces no warning is a bug.
+    if (hostile.warnings.length !== 4) {
+      fail(\`4 untranslatable cards produced \${hostile.warnings.length} warnings\`)
     }
-    if (hostile[3].embed?.meta?.n !== 1.5) fail('a valid number in meta was dropped')
-    if (hostile[3].embed?.meta?.b !== true) fail('a valid boolean in meta was dropped')
+    if (!hostile.warnings.some((w) => w.includes('c4'))) {
+      fail('a dropped card was not identified by id')
+    }
 
-    // --- a flash card is not a note, and has no embed to carry ----------
+    // --- the same file, with urls that *are* what they claim ------------
+    // The other half of the question: a card that survives must come through
+    // *clean*, with the hostile "meta" bag ignored rather than half-copied.
+    const salvageable = m.parseDoc(JSON.stringify({
+      version: 1,
+      pages: [{
+        id: 'p1',
+        cards: [
+          base({ type: 'youtube', embed: { url: 'https://youtu.be/dQw4w9WgXcQ', meta: { start: 'nope', n: 1.5, b: true } } }),
+          base({ id: 'c2', type: 'pdf', embed: { url: 'https://x.test/a.pdf', meta: 'not an object' } }),
+        ],
+      }],
+    }))
+    const salvaged = salvageable.doc.pages[0].elements
+    if (salvaged.length !== 2) {
+      fail(\`a real video and a real pdf produced \${salvaged.length} elements\`)
+    }
+    if (salvaged[0]?.kind !== 'video' || salvaged[0]?.url !== 'https://youtu.be/dQw4w9WgXcQ') {
+      fail(\`a real video did not survive: \${salvaged[0]?.kind} \${salvaged[0]?.url}\`)
+    }
+    // A non-numeric timestamp is dropped rather than kept as a string, because
+    // the player would be handed something it cannot use. There is no "meta" bag
+    // in v2 to smuggle it through.
+    if (salvaged[0]?.startSeconds !== null) {
+      fail(\`a non-numeric start survived as \${salvaged[0]?.startSeconds}\`)
+    }
+    if (salvaged[1]?.kind !== 'pdf' || salvaged[1]?.url !== 'https://x.test/a.pdf') {
+      fail(\`a pdf did not survive: \${salvaged[1]?.kind} \${salvaged[1]?.url}\`)
+    }
+
+    // --- a flash card is a deck of one, and holds no link ----------------
     const flash = m.parseDoc(JSON.stringify({
       version: 1,
       pages: [{
@@ -160,12 +204,22 @@ Promise.all([
           base({ id: 'c2', type: 'flash', embed: { url: 'https://x.test/a.pdf' } }),
         ],
       }],
-    })).doc.pages[0].cards
-    if (flash[0].type !== 'flash') fail(\`a flash card came back as "\${flash[0].type}"\`)
-    if (flash[0].title !== 'Q?' || flash[0].content !== 'A.') {
-      fail('a flash card did not keep its two sides')
+    })).doc.pages[0].elements
+    if (flash[0].kind !== 'flash') fail(\`a flash card became "\${flash[0].kind}"\`)
+    // The question is the front. A migration that puts the answer there produces
+    // a deck that gives away its own answer, and every card looks correct.
+    if (flash[0].cards.length !== 1) {
+      fail(\`a flash card became a deck of \${flash[0].cards.length}\`)
     }
-    if (flash[1].embed !== null) fail('a flash card kept an embed')
+    if (flash[0].cards[0][0].text !== 'Q?') {
+      fail(\`the front of the deck is "\${flash[0].cards[0][0].text}", expected the question"\`)
+    }
+    if (flash[0].cards[0][1].text !== 'A.') {
+      fail(\`the back of the deck is "\${flash[0].cards[0][1].text}", expected the answer"\`)
+    }
+    // A flash element has no url field at all — the type does not have one, so
+    // this is checked on both cards rather than on the first.
+    if (flash.some((f) => f.url !== undefined)) fail('a flash card kept a url')
 
     /* ================================================================ */
     /* presentation steps                                             */
@@ -187,7 +241,7 @@ Promise.all([
       steps: [{ id: 's1', targetId: 'card_1', targetKind: 'card', zoom: 1.4, durationMs: 600 }],
     }).settings.steps
     if (one.length !== 1) fail(\`one step came back as \${one.length}\`)
-    if (one[0].targetId !== 'card_1' || one[0].targetKind !== 'card') fail('a step lost its target')
+    if (one[0].targetId !== 'card_1' || one[0].targetKind !== 'element') fail('a step lost its target')
     if (Math.abs(one[0].zoom - 1.4) > 1e-9) fail(\`a step lost its zoom: \${one[0].zoom}\`)
     if (one[0].durationMs !== 600) fail(\`a step lost its duration: \${one[0].durationMs}\`)
 

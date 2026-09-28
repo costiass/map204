@@ -7,6 +7,7 @@ import { useCanvasStore } from '@/store/useCanvasStore'
 import { downloadDoc, parseDoc, serializeDoc } from '@/utils/serialize'
 import { formatBytes } from '@/utils/image'
 import type { CanvasDoc } from '@/types'
+import { DOC_VERSION } from '@/types'
 
 type Tab = 'export' | 'import'
 
@@ -48,7 +49,7 @@ function ImportExportBody({ initialTab }: { initialTab: Tab }) {
     const pages = doc.pages
     return {
       pages: pages.length,
-      cards: pages.reduce((sum, page) => sum + page.cards.length, 0),
+      elements: pages.reduce((sum, page) => sum + page.elements.length, 0),
       connections: pages.reduce((sum, page) => sum + page.connections.length, 0),
       bytes: json.length,
     }
@@ -126,9 +127,11 @@ function ImportExportBody({ initialTab }: { initialTab: Tab }) {
         if (refreshed) {
           primePageSync(documentId, refreshed)
           store.replaceDoc({
-            version: 1,
+            version: DOC_VERSION,
             pages: refreshed.pages,
             settings: refreshed.settings,
+            // An import adds no uploads — pages and elements are JSON, not files.
+            uploadBytes: store.doc.uploadBytes,
           })
           // Tell anyone else looking at this workspace to re-read. Their page
           // list is derived from what they last loaded, so without this they
@@ -186,7 +189,7 @@ function ImportExportBody({ initialTab }: { initialTab: Tab }) {
             <div className="grid grid-cols-2 gap-2 border-b border-line px-4 py-3 text-xs sm:grid-cols-4">
               {[
                 ['Pages', stats.pages],
-                ['Cards', stats.cards],
+                ['Elements', stats.elements],
                 ['Connections', stats.connections],
                 ['File size', formatBytes(stats.bytes)],
               ].map(([label, value]) => (
@@ -271,7 +274,7 @@ function ImportExportBody({ initialTab }: { initialTab: Tab }) {
               {parsed ? (
                 <div className="mt-2 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-[11px] text-emerald-800">
                   Valid document: {parsed.pages.length} page(s),{' '}
-                  {parsed.pages.reduce((sum, page) => sum + page.cards.length, 0)} card(s),{' '}
+                  {parsed.pages.reduce((sum, page) => sum + page.elements.length, 0)} element(s),{' '}
                   {parsed.pages.reduce((sum, page) => sum + page.connections.length, 0)} connection(s).
                   {warnings.length > 0 ? (
                     <ul className="mt-1 list-disc pl-4 text-amber-800">

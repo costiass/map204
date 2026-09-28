@@ -345,7 +345,9 @@ export function buildEdgeGeometry(options: BuildEdgeOptions): EdgeGeometry {
     case 'straight':
       shape = straightShape(p0, p1)
       break
-    case 'stepped':
+    // The schema calls this `orthogonal`; it is the same right-angled path the
+    // old editor called "stepped", and the function is still named for that.
+    case 'orthogonal':
       shape = steppedShape(p0, n0, p1, n1)
       break
     case 'curved':

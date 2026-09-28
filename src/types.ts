@@ -1,22 +1,43 @@
 /**
  * Map204 data model.
  *
- * Coordinate contract (important):
- *  - `position.x` / `position.y` are CANVAS / WORLD coordinates.
+ * The *document* — pages, elements, groups, connections, settings, presentation
+ * steps — is defined in `elements/schema` and re-exported below, so every
+ * `import { Page } from '@/types'` keeps working and gets the v2 shape.
+ *
+ * What stays here is the canvas's own vocabulary: coordinates, anchors, line and
+ * arrow styles, the palette. Those are about how the thing is drawn rather than
+ * about what a document contains.
+ *
+ * Coordinate contract (unchanged, and load-bearing):
+ *  - `x` / `y` on an element are CANVAS / WORLD coordinates, flat rather than
+ *    behind a nested `position` object.
  *  - The viewport (pan + zoom) is stored separately on the page, so changing the
- *    viewport never mutates a card's stored position, and moving a card never
- *    touches the viewport.
- *  - Connections only ever reference cards by id. No connection stores
- *    coordinates, which is what keeps edges attached while cards move.
+ *    viewport never mutates an element's stored position, and moving an element
+ *    never touches the viewport.
+ *  - Connections only ever reference things by id. No connection stores
+ *    coordinates, which is what keeps edges attached while elements move.
  */
 
-export const DOC_VERSION = 1
-
-export type Anchor = 'top' | 'right' | 'bottom' | 'left'
-export type LineStyle = 'solid' | 'dashed' | 'dotted'
-export type ArrowStyle = 'none' | 'arrow' | 'triangle' | 'circle' | 'diamond'
-export type Routing = 'curved' | 'straight' | 'stepped'
 export type GridPattern = 'none' | 'dots' | 'lines'
+
+/**
+ * The line and arrow vocabulary belongs to the connection style, so it is
+ * defined once in the schema and named here. Two lists of "what arrowheads can
+ * this draw" is one of them wrong, and the wrong one is a user who picks a shape
+ * and gets a different one.
+ *
+ * `LineStyle`, `ArrowStyle` and `Routing` are therefore *derived* from
+ * `ConnectionStyle` rather than written out again.
+ */
+type Style = import('@/elements/schema').ConnectionStyle
+export type LineStyle = Style['lineStyle']
+export type ArrowStyle = Style['arrowStart']
+export type Routing = 'curved' | 'straight' | 'orthogonal'
+
+// Imported, not only re-exported: `export type { Anchor } from` is not in this
+// file's own scope, and `ANCHORS` below is annotated with it.
+import type { Anchor } from '@/elements/schema'
 
 export interface Point {
   x: number
@@ -36,255 +57,68 @@ export interface Viewport {
   zoom: number
 }
 
-export interface ChecklistItem {
-  id: string
-  text: string
-  done: boolean
-}
-
-export interface CardImage {
-  src: string | null
-  alt: string
-}
-
-export interface CardPosition {
-  x: number
-  y: number
-  width: number
-  height: number
-  zIndex: number
-}
-
-export type Position = CardPosition
-
-export interface CardStyle {
-  backgroundColor: string
-  accentColor: string
-  textColor: string
-  borderColor: string
-  borderWidth: number
-  borderRadius: number
-  shadow: boolean
-}
+/* ------------------------------------------------------------------ */
+/* The document model lives in `elements/schema`                        */
+/* ------------------------------------------------------------------ */
 
 /**
- * What a card *is*.
+ * Everything about what a page *contains* is defined in `@/elements/schema` and
+ * re-exported here.
  *
- * Each kind does one job, rather than being a Markdown body with an optional
- * embed field bolted on — one unreadable card that tries to be three things is
- * worse than three cards that are each one thing.
- *
- *   note      the original: a title and a Markdown body
- *   flash     two sides, and a click turns it over
- *   youtube   a video, rendered from a YouTube id
- *   pdf       a document, referenced by URL
- *
- * `note` is the default everywhere, so a document written before this existed
- * needs no migration: a card with no `type` is a note.
+ * Not tidiness. It is what stops the two from drifting: the schema is what the
+ * element types are written against, and a second copy of `Page` here would be a
+ * second thing to remember to change whenever one of them moves. One definition,
+ * two ways to import it.
  */
-export type CardType = 'note' | 'flash' | 'youtube' | 'pdf'
+export { DOC_VERSION, MAX_UPLOAD_BYTES } from '@/elements/schema'
+
+/** Which side of a box an edge leaves from. Defined in the schema — see there. */
+export type { Anchor } from '@/elements/schema'
+
+export type {
+  CanvasDocV2 as CanvasDoc,
+  Connection,
+  ConnectionStyle,
+  DocSettings,
+  Element,
+  ElementBase,
+  ElementKindName,
+  FlashElement,
+  FlashSide,
+  Group,
+  LinkElement,
+  NoteChecklistItem as ChecklistItem,
+  NoteElement,
+  NoteStyle as CardStyle,
+  Page,
+  PdfElement,
+  PresentationStepV2 as PresentationStep,
+  RefDisplay,
+  StepFocusV2 as StepFocus,
+  StepTransitionV2 as StepTransition,
+  StepTriggerV2 as StepTrigger,
+  StoredFile,
+  TableColumn,
+  TableElement,
+  VideoDisplay,
+  VideoElement,
+} from '@/elements/schema'
 
 /**
- * The thing a non-note card refers to.
+ * An endpoint of a connection.
  *
- * Only `url` is stored. For YouTube the video id is *derived* from it rather
- * than kept alongside, so the two cannot drift apart — a card whose id and URL
- * disagree is a card that shows the wrong video.
+ * A connection is between two things, and each end is either an element of any
+ * kind or a group. It used to be a `Card`, and the word outlived the thing it
+ * named — which is the sort of thing that makes a type read narrower than it is.
  */
-export interface CardEmbed {
-  url: string
-  /** Per-kind extras: `{ start }` for a timestamp, `{ pages }` for a PDF. */
-  meta?: Record<string, string | number | boolean>
-}
+export type ConnectionEndpoint = { kind: 'element' | 'group'; id: string }
 
-export interface Card {
-  id: string
-  /** Which of the kinds above this card is. Absent means `note`. */
-  type: CardType
-  title: string
-  /**
-   * The card body, stored as Markdown — the same format the document itself
-   * uses. Images are ordinary Markdown and may appear anywhere:
-   * `![alt](url)` or a pasted `data:image/...` URL.
-   *
-   * For a non-note card this is a caption, and may be empty.
-   */
-  content: string
-  /** What a `youtube` or `pdf` card points at. `null` for a note. */
-  embed: CardEmbed | null
-  image: CardImage
-  position: CardPosition
-  style: CardStyle
-  tags: string[]
-  collapsed: boolean
-  /** Optional child-card relationship. `null` means top-level. */
-  parentId: string | null
-  checklist: ChecklistItem[]
-  createdAt: string
-  updatedAt: string
-}
+/** The image on a note: a stored file's path, or a URL, or nothing. */
+export type CardImage = { src: string | null; alt: string }
 
-export interface GroupPosition {
-  x: number
-  y: number
-  width: number
-  height: number
-  zIndex: number
-}
+/** What a card used to be called, where the name still appears in a string. */
+export type CardType = 'note' | 'flash' | 'video' | 'pdf' | 'link' | 'table'
 
-export interface Group {
-  id: string
-  title: string
-  position: Position
-  color: string
-  memberCardIds: string[]
-  memberGroupIds: string[]
-  createdAt: string
-  updatedAt: string
-}
-
-export interface ConnectionStyle {
-  color: string
-  width: number
-  lineStyle: LineStyle
-  routing: Routing
-  arrowStart: ArrowStyle
-  arrowEnd: ArrowStyle
-  animated: boolean
-}
-
-export type ConnectionEndpoint =
-  | { kind: 'card'; id: string }
-  | { kind: 'group'; id: string }
-
-export interface Connection {
-  id: string
-  source: ConnectionEndpoint
-  target: ConnectionEndpoint
-  /** `null` = pick the best side automatically from relative geometry. */
-  sourceAnchor: Anchor | null
-  targetAnchor: Anchor | null
-  label: string
-  /** Free-form, but see RELATIONSHIP_PRESETS for the suggested values. */
-  relationshipType: string
-  style: ConnectionStyle
-}
-
-export interface Page {
-  id: string
-  title: string
-  position: Position
-  viewport: Viewport
-  cards: Card[]
-  groups: Group[]
-  connections: Connection[]
-  createdAt: string
-  updatedAt: string
-}
-
-/**
- * How the camera gets from one step to the next.
- *
- *   ease     in and out, the default. Reads as a deliberate move.
- *   linear   constant speed. Useful when a step's *timing* matters more than
- *            how it arrives — an animation whose timing you are reading against
- *            a voice-over, where easing would put the reveal in the wrong place.
- *   drift    the camera does not stop dead. It eases toward the destination and
- *            keeps going very slightly past it before settling, which reads as a
- *            hand carrying the view rather than a machine parking it.
- *   instant  no camera move at all. The right choice when the step is about
- *            something already on screen and moving the camera would be a
- *            distraction from the thing being pointed at.
- *
- * The *zoom* is always interpolated on a log scale in every case but `linear`.
- * The difference is not the shape of the curve but what is being eased: `ease`
- * moves zoom the way it moves position, and `drift` overshoots the zoom as well,
- * which on a long jump is the difference between arriving and arriving *gracefully*.
- */
-export type StepTransition = 'ease' | 'linear' | 'drift' | 'instant'
-
-/**
- * What makes a step give way to the next one.
- *
- *   manual  the presenter says so. The default, because a presentation somebody
- *           else is also talking over should not move on its own.
- *   timed   it moves on after `autoAdvanceMs`. For a card that is read aloud at
- *           a known pace, or an animation that is meant to run unattended.
- *   hold    it never gives way on its own, and neither do the arrow keys. For
- *           a step the presenter leaves up while a discussion happens, where an
- *           accidental keypress yanking the screen away would be worse than
- *           nothing.
- */
-export type StepTrigger = 'manual' | 'timed' | 'hold'
-
-/**
- * What the step does to the cards it is *not* pointing at.
- *
- * A camera move says "look here". Dimming says "and nowhere else", which is a
- * different and often stronger statement — on a dense map the target is hard
- * to pick out, and the rest of the map is competing with it for attention.
- */
-export type StepFocus = 'none' | 'dim' | 'spotlight'
-
-/**
- * One step of a presentation: what to show, how closely, and when to move on.
- *
- * The target is a card *or* a group — a group being the natural way to frame a
- * section of a map, which is the thing a presentation actually wants to point
- * at. The zoom is absolute rather than a multiplier because "the same size as
- * last time" is not a thing you can reason about while presenting; 1.4 either
- * means the same thing every time or the reader has no idea.
- */
-export interface PresentationStep {
-  id: string
-  /** A card or group on the page. `null` for an establishing shot of the page. */
-  targetId: string | null
-  targetKind: 'card' | 'group' | 'page'
-  /** How close to come. Clamped to the app's zoom limits, and never more than
-   *  the target actually fits at — see `stepViewport`. */
-  zoom: number
-  /** How the camera arrives. */
-  transition: StepTransition
-  /** What moves this step on. */
-  trigger: StepTrigger
-  /** How long `timed` waits, in ms. Ignored by the other triggers. */
-  autoAdvanceMs: number
-  /** How long the camera takes to arrive, in ms. Zero snaps. */
-  durationMs: number
-  /** What happens to everything that is not the target. */
-  focus: StepFocus
-}
-
-/**
- * Document-wide choices, stored with the document so an exported file carries
- * the look of the workspace with it. `setDefaultCardStyle` / right-click →
- * "Set as default style" writes here; new objects inherit from it.
- */
-export interface DocSettings {
-  defaultCardStyle: CardStyle
-  defaultConnectionStyle: ConnectionStyle
-  /**
-   * Relationship new links start with. `''` means no relationship at all, which
-   * is a valid choice: the link is drawn without a word on it. Set from a link
-   * with "Set as default for new links".
-   */
-  defaultRelationshipType: string
-  /**
-   * The presentation, in order.
-   *
-   * It lives here rather than in a table of its own because it is per-document
-   * and `settings` is already per-document JSONB — so a presentation travels in
-   * an export and needs no migration. It is not a *default* like the two fields
-   * above, and the name says so.
-   */
-  steps: PresentationStep[]
-}
-
-export interface CanvasDoc {
-  version: number
-  pages: Page[]
-  settings: DocSettings
-}
 
 /* ------------------------------------------------------------------ */
 /* Presets & defaults                                                 */
@@ -303,7 +137,7 @@ export const RELATIONSHIP_PRESETS = [
 
 export const ANCHORS: Anchor[] = ['top', 'right', 'bottom', 'left']
 export const LINE_STYLES: LineStyle[] = ['solid', 'dashed', 'dotted']
-export const ROUTINGS: Routing[] = ['curved', 'straight', 'stepped']
+export const ROUTINGS: Routing[] = ['curved', 'straight', 'orthogonal']
 export const ARROW_STYLES: ArrowStyle[] = ['none', 'arrow', 'triangle', 'circle', 'diamond']
 
 export const CARD_BACKGROUNDS = [
@@ -359,25 +193,30 @@ export const MAX_ZOOM = 2
 export const DEFAULT_GRID_SIZE = 20
 export const COLLAPSED_HEADER_HEIGHT = 34
 
-export const DEFAULT_CARD_STYLE: CardStyle = {
-  backgroundColor: '#ffffff',
-  accentColor: '#6366F1',
-  textColor: '#111827',
-  borderColor: '#E5E7EB',
-  borderWidth: 1,
-  borderRadius: 12,
-  shadow: true,
-}
+/* ------------------------------------------------------------------ */
+/* Defaults                                                             */
+/* ------------------------------------------------------------------ */
 
-export const DEFAULT_CONNECTION_STYLE: ConnectionStyle = {
-  color: '#6366F1',
-  width: 2,
-  lineStyle: 'solid',
-  routing: 'curved',
-  arrowStart: 'none',
-  arrowEnd: 'arrow',
-  animated: false,
-}
+/**
+ * The defaults live in `elements/defaults`, because there are three ways to make
+ * an element — the toolbar, the context menu, a keyboard shortcut — and three
+ * copies of "what does a new note look like" is three places for them to
+ * disagree.
+ *
+ * Re-exported under the names the chrome already uses, so nothing outside this
+ * file has to know where they came from. Imported as well, because a re-export
+ * is not in this file's own scope and the two functions below name these types.
+ */
+export {
+  DEFAULT_CONNECTION_STYLE_V2 as DEFAULT_CONNECTION_STYLE,
+  DEFAULT_NOTE_STYLE as DEFAULT_CARD_STYLE,
+  DEFAULT_VIDEO_ASPECT,
+} from '@/elements/defaults'
+import {
+  DEFAULT_CONNECTION_STYLE_V2 as DEFAULT_CONNECTION_STYLE,
+  DEFAULT_NOTE_STYLE as DEFAULT_CARD_STYLE,
+} from '@/elements/defaults'
+import type { DocSettings, PresentationStepV2 as PresentationStep } from '@/elements/schema'
 
 export const MIN_CARD_BORDER_WIDTH = 0
 export const MAX_CARD_BORDER_WIDTH = 8
@@ -391,7 +230,7 @@ export const DEFAULT_RELATIONSHIP = 'related to'
 /** The starting point for a fresh document, before any user preferences. */
 export function createDefaultSettings(): DocSettings {
   return {
-    defaultCardStyle: { ...DEFAULT_CARD_STYLE },
+    defaultNoteStyle: { ...DEFAULT_CARD_STYLE },
     defaultConnectionStyle: { ...DEFAULT_CONNECTION_STYLE },
     defaultRelationshipType: DEFAULT_RELATIONSHIP,
     steps: [],

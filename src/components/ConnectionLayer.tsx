@@ -2,20 +2,20 @@ import { memo, useEffect, useRef, useState } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 
 import { arrowheadPath, arrowheadSize, buildEdgeGeometry, dashArray, flowDashArray, flowPeriod } from '@/utils/edges'
-import { anchorPoint, visualCardRect } from '@/utils/geometry'
-import type { Anchor, Card, Connection, Group, Point, Rect } from '@/types'
+import { anchorPoint, visualRectOf } from '@/utils/geometry'
+import type { Anchor, Connection, Element, Group, Point, Rect } from '@/types'
 
 export interface DraftConnection {
-  sourceCardId: string
+  sourceElementId: string
   sourceAnchor: Anchor
   from: Point
   to: Point
-  targetCardId: string | null
+  targetElementId: string | null
   targetAnchor: Anchor | null
 }
 
 export interface ConnectionLayerProps {
-  cards: Map<string, Card>
+  cards: Map<string, Element>
   groups: Map<string, Group>
   connections: Connection[]
   selectedIds: string[]
@@ -50,17 +50,17 @@ function ConnectionLayerImpl({
   }, [editingLabelId])
 
   const resolveRect = (
-    endpoint: { kind: 'card' | 'group'; id: string },
+    endpoint: { kind: 'element' | 'group'; id: string },
   ): Rect | null => {
-    if (endpoint.kind === 'card') {
-      const card = cards.get(endpoint.id)
-      return card ? visualCardRect(card) : null
+    if (endpoint.kind === 'element') {
+      const Element = cards.get(endpoint.id)
+      return Element ? visualRectOf(Element) : null
     }
     const group = groups.get(endpoint.id)
-    return group ? group.position : null
+    return group ? { x: group.x, y: group.y, width: group.width, height: group.height } : null
   }
 
-  const endpointId = (endpoint: { kind: 'card' | 'group'; id: string }): string =>
+  const endpointId = (endpoint: { kind: 'element' | 'group'; id: string }): string =>
     endpoint.id
 
   const rendered = connections.flatMap((connection) => {
@@ -253,13 +253,13 @@ function ConnectionLayerImpl({
   )
 }
 
-function DraftEdge({ draft, cards }: { draft: DraftConnection; cards: Map<string, Card> }) {
-  const source = cards.get(draft.sourceCardId)
+function DraftEdge({ draft, cards }: { draft: DraftConnection; cards: Map<string, Element> }) {
+  const source = cards.get(draft.sourceElementId)
   if (!source) return null
-  const target = draft.targetCardId ? cards.get(draft.targetCardId) : null
+  const target = draft.targetElementId ? cards.get(draft.targetElementId) : null
 
-  const from = anchorPoint(visualCardRect(source), draft.sourceAnchor)
-  const to = target && draft.targetAnchor ? anchorPoint(visualCardRect(target), draft.targetAnchor) : draft.to
+  const from = anchorPoint(visualRectOf(source), draft.sourceAnchor)
+  const to = target && draft.targetAnchor ? anchorPoint(visualRectOf(target), draft.targetAnchor) : draft.to
 
   const head = arrowheadPath(to, { x: to.x - from.x, y: to.y - from.y }, 'triangle', 12)
   const valid = Boolean(target)

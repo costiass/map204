@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef } from 'react'
 
 import { IconSearch, IconX } from '@/components/Icons'
+import { elementKind } from '@/elements/registry'
 import { useCanvasStore } from '@/store/useCanvasStore'
-import { cardRect, centerOn, rectCenter } from '@/utils/geometry'
+import { visualRectOf, centerOn, rectCenter } from '@/utils/geometry'
 import { isFiltering, matchesFilters, splitMatch } from '@/utils/filters'
 import { markdownToPlainText } from '@/utils/markdown'
 
@@ -36,21 +37,23 @@ export function SearchPanel() {
   )
   const results = useMemo(() => {
     if (!page) return []
-    return page.cards
+    return page.elements
       .filter((card) => matchesFilters(card, filters))
       .sort((a, b) => a.title.localeCompare(b.title))
   }, [page, filters])
 
   if (!searchOpen) return null
 
-  const focusCard = (cardId: string) => {
+  const focusElement = (elementId: string) => {
     const store = useCanvasStore.getState()
     const target = store.doc.pages.find((p) => p.id === store.activePageId)
-    const card = target?.cards.find((c) => c.id === cardId)
-    if (!target || !card) return
-    store.selectCards([cardId])
+    const element = target?.elements.find((c) => c.id === elementId)
+    if (!target || !element) return
+    store.selectElements([elementId])
     const zoom = Math.min(Math.max(target.viewport.zoom, 0.7), 1.2)
-    store.setViewport(centerOn(rectCenter(cardRect(card)), store.viewportSize, zoom))
+    // The visual rect, so jumping to a collapsed element frames the title bar
+    // that is on screen rather than the height it would occupy expanded.
+    store.setViewport(centerOn(rectCenter(visualRectOf(element)), store.viewportSize, zoom))
   }
 
   const active = isFiltering(filters)
@@ -72,7 +75,7 @@ export function SearchPanel() {
                 clearFilters()
                 setSearchOpen(false)
               }
-              if (event.key === 'Enter' && results[0]) focusCard(results[0].id)
+              if (event.key === 'Enter' && results[0]) focusElement(results[0].id)
             }}
           />
           <button
@@ -92,18 +95,24 @@ export function SearchPanel() {
             </p>
           ) : (
             <ul className="divide-y divide-line">
-              {results.map((card) => {
-                const { before, match, after } = splitMatch(card.title, query)
-                const snippet = markdownToPlainText(card.content).slice(0, 90)
+              {results.map((element) => {
+                const { before, match, after } = splitMatch(element.title, query)
+                // A body, tags and an accent colour belong to a note. The rest
+                // are found by their title, and this is the line that says so
+                // rather than reading a field that is not there.
+                const note = element.kind === 'note' ? element : null
+                const snippet = note ? markdownToPlainText(note.body).slice(0, 90) : ''
+                const tags = note?.tags ?? []
+                const KindIcon = elementKind(element.kind).icon
                 return (
-                  <li key={card.id}>
+                  <li key={element.id}>
                     <button
                       type="button"
                       className="flex w-full cursor-pointer flex-col gap-1 px-3 py-2 text-left hover:bg-surface-alt"
-                      onClick={() => focusCard(card.id)}
+                      onClick={() => focusElement(element.id)}
                     >
                       <span className="flex items-center gap-2">
-                        <span className="h-3 w-3 shrink-0 rounded-sm" style={{ background: card.style.accentColor }} />
+                        <KindIcon size={13} className="shrink-0 text-slate-400" />
                         <span className="truncate text-[13px] font-semibold text-ink-strong">
                           {match ? (
                             <>
@@ -112,14 +121,14 @@ export function SearchPanel() {
                               {after}
                             </>
                           ) : (
-                            card.title
+                            element.title
                           )}
                         </span>
                       </span>
                       {snippet ? <span className="line-clamp-1 pl-5 text-[11px] text-muted">{snippet}</span> : null}
-                      {card.tags.length > 0 ? (
+                      {tags.length > 0 ? (
                         <span className="flex flex-wrap gap-1 pl-5">
-                          {card.tags.map((tag) => (
+                          {tags.map((tag) => (
                             <span
                               key={tag}
                               className="cc-tag"
@@ -143,7 +152,7 @@ export function SearchPanel() {
 
         <div className="flex items-center justify-between border-t border-line px-3 py-1.5 text-[11px] text-muted">
           <span>
-            {results.length} of {page?.cards.length ?? 0} cards
+            {results.length} of {page?.elements.length ?? 0} cards
           </span>
           {active ? (
             <button

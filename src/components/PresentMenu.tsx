@@ -28,7 +28,7 @@ export function PresentMenu() {
   const ref = useRef<HTMLDivElement>(null)
 
   const steps = useCanvasStore((s) => s.doc.settings.steps)
-  const selectedCardIds = useCanvasStore((s) => s.selectedCardIds)
+  const selectedElementIds = useCanvasStore((s) => s.selectedElementIds)
   const selectedGroupId = useCanvasStore((s) => s.selectedGroupId)
   const page = useCanvasStore((s) => s.doc.pages.find((p) => p.id === s.activePageId))
   const addStep = useCanvasStore((s) => s.addStep)
@@ -67,31 +67,31 @@ export function PresentMenu() {
   if (readOnlyReason === 'viewing') return null
 
   const zoom = page?.viewport.zoom ?? 1
-  const cards = page?.cards ?? []
+  const cards = page?.elements ?? []
   const groups = page?.groups ?? []
 
   /** The zoom a new step gets: the camera as it is right now. */
   const captured = Math.max(MIN_ZOOM, Math.min(2, zoom))
 
-  const titleOf = (targetId: string | null, kind: 'card' | 'group' | 'page') => {
+  const titleOf = (targetId: string | null, kind: 'element' | 'group' | 'page') => {
     if (kind === 'page' || !targetId) return 'The whole page'
-    if (kind === 'card') return cards.find((c) => c.id === targetId)?.title || 'A deleted card'
+    if (kind === 'element') return cards.find((c) => c.id === targetId)?.title || 'A deleted card'
     return groups.find((g) => g.id === targetId)?.title || 'A deleted group'
   }
 
-  const addFor = (targetId: string | null, kind: 'card' | 'group' | 'page') => {
+  const addFor = (targetId: string | null, kind: 'element' | 'group' | 'page') => {
     addStep({ targetId, targetKind: kind, zoom: captured, durationMs: 450 })
   }
 
   const addForSelection = () => {
     // One step per selected card, in the order they were selected, so selecting
     // five cards and pressing this gives five steps rather than one.
-    const chosen = selectedCardIds.filter((id) => cards.some((c) => c.id === id))
+    const chosen = selectedElementIds.filter((id) => cards.some((c) => c.id === id))
     if (chosen.length === 0 && selectedGroupId) {
       addFor(selectedGroupId, 'group')
       return
     }
-    for (const id of chosen) addFor(id, 'card')
+    for (const id of chosen) addFor(id, 'element')
   }
 
   const addForEverything = () => {
@@ -99,12 +99,12 @@ export function PresentMenu() {
     // because it would append a second full run to the first.
     if (steps.length > 0) return
     addFor(null, 'page')
-    for (const card of cards) addFor(card.id, 'card')
+    for (const card of cards) addFor(card.id, 'element')
   }
 
   const canStart = steps.length > 0
   const canAddSelection =
-    selectedCardIds.some((id) => cards.some((c) => c.id === id)) || selectedGroupId !== null
+    selectedElementIds.some((id) => cards.some((c) => c.id === id)) || selectedGroupId !== null
 
   return (
     <div ref={ref} className="relative shrink-0">

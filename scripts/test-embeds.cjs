@@ -143,27 +143,26 @@ import(${JSON.stringify(url)})
       cases.push(\`a t=90 link lost its timestamp: \${timed}\`)
     }
 
-    // --- kind inference --------------------------------------------------
-    if (m.guessCardType(\`https://youtu.be/\${id}\`) !== 'youtube') {
-      cases.push('a YouTube link was not recognised')
+    // --- kind inference -------------------------------------------------
+    //
+    // The kind-inference helpers are gone. In v1 this file decided what kind a
+    // pasted URL should be, which was a fourth copy of the list of kinds. In v2
+    // the kinds live in \`elements/registry\` and the URL rules stay here, so
+    // what is worth asserting is the rule rather than the guess: a YouTube link
+    // yields a video id, and anything else yields nothing. Whether that becomes
+    // a video element or a note is \`normalizeElement\`'s decision, and it is
+    // tested there.
+    if (m.youtubeVideoId(\`https://youtu.be/\${id}\`) !== id) {
+      cases.push('a YouTube link did not yield its id')
     }
-    if (m.guessCardType('https://example.com/notes.pdf') !== 'pdf') {
-      cases.push('a PDF link was not recognised')
+    if (m.youtubeVideoId('https://example.com/not-a-video') !== null) {
+      cases.push('a non-YouTube link produced a video id')
     }
-    if (m.guessCardType('https://example.com/page') !== 'note') {
-      cases.push('a plain link was guessed as something other than a note')
+    if (m.looksLikePdf('https://example.com/notes.pdf') !== true) {
+      cases.push('a .pdf link was not recognised')
     }
-
-    // --- a video card asked for with a non-YouTube link becomes a note ---
-    // Rather than a video card that quietly shows nothing.
-    const built = m.embedFor('youtube', 'https://example.com/not-a-video')
-    if (built.type !== 'note' || built.embed !== null) {
-      cases.push('a non-YouTube link produced a youtube card')
-    }
-
-    // --- an old card with no type at all is a note ----------------------
-    if (m.isCardType(undefined) || m.isCardType(null) || m.isCardType('calendar')) {
-      cases.push('isCardType accepted something that is not a kind')
+    if (m.looksLikePdf('https://example.com/page') !== false) {
+      cases.push('a plain link was treated as a PDF')
     }
 
     process.stdout.write(JSON.stringify(cases))

@@ -2,8 +2,8 @@ import { IconFit, IconPlus } from '@/components/Icons'
 import { useCanvasStore } from '@/store/useCanvasStore'
 
 export function EmptyState({ onFit }: { onFit: () => void }) {
-  const addCard = useCanvasStore((s) => s.addCard)
-  const cards = useCanvasStore((s) => s.doc.pages.find((p) => p.id === s.activePageId)?.cards.length ?? 0)
+  const addElement = useCanvasStore((s) => s.addElement)
+  const cards = useCanvasStore((s) => s.doc.pages.find((p) => p.id === s.activePageId)?.elements.length ?? 0)
 
   return (
     <div className="pointer-events-none absolute inset-0 grid place-items-center">
@@ -20,7 +20,7 @@ export function EmptyState({ onFit }: { onFit: () => void }) {
           a dot on a card edge to connect two things.
         </p>
         <div className="mt-4 flex justify-center gap-2">
-          <button type="button" className="cc-btn" data-variant="primary" onClick={() => addCard()}>
+          <button type="button" className="cc-btn" data-variant="primary" onClick={() => addElement('note')}>
             <IconPlus size={14} /> New card
           </button>
           <button type="button" className="cc-btn" onClick={onFit}>

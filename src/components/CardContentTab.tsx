@@ -4,18 +4,22 @@ import { Section } from '@/components/EditorParts'
 import { IconImage, IconX } from '@/components/Icons'
 import { MarkdownEditor } from '@/components/MarkdownEditor'
 import { useCanvasStore } from '@/store/useCanvasStore'
-import type { Card } from '@/types'
+import type { NoteElement } from '@/types'
 import { fileToDataUrl } from '@/utils/image'
 
 /**
- * The Content tab: the card treated as a small Markdown page. The source lives
- * on the left with a live preview, and everything else about the card's
- * *content* (banner image, tags, steps, children) sits underneath it.
+ * The Content tab: a note treated as a small Markdown page. The source lives on
+ * the left with a live preview, and everything else about the note's *content*
+ * (banner image, tags, steps, what it shares a group with) sits underneath it.
+ *
+ * Note-only, and typed as one. A body, tags, a checklist and a banner image
+ * belong to a note and nowhere else; `Inspector` routes the other kinds to
+ * `ElementInspectorTab` rather than showing controls that would do nothing.
  */
-export function CardContentTab({ card }: { card: Card }) {
-  const updateCard = useCanvasStore((s) => s.updateCard)
+export function CardContentTab({ card }: { card: NoteElement }) {
+  const updateElement = useCanvasStore((s) => s.updateElement)
   const flushCommit = useCanvasStore((s) => s.flushCommit)
-  const setCardImage = useCanvasStore((s) => s.setCardImage)
+  const setNoteImage = useCanvasStore((s) => s.setNoteImage)
   const addTag = useCanvasStore((s) => s.addTag)
   const removeTag = useCanvasStore((s) => s.removeTag)
   const addChecklistItem = useCanvasStore((s) => s.addChecklistItem)
@@ -27,16 +31,29 @@ export function CardContentTab({ card }: { card: Card }) {
 
   const [tagDraft, setTagDraft] = useState('')
   const altInputRef = useRef<HTMLInputElement>(null)
-  const childTitles = (pages.find((page) => page.id === activePageId)?.cards ?? [])
-    .filter((other) => other.parentId === card.id)
-    .map((other) => other.title || 'Untitled card')
+
+  // Which elements share a group with this one.
+  //
+  // This used to read each card's `parentId` — the old way of saying "this is
+  // inside that". A group is that now, and it says so in `memberIds`, so the
+  // answer comes from the group rather than from a field on the element that
+  // could disagree with it.
+  const activePage = pages.find((page) => page.id === activePageId)
+  const childTitles = (activePage?.elements ?? [])
+    .filter((other) =>
+      (activePage?.groups ?? []).some(
+        (group) => group.memberIds.includes(other.id) && group.memberIds.includes(card.id),
+      ),
+    )
+    .filter((other) => other.id !== card.id)
+    .map((other) => other.title || 'Untitled')
 
   const handleUpload = async (file: File | undefined) => {
     if (!file) return
     try {
       const dataUrl = await fileToDataUrl(file)
-      setCardImage(card.id, { src: dataUrl, alt: altInputRef.current?.value ?? card.image.alt })
-      pushToast('Banner image embedded in the card.', 'success')
+      setNoteImage(card.id, { src: dataUrl, alt: altInputRef.current?.value ?? card.image.alt })
+      pushToast('Banner image embedded.', 'success')
     } catch {
       pushToast('Could not read that image file.', 'error')
     }
@@ -46,9 +63,9 @@ export function CardContentTab({ card }: { card: Card }) {
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-0 flex-1 flex-col">
         <MarkdownEditor
-          value={card.content}
+          value={card.body}
           ariaLabel={`Markdown body of ${card.title}`}
-          onChange={(content) => updateCard(card.id, { content }, { silent: true })}
+          onChange={(body) => updateElement(card.id, { body }, { silent: true })}
           onCommit={flushCommit}
         />
       </div>
@@ -61,7 +78,7 @@ export function CardContentTab({ card }: { card: Card }) {
               <button
                 type="button"
                 className="cursor-pointer text-[11px] font-semibold text-slate-500 hover:text-red-600"
-                onClick={() => setCardImage(card.id, { src: null, alt: '' })}
+                onClick={() => setNoteImage(card.id, { src: null, alt: '' })}
               >
                 Remove
               </button>
@@ -78,7 +95,7 @@ export function CardContentTab({ card }: { card: Card }) {
               onBlur={(event) => {
                 const next = event.target.value.trim()
                 if (next !== (card.image.src ?? '')) {
-                  setCardImage(card.id, { src: next || null, alt: card.image.alt })
+                  setNoteImage(card.id, { src: next || null, alt: card.image.alt })
                 }
               }}
             />
@@ -103,7 +120,7 @@ export function CardContentTab({ card }: { card: Card }) {
             defaultValue={card.image.alt}
             onBlur={(event) => {
               if (event.target.value !== card.image.alt) {
-                setCardImage(card.id, { src: card.image.src, alt: event.target.value })
+                setNoteImage(card.id, { src: card.image.src, alt: event.target.value })
               }
             }}
           />

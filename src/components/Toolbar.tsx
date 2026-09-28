@@ -87,7 +87,7 @@ export function Toolbar({
 }: ToolbarProps) {
   const isCanvas = Boolean(documentId)
   const page = useCanvasStore((s) => s.doc.pages.find((p) => p.id === s.activePageId))
-  const addCard = useCanvasStore((s) => s.addCard)
+  const addElement = useCanvasStore((s) => s.addElement)
   const addGroup = useCanvasStore((s) => s.addGroup)
   const undo = useCanvasStore((s) => s.undo)
   const redo = useCanvasStore((s) => s.redo)
@@ -486,7 +486,7 @@ export function Toolbar({
             className="cc-btn shrink-0"
             data-variant="primary"
             title="New note (C)"
-            onClick={() => addCard()}
+            onClick={() => addElement('note')}
           >
             <StickyNote size={14} />
             Card

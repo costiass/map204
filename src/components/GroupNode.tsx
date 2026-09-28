@@ -31,15 +31,15 @@ function GroupNodeImpl({
   const deleteGroups = useCanvasStore((s) => s.deleteGroups)
   const selectGroup = useCanvasStore((s) => s.selectGroup)
 
-  const x = group.position.x + (offset?.x ?? 0)
-  const y = group.position.y + (offset?.y ?? 0)
+  const x = group.x + (offset?.x ?? 0)
+  const y = group.y + (offset?.y ?? 0)
 
   const style = {
     left: x,
     top: y,
-    width: group.position.width,
-    height: group.position.height,
-    zIndex: group.position.zIndex,
+    width: group.width,
+    height: group.height,
+    zIndex: group.zIndex,
     '--cc-group-color': group.color,
     border: `2px dashed ${group.color}55`,
     background: `${group.color}08`,

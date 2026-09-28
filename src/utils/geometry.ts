@@ -21,18 +21,35 @@ export function snap(value: number, gridSize = DEFAULT_GRID_SIZE): number {
   return Math.round(value / gridSize) * gridSize
 }
 
-export function cardRect(card: { position: Rect }): Rect {
-  const { x, y, width, height } = card.position
+/**
+ * The rectangle something occupies.
+ *
+ * Takes a flat `{x, y, width, height}` rather than a nested `position`, which is
+ * what v2's elements and groups both are. Renamed from `cardRect`: an element is
+ * not a card, and the only thing that still is a card is a flash deck's side.
+ */
+export function rectOf(target: { x: number; y: number; width: number; height: number }): Rect {
+  const { x, y, width, height } = target
   return { x, y, width, height }
 }
 
 /**
- * Visual rect of a card — when collapsed, uses the collapsed header height
- * so connection endpoints point to the visible middle of the collapsed card.
+ * The rectangle something *appears* to occupy.
+ *
+ * A collapsed element is a title bar, not a short box — so this reports the
+ * height that is actually on screen, and a connection endpoint attached to a
+ * collapsed element points at the middle of what the user can see rather than at
+ * empty space below it.
  */
-export function visualCardRect(card: { position: Rect; collapsed?: boolean }): Rect {
-  const { x, y, width, height } = card.position
-  if (card.collapsed) {
+export function visualRectOf(target: {
+  x: number
+  y: number
+  width: number
+  height: number
+  collapsed?: boolean
+}): Rect {
+  const { x, y, width, height } = target
+  if (target.collapsed) {
     return { x, y, width, height: COLLAPSED_HEADER_HEIGHT }
   }
   return { x, y, width, height }

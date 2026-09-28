@@ -1,27 +1,28 @@
 import { Section } from '@/components/EditorParts'
 import { ColorPicker } from '@/components/ColorPicker'
 import { IconTrash } from '@/components/Icons'
+import { elementKind } from '@/elements/registry'
 import { useCanvasStore } from '@/store/useCanvasStore'
 import { CARD_ACCENTS, type Group } from '@/types'
 
 /**
- * Inspector panel for editing a group: title, colour, position, membership.
+ * Inspector panel for editing a group: title, colour, layout, membership.
+ *
+ * A group holds *elements* of any kind, not cards, so the member list labels
+ * each one with its kind rather than assuming a note's accent colour.
  */
 export function GroupEditor({ group }: { group: Group }) {
   const updateGroup = useCanvasStore((s) => s.updateGroup)
   const flushCommit = useCanvasStore((s) => s.flushCommit)
   const deleteGroups = useCanvasStore((s) => s.deleteGroups)
-  const addCardToGroup = useCanvasStore((s) => s.addCardToGroup)
-  const removeCardFromGroup = useCanvasStore((s) => s.removeCardFromGroup)
-  const addGroupToGroup = useCanvasStore((s) => s.addGroupToGroup)
-  const removeGroupFromGroup = useCanvasStore((s) => s.removeGroupFromGroup)
+  const addElementToGroup = useCanvasStore((s) => s.addElementToGroup)
+  const removeElementFromGroup = useCanvasStore((s) => s.removeElementFromGroup)
   const page = useCanvasStore((s) => s.doc.pages.find((p) => p.id === s.activePageId))
   const pushToast = useCanvasStore((s) => s.pushToast)
 
   if (!page) return null
 
-  const otherCards = page.cards.filter((c) => !group.memberCardIds.includes(c.id))
-  const otherGroups = page.groups.filter((g) => g.id !== group.id && !group.memberGroupIds.includes(g.id))
+  const otherElements = page.elements.filter((c) => !group.memberIds.includes(c.id))
 
   return (
     <div className="cc-scroll flex-1 overflow-y-auto">
@@ -46,27 +47,29 @@ export function GroupEditor({ group }: { group: Group }) {
         </div>
       </Section>
 
-      <Section title={`Cards (${group.memberCardIds.length})`}>
-        {group.memberCardIds.length === 0 ? (
-          <p className="text-[11px] text-slate-400">No cards in this group yet.</p>
+      <Section title={`Elements (${group.memberIds.length})`}>
+        {group.memberIds.length === 0 ? (
+          <p className="text-[11px] text-slate-400">No elements in this group yet.</p>
         ) : (
           <ul className="space-y-1">
-            {group.memberCardIds.map((cardId) => {
-              const card = page.cards.find((c) => c.id === cardId)
-              if (!card) return null
+            {group.memberIds.map((elementId) => {
+              const element = page.elements.find((c) => c.id === elementId)
+              if (!element) return null
+              const kind = elementKind(element.kind)
+              const Icon = kind.icon
               return (
-                <li key={cardId} className="flex items-center gap-2">
-                  <span
-                    className="h-2.5 w-2.5 shrink-0 rounded-full"
-                    style={{ background: card.style.accentColor }}
-                  />
+                <li key={elementId} className="flex items-center gap-2">
+                  {/* A group can hold any kind, and only a note has an accent
+                      colour to dot with. The icon is what tells them apart. */}
+                  <Icon className="h-3.5 w-3.5 shrink-0 text-slate-400" />
                   <span className="min-w-0 flex-1 truncate text-xs text-slate-700">
-                    {card.title || 'Untitled'}
+                    {element.title || 'Untitled'}
                   </span>
+                  <span className="shrink-0 text-[10px] text-slate-400">{kind.label}</span>
                   <button
                     type="button"
                     className="shrink-0 cursor-pointer text-slate-400 hover:text-red-600"
-                    onClick={() => removeCardFromGroup(group.id, cardId)}
+                    onClick={() => removeElementFromGroup(group.id, elementId)}
                   >
                     Remove
                   </button>
@@ -75,71 +78,21 @@ export function GroupEditor({ group }: { group: Group }) {
             })}
           </ul>
         )}
-        {otherCards.length > 0 ? (
+        {otherElements.length > 0 ? (
           <select
             className="cc-input mt-2"
             value=""
             onChange={(event) => {
               if (event.target.value) {
-                addCardToGroup(group.id, event.target.value)
-                pushToast('Card added to group.', 'success')
+                addElementToGroup(group.id, event.target.value)
+                pushToast('Added to group.', 'success')
               }
             }}
           >
-            <option value="">+ Add card to group…</option>
-            {otherCards.map((card) => (
-              <option key={card.id} value={card.id}>
-                {card.title || 'Untitled'}
-              </option>
-            ))}
-          </select>
-        ) : null}
-      </Section>
-
-      <Section title={`Groups (${group.memberGroupIds.length})`}>
-        {group.memberGroupIds.length === 0 ? (
-          <p className="text-[11px] text-slate-400">No groups inside this group yet.</p>
-        ) : (
-          <ul className="space-y-1">
-            {group.memberGroupIds.map((groupId) => {
-              const childGroup = page.groups.find((g) => g.id === groupId)
-              if (!childGroup) return null
-              return (
-                <li key={groupId} className="flex items-center gap-2">
-                  <span
-                    className="h-2.5 w-2.5 shrink-0 rounded-sm"
-                    style={{ background: childGroup.color }}
-                  />
-                  <span className="min-w-0 flex-1 truncate text-xs text-slate-700">
-                    {childGroup.title || 'Untitled group'}
-                  </span>
-                  <button
-                    type="button"
-                    className="shrink-0 cursor-pointer text-slate-400 hover:text-red-600"
-                    onClick={() => removeGroupFromGroup(group.id, groupId)}
-                  >
-                    Remove
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
-        )}
-        {otherGroups.length > 0 ? (
-          <select
-            className="cc-input mt-2"
-            value=""
-            onChange={(event) => {
-              if (event.target.value) {
-                addGroupToGroup(group.id, event.target.value)
-                pushToast('Group added to group.', 'success')
-              }
-            }}
-          >
-            <option value="">+ Add group to group…</option>
-            {otherGroups.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.title || 'Untitled group'}
+            <option value="">+ Add to group…</option>
+            {otherElements.map((element) => (
+              <option key={element.id} value={element.id}>
+                {element.title || 'Untitled'}
               </option>
             ))}
           </select>
@@ -153,8 +106,8 @@ export function GroupEditor({ group }: { group: Group }) {
             <input
               type="number"
               className="cc-input"
-              value={group.position.x}
-              onChange={(event) => updateGroup(group.id, { position: { ...group.position, x: Number(event.target.value) } })}
+              value={group.x}
+              onChange={(event) => updateGroup(group.id, { x: Number(event.target.value) })}
             />
           </label>
           <label className="block">
@@ -162,8 +115,8 @@ export function GroupEditor({ group }: { group: Group }) {
             <input
               type="number"
               className="cc-input"
-              value={group.position.y}
-              onChange={(event) => updateGroup(group.id, { position: { ...group.position, y: Number(event.target.value) } })}
+              value={group.y}
+              onChange={(event) => updateGroup(group.id, { y: Number(event.target.value) })}
             />
           </label>
           <label className="block">
@@ -171,8 +124,8 @@ export function GroupEditor({ group }: { group: Group }) {
             <input
               type="number"
               className="cc-input"
-              value={group.position.width}
-              onChange={(event) => updateGroup(group.id, { position: { ...group.position, width: Number(event.target.value) } })}
+              value={group.width}
+              onChange={(event) => updateGroup(group.id, { width: Number(event.target.value) })}
             />
           </label>
           <label className="block">
@@ -180,8 +133,8 @@ export function GroupEditor({ group }: { group: Group }) {
             <input
               type="number"
               className="cc-input"
-              value={group.position.height}
-              onChange={(event) => updateGroup(group.id, { position: { ...group.position, height: Number(event.target.value) } })}
+              value={group.height}
+              onChange={(event) => updateGroup(group.id, { height: Number(event.target.value) })}
             />
           </label>
         </div>

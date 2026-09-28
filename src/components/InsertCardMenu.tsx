@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Plus } from 'lucide-react'
 
-import { openInsertCard } from '@/components/InsertCardDialog'
+import { openInsertElement } from '@/components/InsertCardDialog'
 import { insertableKinds, needsSource } from '@/elements/registry'
 import { useCanvasStore } from '@/store/useCanvasStore'
-import type { CardType } from '@/types'
 
 /**
  * The toolbar's one button for making a card, and the menu it opens.
@@ -49,8 +48,8 @@ export function InsertCardMenu() {
   const buttonRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
-  const addCard = useCanvasStore((s) => s.addCard)
-  const selectCards = useCanvasStore((s) => s.selectCards)
+  const addElement = useCanvasStore((s) => s.addElement)
+  const selectElements = useCanvasStore((s) => s.selectElements)
   const readOnlyReason = useCanvasStore((s) => s.readOnlyReason)
 
   // Kept in a ref as well as state, so the click-away and the outside-click
@@ -145,11 +144,13 @@ export function InsertCardMenu() {
     if (needsSource(kindId)) {
       // No position, so the dialog lets it land wherever the canvas chooses —
       // the same place a `C` press would put it.
-      openInsertCard(-1, -1, kindId as CardType)
+      openInsertElement(-1, -1, kindId)
       return
     }
-    const id = addCard({ type: kindId as CardType })
-    if (id) selectCards([id])
+    // The kind comes straight from the registry, so there is no cast and nothing
+    // to get wrong: whatever the menu showed is what gets made.
+    const id = addElement(kindId)
+    if (id) selectElements([id])
   }
 
   return (

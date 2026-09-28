@@ -43,6 +43,7 @@ import {
   DOC_VERSION,
   MAX_UPLOAD_BYTES,
   type CanvasDocV2,
+  type Anchor,
   type Connection,
   type DocSettings,
   type Element,
@@ -81,6 +82,28 @@ export interface MigrationResult {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
+
+/** Every arrowhead `utils/edges.ts` can actually draw. */
+const ARROWHEADS = ['none', 'arrow', 'triangle', 'circle', 'diamond'] as const
+type Arrowhead = (typeof ARROWHEADS)[number]
+
+/**
+ * A stored arrowhead, or the default.
+ *
+ * Written as an `includes` test rather than a `Set.has` one because `Set.has`
+ * does not narrow, and the value on the other side is `unknown` off an imported
+ * file.
+ */
+function arrowheadOf(value: unknown, fallback: Arrowhead): Arrowhead {
+  return ARROWHEADS.includes(value as Arrowhead) ? (value as Arrowhead) : fallback
+}
+
+/** A side of a box, or `null` for "the renderer decides". */
+function anchorOf(value: unknown): Anchor | null {
+  return value === 'top' || value === 'right' || value === 'bottom' || value === 'left'
+    ? value
+    : null
+}
 
 const str = (value: unknown, fallback = ''): string =>
   typeof value === 'string' ? value : fallback
@@ -202,6 +225,7 @@ function convertCard(raw: unknown, index: number, stamp: string): Element | null
         kind: 'flash',
         title,
         cards: [[{ id: mintId('face'), text: title }, { id: mintId('face'), text: body }]],
+        cardIndex: 0,
         showing: 'front',
         presentation: 'single',
         hideAnswer: true,
@@ -363,6 +387,12 @@ export function migrateToV2(input: unknown): MigrationResult {
           id: str(rawConnection.id) || mintId('link'),
           source: from,
           target: to,
+          // The anchors survive. A person who chose "leave from the left" meant
+          // it, and the alternative — dropping the choice and letting the
+          // renderer decide — changes how every edge in their document attaches
+          // the first time it is opened.
+          sourceAnchor: anchorOf(rawConnection.sourceAnchor),
+          targetAnchor: anchorOf(rawConnection.targetAnchor),
           label: str(rawConnection.label),
           relationshipType: str(rawConnection.relationshipType, fallback.relationshipType),
           style: {
@@ -372,18 +402,21 @@ export function migrateToV2(input: unknown): MigrationResult {
               style.lineStyle === 'dashed' || style.lineStyle === 'dotted'
                 ? style.lineStyle
                 : fallback.lineStyle,
+            // Version 1 called the right-angled routing `stepped`; version 2
+            // calls it `orthogonal`. It is the same path, and reading only the
+            // new name here turned every stepped connection in every saved
+            // document into a curve — a change nobody would notice until they
+            // opened a map they had drawn and it looked different.
             routing:
-              style.routing === 'straight' || style.routing === 'orthogonal'
-                ? style.routing
-                : fallback.routing,
-            arrowStart:
-              style.arrowStart === 'arrow' || style.arrowStart === 'circle'
-                ? style.arrowStart
-                : ('none' as const),
-            arrowEnd:
-              style.arrowEnd === 'arrow' || style.arrowEnd === 'circle'
-                ? style.arrowEnd
-                : ('arrow' as const),
+              style.routing === 'stepped'
+                ? ('orthogonal' as const)
+                : style.routing === 'straight' || style.routing === 'curved'
+                  ? style.routing
+                  : fallback.routing,
+            // Every arrowhead the renderer draws, kept. Narrowing this list
+            // silently rewrites a reader's connections on the next save.
+            arrowStart: arrowheadOf(style.arrowStart, 'none'),
+            arrowEnd: arrowheadOf(style.arrowEnd, 'arrow'),
             animated: style.animated === true,
           },
         },
@@ -428,15 +461,34 @@ export function migrateToV2(input: unknown): MigrationResult {
     // at a "card" and now point at an element of any kind.
     steps: rawSteps.flatMap((rawStep): PresentationStepV2[] => {
       if (!isRecord(rawStep)) return []
-      const kind = str(rawStep.targetKind, 'card')
+      // An unrecognised kind is an establishing shot, not a step pointing at
+      // nothing. Mapping it to 'element' would keep its `targetId` and fly the
+      // camera to an object that does not exist, which is the one outcome a
+      // viewer notices immediately. Version 1 did this too.
+      //
+      // So the three cases are kept apart rather than collapsed: 'card' is a real
+      // version 1 kind and becomes an element step; a kind we do not recognise
+      // becomes a page step and loses its target.
+      const rawKind = str(rawStep.targetKind, 'card')
+      const known = rawKind === 'card' || rawKind === 'group' || rawKind === 'page'
       const transition = str(rawStep.transition, 'ease')
       const trigger = str(rawStep.trigger, 'manual')
       const focus = str(rawStep.focus, 'none')
       return [
         {
           id: str(rawStep.id) || mintId('step'),
-          targetId: strOrNull(rawStep.targetId),
-          targetKind: kind === 'group' ? 'group' : kind === 'page' ? 'page' : 'element',
+          // A step whose kind we did not recognise becomes an establishing shot,
+          // and an establishing shot does not name a target: pointing the camera
+          // at a thing that is not there is the failure a viewer notices
+          // immediately.
+          targetId: known ? strOrNull(rawStep.targetId) : null,
+          targetKind: !known
+            ? ('page' as const)
+            : rawKind === 'group'
+              ? ('group' as const)
+              : rawKind === 'page'
+                ? ('page' as const)
+                : ('element' as const),
           zoom: num(rawStep.zoom, 1),
           transition:
             transition === 'linear' || transition === 'drift' || transition === 'instant'

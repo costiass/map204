@@ -1,11 +1,12 @@
 import { CardContentTab } from '@/components/CardContentTab'
+import { ElementInspectorTab } from '@/components/ElementInspectorTab'
 import { CardSettingsTab } from '@/components/CardSettingsTab'
 import { ConnectionEditor } from '@/components/ConnectionEditor'
 import { GroupEditor } from '@/components/GroupEditor'
 import { IconFit, IconX } from '@/components/Icons'
 import { MultiSelectEditor } from '@/components/MultiSelectEditor'
 import { useCanvasStore } from '@/store/useCanvasStore'
-import { cardRect, centerOn, rectCenter } from '@/utils/geometry'
+import { rectOf, centerOn, rectCenter } from '@/utils/geometry'
 
 /**
  * Right-hand inspector.
@@ -20,10 +21,10 @@ import { cardRect, centerOn, rectCenter } from '@/utils/geometry'
  * connection editor.
  */
 export function Inspector() {
-  const selectedCardIds = useCanvasStore((s) => s.selectedCardIds)
+  const selectedElementIds = useCanvasStore((s) => s.selectedElementIds)
   const card = useCanvasStore((s) =>
-    s.selectedCardIds.length === 1
-      ? s.doc.pages.find((p) => p.id === s.activePageId)?.cards.find((c) => c.id === s.selectedCardIds[0])
+    s.selectedElementIds.length === 1
+      ? s.doc.pages.find((p) => p.id === s.activePageId)?.elements.find((c) => c.id === s.selectedElementIds[0])
       : undefined,
   )
   const group = useCanvasStore((s) =>
@@ -39,12 +40,12 @@ export function Inspector() {
       : undefined,
   )
   const cardCount = useCanvasStore((s) =>
-    s.doc.pages.find((p) => p.id === s.activePageId)?.cards.filter((c) => s.selectedCardIds.includes(c.id)).length ?? 0,
+    s.doc.pages.find((p) => p.id === s.activePageId)?.elements.filter((c) => s.selectedElementIds.includes(c.id)).length ?? 0,
   )
   const clearSelection = useCanvasStore((s) => s.clearSelection)
   const tab = useCanvasStore((s) => s.inspectorTab)
   const setTab = useCanvasStore((s) => s.setInspectorTab)
-  const updateCard = useCanvasStore((s) => s.updateCard)
+  const updateElement = useCanvasStore((s) => s.updateElement)
   const updateGroup = useCanvasStore((s) => s.updateGroup)
   const flushCommit = useCanvasStore((s) => s.flushCommit)
   const setViewport = useCanvasStore((s) => s.setViewport)
@@ -55,7 +56,7 @@ export function Inspector() {
   if (!open) return null
 
   const heading = card
-    ? card.title || 'Untitled card'
+    ? card.title || 'Untitled'
     : group
       ? group.title || 'Untitled group'
       : connection
@@ -72,14 +73,14 @@ export function Inspector() {
               className="min-w-0 flex-1 border-0 bg-transparent text-[13px] font-bold text-slate-700 outline-none placeholder:text-slate-400"
               placeholder="Card title"
               aria-label="Card title"
-              onChange={(event) => updateCard(card.id, { title: event.target.value }, { silent: true })}
+              onChange={(event) => updateElement(card.id, { title: event.target.value }, { silent: true })}
               onBlur={() => flushCommit()}
             />
             <button
               type="button"
               className="cc-btn shrink-0 px-1.5 py-1"
               title="Centre this card in the viewport"
-              onClick={() => setViewport(centerOn(rectCenter(cardRect(card)), viewportSize, Math.max(pageZoom, 0.8)))}
+              onClick={() => setViewport(centerOn(rectCenter(rectOf(card)), viewportSize, Math.max(pageZoom, 0.8)))}
             >
               <IconFit size={13} />
             </button>
@@ -98,7 +99,7 @@ export function Inspector() {
               type="button"
               className="cc-btn shrink-0 px-1.5 py-1"
               title="Centre this group in the viewport"
-              onClick={() => setViewport(centerOn(rectCenter(group.position), viewportSize, Math.max(pageZoom, 0.8)))}
+              onClick={() => setViewport(centerOn(rectCenter(rectOf(group)), viewportSize, Math.max(pageZoom, 0.8)))}
             >
               <IconFit size={13} />
             </button>
@@ -128,7 +129,7 @@ export function Inspector() {
               data-active={tab === 'content'}
               onClick={() => setTab('content')}
             >
-              Content
+              {card.kind === 'note' ? 'Content' : 'Source'}
             </button>
             <button
               type="button"
@@ -139,8 +140,15 @@ export function Inspector() {
               Settings
             </button>
           </div>
-          {tab === 'content' ? <CardContentTab key={card.id} card={card} /> : null}
-          {tab === 'settings' ? <CardSettingsTab key={card.id} card={card} /> : null}
+          {/* Which tab panel gets mounted depends on the *kind*, not on how many
+              are open. A note has a Markdown body, tags, a checklist and a
+              style; a video has a link and a display mode. Showing the note tabs
+              for a video would offer a colour picker for a thing with no colour. */}
+          {card.kind === 'note'
+            ? tab === 'content'
+              ? <CardContentTab key={card.id} card={card} />
+              : <CardSettingsTab key={card.id} card={card} />
+            : <ElementInspectorTab key={card.id} element={card} />}
         </>
       ) : null}
 
@@ -148,7 +156,7 @@ export function Inspector() {
 
       {connection && !card ? <ConnectionEditor key={connection.id} connectionId={connection.id} /> : null}
 
-      {!card && !connection && cardCount > 1 ? <MultiSelectEditor cardIds={selectedCardIds} /> : null}
+      {!card && !connection && cardCount > 1 ? <MultiSelectEditor cardIds={selectedElementIds} /> : null}
     </aside>
   )
 }

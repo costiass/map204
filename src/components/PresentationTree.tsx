@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { ChevronRight, ListTree, X } from 'lucide-react'
 
 import { useCanvasStore } from '@/store/useCanvasStore'
-import type { PresentationStep } from '@/types'
+import type { Page, PresentationStep } from '@/types'
 
 /**
  * The outline, while presenting.
@@ -133,21 +133,24 @@ export function PresentationTree({ onClose }: { onClose: () => void }) {
 /** What a step is called, in the list. */
 function nameOfStep(
   step: PresentationStep,
-  page: { cards: Array<{ id: string; title: string }>; groups: Array<{ id: string; title: string }> },
+  page: Pick<Page, 'elements' | 'groups'>,
 ): string {
   if (step.targetKind === 'page' || !step.targetId) return 'The whole page'
-  if (step.targetKind === 'card') {
-    return page.cards.find((c) => c.id === step.targetId)?.title || 'A deleted card'
+  if (step.targetKind === 'element') {
+    return page.elements.find((c) => c.id === step.targetId)?.title || 'A deleted element'
   }
   return page.groups.find((g) => g.id === step.targetId)?.title || 'A deleted group'
 }
 
-/** Is the thing this step pointed at still on the page? */
-function isMissing(
-  step: PresentationStep,
-  page: { cards: Array<{ id: string }>; groups: Array<{ id: string }> },
-): boolean {
+/**
+ * Is the thing this step pointed at still on the page?
+ *
+ * Shown in the outline, because a step whose target was deleted is a step that
+ * will do nothing when it is reached — the camera falls back to an establishing
+ * shot. The person presenting should know that before they get there.
+ */
+function isMissing(step: PresentationStep, page: Pick<Page, 'elements' | 'groups'>): boolean {
   if (step.targetKind === 'page' || !step.targetId) return false
-  const list = step.targetKind === 'card' ? page.cards : page.groups
+  const list = step.targetKind === 'group' ? page.groups : page.elements
   return !list.some((entry) => entry.id === step.targetId)
 }

@@ -82,15 +82,15 @@ export function ConnectionEditor({
   if (!connection || !page) return null
 
   const source =
-    connection.source.kind === 'card'
-      ? page.cards.find((card) => card.id === connection.source.id)?.title ?? 'Missing card'
+    connection.source.kind === 'element'
+      ? page.elements.find((card) => card.id === connection.source.id)?.title ?? 'Missing element'
       : page.groups.find((group) => group.id === connection.source.id)?.title ?? 'Missing group'
   const target =
-    connection.target.kind === 'card'
-      ? page.cards.find((card) => card.id === connection.target.id)?.title ?? 'Missing card'
+    connection.target.kind === 'element'
+      ? page.elements.find((card) => card.id === connection.target.id)?.title ?? 'Missing element'
       : page.groups.find((group) => group.id === connection.target.id)?.title ?? 'Missing group'
-  const sourceLabel = connection.source.kind === 'card' ? 'Card' : 'Group'
-  const targetLabel = connection.target.kind === 'card' ? 'Card' : 'Group'
+  const sourceLabel = connection.source.kind === 'element' ? 'Element' : 'Group'
+  const targetLabel = connection.target.kind === 'element' ? 'Element' : 'Group'
   const { style } = connection
 
   const isDefault =
@@ -230,7 +230,7 @@ export function ConnectionEditor({
               className="cc-btn"
               onClick={() => {
                 resetDefaultStyles()
-                pushToast('Default card and link styles reset.', 'info')
+                pushToast('Default element and link styles reset.', 'info')
               }}
             >
               <IconReset size={13} /> Reset defaults

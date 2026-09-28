@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 
-import { CardNode } from '@/components/CardNode'
+import { ElementNode } from '@/components/ElementNode'
 import { ConnectionLayer } from '@/components/ConnectionLayer'
 import { CursorLayer } from '@/components/CursorLayer'
 import type { DraftConnection } from '@/components/ConnectionLayer'
@@ -14,7 +14,7 @@ import {
   MIN_CARD_HEIGHT,
   MIN_CARD_WIDTH,
   type Anchor,
-  type Card,
+  type Element,
   type Connection,
   type Group,
   type Point,
@@ -22,7 +22,7 @@ import {
 } from '@/types'
 import {
   boundsOf,
-  cardRect,
+  rectOf,
   centerOn,
   clamp,
   clampZoom,
@@ -31,7 +31,7 @@ import {
   rectsIntersect,
   screenToWorld,
   snap,
-  visualCardRect,
+  visualRectOf,
   zoomAtPoint,
 } from '@/utils/geometry'
 import { isFiltering, matchesFilters } from '@/utils/filters'
@@ -67,7 +67,7 @@ type Interaction =
   | {
       kind: 'connect'
       pointerId: number
-      sourceCardId: string
+      sourceElementId: string
       sourceAnchor: Anchor
       current: Point
       hoverCardId: string | null
@@ -82,7 +82,7 @@ type Preview =
   | null
 
 const EMPTY_SET: Set<string> = new Set()
-const EMPTY_CARDS: Card[] = []
+const EMPTY_CARDS: Element[] = []
 const EMPTY_GROUPS: Group[] = []
 const EMPTY_CONNECTIONS: Connection[] = []
 
@@ -106,7 +106,7 @@ export function Canvas() {
 
   const page = useCanvasStore((s) => s.doc.pages.find((p) => p.id === s.activePageId))
   const activePageId = useCanvasStore((s) => s.activePageId)
-  const selectedCardIds = useCanvasStore((s) => s.selectedCardIds)
+  const selectedElementIds = useCanvasStore((s) => s.selectedElementIds)
   const selectedConnectionIds = useCanvasStore((s) => s.selectedConnectionIds)
   const selectedGroupId = useCanvasStore((s) => s.selectedGroupId)
   const searchQuery = useCanvasStore((s) => s.searchQuery)
@@ -117,23 +117,31 @@ export function Canvas() {
   const snapToGrid = useCanvasStore((s) => s.snapToGrid)
   const spacePressed = useCanvasStore((s) => s.spacePressed)
 
-  const cards = page?.cards ?? EMPTY_CARDS
+  const cards = page?.elements ?? EMPTY_CARDS
   const groups = page?.groups ?? EMPTY_GROUPS
   const connections = page?.connections ?? EMPTY_CONNECTIONS
 
   const cardMap = useMemo(() => new Map(cards.map((card) => [card.id, card])), [cards])
   const groupMap = useMemo(() => new Map(groups.map((group) => [group.id, group])), [groups])
 
+  /**
+   * Which elements sit inside which group, by title.
+   *
+   * This used to be built from each card's `parentId`, which was the old way of
+   * saying "this is inside that". A group is that now, and it says so in
+   * `memberIds` — so the nesting a card shows is the nesting a group defines,
+   * and there is no second opinion to disagree with it.
+   */
   const childrenOf = useMemo(() => {
     const map = new Map<string, string[]>()
-    for (const card of cards) {
-      if (!card.parentId) continue
-      const list = map.get(card.parentId) ?? []
-      list.push(card.title || 'Untitled')
-      map.set(card.parentId, list)
+    const byId = new Map(cards.map((card) => [card.id, card]))
+    for (const group of groups) {
+      const list = group.memberIds
+        .map((id) => byId.get(id)?.title || 'Untitled')
+      if (list.length > 0) map.set(group.id, list)
     }
     return map
-  }, [cards])
+  }, [cards, groups])
 
   const filterDimmedCardIds = useMemo(() => {
     const filters = { query: searchQuery, tags: filterTags, color: filterColor }
@@ -367,7 +375,7 @@ export function Canvas() {
     if (!element) return
     cancelViewportAnimation()
     const rect = element.getBoundingClientRect()
-    const bounds = boundsOf((target?.cards ?? []).map(cardRect))
+    const bounds = boundsOf((target?.elements ?? []).map(rectOf))
     viewportRef.current = fitViewport(bounds, { width: rect.width, height: rect.height })
     applyViewport()
     commitViewport(true)
@@ -376,10 +384,10 @@ export function Canvas() {
   useEffect(() => {
     if (didInitialFit.current) return
     didInitialFit.current = true
-    if ((page?.cards.length ?? 0) === 0) return
+    if ((page?.elements.length ?? 0) === 0) return
     const timer = window.setTimeout(fitView, 0)
     return () => window.clearTimeout(timer)
-  }, [fitView, page?.cards.length])
+  }, [fitView, page?.elements.length])
 
   const fitViewToken = useCanvasStore((s) => s.fitViewToken)
   useEffect(() => {
@@ -391,7 +399,7 @@ export function Canvas() {
   /* center selection on the visible canvas                             */
   /* ---------------------------------------------------------------- */
 
-  const hasSelection = selectedCardIds.length > 0 || selectedConnectionIds.length > 0 || selectedGroupId !== null
+  const hasSelection = selectedElementIds.length > 0 || selectedConnectionIds.length > 0 || selectedGroupId !== null
   const prevSelectionKey = useRef<string>('')
   const centerTimer = useRef<number | null>(null)
 
@@ -409,8 +417,8 @@ export function Canvas() {
     // Build a key for the current selection to detect changes.
     const selKey = store.selectedGroupId
       ? `g:${store.selectedGroupId}`
-      : store.selectedCardIds.length > 0
-        ? `c:${store.selectedCardIds.join(',')}`
+      : store.selectedElementIds.length > 0
+        ? `c:${store.selectedElementIds.join(',')}`
         : store.selectedConnectionIds.length > 0
           ? `l:${store.selectedConnectionIds.join(',')}`
           : ''
@@ -425,10 +433,13 @@ export function Canvas() {
     let target: { x: number; y: number; width: number; height: number } | null = null
     if (store.selectedGroupId) {
       const group = page.groups.find((g) => g.id === store.selectedGroupId)
-      if (group) target = group.position
-    } else if (store.selectedCardIds.length === 1) {
-      const card = page.cards.find((c) => c.id === store.selectedCardIds[0])
-      if (card) target = card.position
+      if (group) target = rectOf(group)
+    } else if (store.selectedElementIds.length === 1) {
+      const element = page.elements.find((c) => c.id === store.selectedElementIds[0])
+      // The *visual* rect, so centring on a collapsed element frames the title
+      // bar that is actually on screen rather than the height it would occupy
+      // expanded.
+      if (element) target = visualRectOf(element)
     }
     if (!target) return
 
@@ -470,7 +481,7 @@ export function Canvas() {
       }
     }
     centerTimer.current = requestAnimationFrame(step)
-  }, [hasSelection, selectedCardIds, selectedGroupId, applyViewport, commitViewport])
+  }, [hasSelection, selectedElementIds, selectedGroupId, applyViewport, commitViewport])
 
   useEffect(() => {
     return () => {
@@ -627,13 +638,13 @@ export function Canvas() {
     let ids: string[]
 
     if (additive) {
-      store.toggleCardSelection(cardId)
-      ids = useCanvasStore.getState().selectedCardIds
+      store.toggleElementSelection(cardId)
+      ids = useCanvasStore.getState().selectedElementIds
       if (!ids.includes(cardId)) ids = [...ids, cardId]
-    } else if (store.selectedCardIds.includes(cardId)) {
-      ids = store.selectedCardIds
+    } else if (store.selectedElementIds.includes(cardId)) {
+      ids = store.selectedElementIds
     } else {
-      store.selectCards([cardId])
+      store.selectElements([cardId])
       ids = [cardId]
     }
 
@@ -665,18 +676,18 @@ export function Canvas() {
     interactionRef.current = {
       kind: 'connect',
       pointerId: event.pointerId,
-      sourceCardId: groupId,
+      sourceElementId: groupId,
       sourceAnchor: side,
       current: start,
       hoverCardId: null,
       hoverAnchor: null,
     }
     setDraft({
-      sourceCardId: groupId,
+      sourceElementId: groupId,
       sourceAnchor: side,
       from: start,
       to: start,
-      targetCardId: null,
+      targetElementId: null,
       targetAnchor: null,
     })
   }
@@ -694,7 +705,7 @@ export function Canvas() {
       pointerId: event.pointerId,
       groupId,
       startWorld: worldPoint(event),
-      startSize: { width: group.position.width, height: group.position.height },
+      startSize: { width: group.width, height: group.height },
     }
     setDragging(true)
   }
@@ -713,7 +724,7 @@ export function Canvas() {
       pointerId: event.pointerId,
       cardId,
       startWorld: worldPoint(event),
-      startSize: { width: card.position.width, height: card.position.height },
+      startSize: { width: card.width, height: card.height },
     }
     setDragging(true)
   }
@@ -734,18 +745,18 @@ export function Canvas() {
     interactionRef.current = {
       kind: 'connect',
       pointerId: event.pointerId,
-      sourceCardId: cardId,
+      sourceElementId: cardId,
       sourceAnchor: side,
       current: start,
       hoverCardId: null,
       hoverAnchor: null,
     }
     setDraft({
-      sourceCardId: cardId,
+      sourceElementId: cardId,
       sourceAnchor: side,
       from: start,
       to: start,
-      targetCardId: null,
+      targetElementId: null,
       targetAnchor: null,
     })
   }
@@ -805,8 +816,8 @@ export function Canvas() {
         const primaryGroup = groupMap.get(interaction.primaryId)
         const primary = primaryCard ?? primaryGroup
         if (snapToGrid && primary) {
-          dx = snap(primary.position.x + dx, gridSize) - primary.position.x
-          dy = snap(primary.position.y + dy, gridSize) - primary.position.y
+          dx = snap(primary.x + dx, gridSize) - primary.x
+          dy = snap(primary.y + dy, gridSize) - primary.y
         }
         interaction.moved = true
         setPreview({ kind: 'drag', delta: { x: dx, y: dy }, ids: interaction.ids })
@@ -857,16 +868,16 @@ export function Canvas() {
         const element = document.elementFromPoint(event.clientX, event.clientY)
         const host = element?.closest('[data-card-id]') as HTMLElement | null
         const targetId = host?.dataset.cardId ?? null
-        const targetCard = targetId && targetId !== interaction.sourceCardId ? cardMap.get(targetId) : undefined
-        const anchor = targetCard ? nearestAnchor(visualCardRect(targetCard), current) : null
+        const targetCard = targetId && targetId !== interaction.sourceElementId ? cardMap.get(targetId) : undefined
+        const anchor = targetCard ? nearestAnchor(visualRectOf(targetCard), current) : null
         interaction.hoverCardId = targetCard?.id ?? null
         interaction.hoverAnchor = anchor
         setDraft({
-          sourceCardId: interaction.sourceCardId,
+          sourceElementId: interaction.sourceElementId,
           sourceAnchor: interaction.sourceAnchor,
           from: current,
           to: current,
-          targetCardId: targetCard?.id ?? null,
+          targetElementId: targetCard?.id ?? null,
           targetAnchor: anchor,
         })
         break
@@ -894,8 +905,8 @@ export function Canvas() {
             if (card) {
               cardEntries.push({
                 id,
-                x: Math.round(card.position.x + latest.delta.x),
-                y: Math.round(card.position.y + latest.delta.y),
+                x: Math.round(card.x + latest.delta.x),
+                y: Math.round(card.y + latest.delta.y),
               })
               continue
             }
@@ -903,27 +914,29 @@ export function Canvas() {
             if (group) {
               groupEntries.push({
                 id,
-                x: Math.round(group.position.x + latest.delta.x),
-                y: Math.round(group.position.y + latest.delta.y),
+                x: Math.round(group.x + latest.delta.x),
+                y: Math.round(group.y + latest.delta.y),
               })
             }
           }
-          if (cardEntries.length > 0) store.commitCardPositions(cardEntries)
-          if (groupEntries.length > 0) store.commitGroupPositions(groupEntries)
+          if (cardEntries.length > 0) store.moveElements(cardEntries)
+          if (groupEntries.length > 0) store.moveGroups(groupEntries)
         }
         break
       }
       case 'resize': {
         if (latest?.kind === 'resize') {
-          store.resizeCard(latest.cardId, { width: latest.width, height: latest.height })
+          store.resizeElement(latest.cardId, { width: latest.width, height: latest.height })
         }
         break
       }
       case 'group-resize': {
         if (latest?.kind === 'group-resize') {
-          store.updateGroup(latest.groupId, {
-            position: { ...groupMap.get(latest.groupId)!.position, width: latest.width, height: latest.height },
-          })
+          // `resizeGroup`, not `updateGroup` with a new width. The store action
+          // captures where the group's corner *was* and rescales its members by
+          // that factor, so what is inside follows the box. Setting the width on
+          // its own resizes the frame and leaves the contents where they were.
+          store.resizeGroup(latest.groupId, { width: latest.width, height: latest.height })
         }
         break
       }
@@ -939,8 +952,8 @@ export function Canvas() {
           if (rect.width < 4 && rect.height < 4) {
             if (!interaction.additive) store.clearSelection()
           } else {
-            const hits = cards.filter((card) => rectsIntersect(rect, cardRect(card))).map((card) => card.id)
-            store.selectCards(hits, interaction.additive)
+            const hits = cards.filter((card) => rectsIntersect(rect, rectOf(card))).map((card) => card.id)
+            store.selectElements(hits, interaction.additive)
           }
         }
         break
@@ -948,8 +961,8 @@ export function Canvas() {
       case 'connect': {
         if (interaction.hoverCardId) {
           store.addConnection({
-            source: { kind: 'card', id: interaction.sourceCardId },
-            target: { kind: 'card', id: interaction.hoverCardId },
+            source: { kind: 'element', id: interaction.sourceElementId },
+            target: { kind: 'element', id: interaction.hoverCardId },
             sourceAnchor: interaction.sourceAnchor,
             targetAnchor: interaction.hoverAnchor,
           })
@@ -1053,7 +1066,7 @@ export function Canvas() {
     event.stopPropagation()
     const store = useCanvasStore.getState()
     if (!store.canEdit()) return
-    if (!store.selectedCardIds.includes(cardId)) store.selectCards([cardId])
+    if (!store.selectedElementIds.includes(cardId)) store.selectElements([cardId])
     store.setContextMenu({ x: event.clientX, y: event.clientY, cardId, connectionId: null, groupId: null })
   }
 
@@ -1078,21 +1091,16 @@ export function Canvas() {
   const handleDoubleClick = (event: React.MouseEvent<HTMLDivElement>) => {
     if (event.button !== 0) return
     if ((event.target as HTMLElement).closest('[data-card-id]')) return
-    const point = worldPoint(event)
     const store = useCanvasStore.getState()
-    store.addCard({
-      title: 'New card',
+    // A double-click on empty canvas makes a note, centred on the point
+    // clicked. The kind is the first argument because it decides the shape; the
+    // rest is a patch over the defaults for that kind.
+    store.addElement('note', {
+      title: 'New note',
       // An empty body. This used to be seeded with '<p></p>', which is HTML
-      // rather than Markdown: the card showed a stray empty paragraph, and the
-      // renderer escaped the tags into visible text.
-      content: '',
-      position: {
-        x: Math.round(point.x - 140),
-        y: Math.round(point.y - 90),
-        width: 280,
-        height: 220,
-        zIndex: 1,
-      },
+      // rather than Markdown: the element showed a stray empty paragraph, and
+      // the renderer escaped the tags into visible text.
+      body: '',
     })
   }
 
@@ -1194,22 +1202,22 @@ export function Canvas() {
         </div>
 
         <div className="cc-cards">
-          {cards.map((card: Card) => (
-            <CardNode
-              key={card.id}
-              card={card}
-              selected={selectedCardIds.includes(card.id)}
-              dimmed={dimmedCardIds.has(card.id)}
-              spotlight={spotlightId === card.id}
-              dragTarget={draft?.targetCardId === card.id}
-              offset={dragOffsetFor(card.id)}
+          {cards.map((element: Element) => (
+            <ElementNode
+              key={element.id}
+              element={element}
+              selected={selectedElementIds.includes(element.id)}
+              dimmed={dimmedCardIds.has(element.id)}
+              spotlight={spotlightId === element.id}
+              dragTarget={draft?.targetElementId === element.id}
+              offset={dragOffsetFor(element.id)}
               size={
-                preview?.kind === 'resize' && preview.cardId === card.id
+                preview?.kind === 'resize' && preview.cardId === element.id
                   ? { width: preview.width, height: preview.height }
                   : null
               }
-              childTitles={childrenOf.get(card.id) ?? []}
-              onCardPointerDown={handleCardPointerDown}
+              childTitles={childrenOf.get(element.id) ?? []}
+              onElementPointerDown={handleCardPointerDown}
               onResizePointerDown={handleResizePointerDown}
               onHandlePointerDown={handleHandlePointerDown}
               onContextMenu={openCardMenu}

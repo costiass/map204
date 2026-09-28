@@ -4,7 +4,6 @@ import { AuthGuard } from '@/components/AuthGuard'
 import { Canvas } from '@/components/Canvas'
 import { ConnectionTree } from '@/components/ConnectionTree'
 import { ContextMenu } from '@/components/ContextMenu'
-import { DevOverlay } from '@/components/DevOverlay'
 import { ImportExportDialog } from '@/components/ImportExportDialog'
 import { InsertCardDialog } from '@/components/InsertCardDialog'
 import { PresentOverlay } from '@/components/PresentOverlay'
@@ -25,6 +24,7 @@ import { primePageSync, resetPageSync, usePageSync } from '@/hooks/usePageSync'
 import { navigate, migrateLegacyHash, useRoute } from '@/router'
 import { loadDocument, fetchMyRole } from '@/store/supabase-sync'
 import type { DocumentRow } from '@/store/supabase-sync'
+import { DOC_VERSION } from '@/types'
 import { useCanvasStore } from '@/store/useCanvasStore'
 import { useUserSettings } from '@/store/userSettings'
 import type { SupabaseUser } from '@/lib/supabase'
@@ -133,9 +133,12 @@ export default function App() {
         })
 
         store.hydrateDocument({
-          version: 1,
+          version: DOC_VERSION,
           pages: loaded.pages,
           settings: loaded.settings,
+          // The upload total is re-read from the server when a file is opened;
+          // until then this document has no counted uploads of its own.
+          uploadBytes: 0,
         })
       } catch (error) {
         if (cancelled) return
@@ -211,8 +214,6 @@ export default function App() {
         <ContextMenu />
         <ImportExportDialog />
         <StatusBar />
-        {/* TEMPORARY debug overlay. See src/components/DevOverlay.tsx. */}
-        <DevOverlay />
         <InsertCardDialog />
         <Toasts />
       </div>

@@ -16,6 +16,7 @@ import {
   updatePageMeta,
 } from '@/store/supabase-sync'
 import type { Page } from '@/types'
+import { DOC_VERSION } from '@/types'
 import { screenToWorld } from '@/utils/geometry'
 import { applySnapshot, unionContent, type RemoteSnapshot } from '@/utils/merge'
 
@@ -202,9 +203,9 @@ const lastDocumentSettings = new Map<string, string>()
 function pageSignature(page: Page): string {
   return JSON.stringify({
     t: page.title,
-    p: page.position,
+    o: page.ordinal,
     v: page.viewport,
-    c: page.cards,
+    c: page.elements,
     g: page.groups,
     n: page.connections,
   })
@@ -419,9 +420,15 @@ export function usePageSync() {
         void loadDocument(documentId).then((fresh) => {
           if (!fresh || syncedDocumentId !== documentId) return
           useCanvasStore.getState().hydrateDocument({
-            version: 1,
+            // `DOC_VERSION`, not a literal. This was hardcoded to 1 and a stale
+            // version number is the kind of thing that makes a later migration
+            // skip a file it should have read.
+            version: DOC_VERSION,
             pages: fresh.pages,
             settings: fresh.settings,
+            // A freshly loaded document has no uploads of its own counted yet;
+            // the total is re-read from the server when the page opens.
+            uploadBytes: 0,
           })
           primePageSync(documentId, fresh)
         })
@@ -588,11 +595,15 @@ export function usePageSync() {
     setSaveState('unsaved')
 
     // 1. Realtime: everyone else sees the edit now.
+    //
+    // The broadcast payload is a `RemoteSnapshot`, which is in-memory shaped —
+    // `elements`, not the `cards` column name. Only the *database* row uses that
+    // name, and the two are different things on purpose.
     const payload: PageUpdatePayload & { origin: string } = {
       title: page.title,
-      position: page.position,
+      ordinal: page.ordinal,
       viewport: page.viewport,
-      cards: page.cards,
+      elements: page.elements,
       groups: page.groups,
       connections: page.connections,
       sentAt: entry.localEditAt,
@@ -736,10 +747,12 @@ async function writePage(pageId: string): Promise<void> {
 
     if (outcome.status === 'conflict') {
       // Somebody else wrote first: union their state with ours, then write again.
+      // The server side is a `PageRow`, so its contents are under `cards` — the
+      // column name — while ours is `elements`. Two different shapes, one merge.
       const merged = unionContent(
-        { cards: page.cards, groups: page.groups, connections: page.connections },
+        { elements: page.elements, groups: page.groups, connections: page.connections },
         {
-          cards: outcome.server.cards ?? [],
+          elements: outcome.server.cards ?? [],
           groups: outcome.server.groups ?? [],
           connections: outcome.server.connections ?? [],
         },
