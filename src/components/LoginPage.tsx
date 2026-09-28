@@ -36,8 +36,8 @@ export function LoginPage({ onAuth }: LoginPageProps) {
     return (
       <div className="cc-modal-backdrop">
         <div className="cc-panel w-80 p-4">
-          <h2 className="mb-3 text-sm font-bold text-slate-700">Sign in</h2>
-          <p className="text-xs text-slate-500">
+          <h2 className="mb-3 text-sm font-bold text-ink">Sign in</h2>
+          <p className="text-xs text-muted">
             Supabase is not configured. Add <code>VITE_SUPABASE_URL</code> and{' '}
             <code>VITE_SUPABASE_ANON_KEY</code> to enable sign in.
           </p>
@@ -50,8 +50,8 @@ export function LoginPage({ onAuth }: LoginPageProps) {
     <div className="cc-modal-backdrop">
       <div className="cc-panel w-80 p-6 text-center">
         <img src="/favicon.svg" alt="Logo" width="40" height="40" className="mx-auto mb-3" />
-        <h2 className="mb-1 text-lg font-bold text-slate-700">Sign in to ClassCards</h2>
-        <p className="mb-4 text-xs text-slate-500">
+        <h2 className="mb-1 text-lg font-bold text-ink">Sign in to ClassCards</h2>
+        <p className="mb-4 text-xs text-muted">
           Sync your workspace across devices. Collaborate in real time.
         </p>
         <button

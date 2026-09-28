@@ -151,17 +151,17 @@ export function ShareDialog({ document, currentUserId, onClose }: ShareDialogPro
     <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
       <div className="flex-1" />
       <aside
-        className="flex h-full w-[clamp(20rem,28vw,26rem)] flex-col border-l border-line bg-white shadow-lg dark:bg-slate-800"
+        className="flex h-full w-[clamp(20rem,28vw,26rem)] flex-col border-l border-line bg-surface shadow-lg bg-surface"
         onClick={(event) => event.stopPropagation()}
         role="dialog"
         aria-label="Share this workspace"
       >
         <header className="flex items-center justify-between border-b border-line px-4 py-3">
           <div>
-            <h2 className="text-sm font-bold text-slate-700 dark:text-slate-100">
+            <h2 className="text-sm font-bold text-ink-strong">
               Share “{document.title}”
             </h2>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-muted">
               {entries.length === 1 ? 'Only you have access' : `${entries.length} people have access`}
             </p>
           </div>
@@ -172,7 +172,7 @@ export function ShareDialog({ document, currentUserId, onClose }: ShareDialogPro
 
         {isOwner ? (
           <div className="border-b border-line px-4 py-3">
-            <label className="mb-1.5 block text-xs font-semibold text-slate-500">
+            <label className="mb-1.5 block text-xs font-semibold text-muted">
               Invite by email
             </label>
             <div className="flex gap-2">
@@ -211,9 +211,9 @@ export function ShareDialog({ document, currentUserId, onClose }: ShareDialogPro
               </button>
             </div>
             {inviteError ? (
-              <p className="mt-1.5 text-xs text-red-600 dark:text-red-400">{inviteError}</p>
+              <p className="mt-1.5 text-xs text-danger">{inviteError}</p>
             ) : (
-              <p className="mt-1.5 text-xs text-slate-400">
+              <p className="mt-1.5 text-xs text-muted">
                 The person must already have a ClassCards account.
               </p>
             )}
@@ -222,12 +222,12 @@ export function ShareDialog({ document, currentUserId, onClose }: ShareDialogPro
 
         <ul className="cc-scroll flex-1 space-y-0.5 overflow-y-auto px-2 py-2">
           {loading ? (
-            <li className="px-2 py-4 text-sm text-slate-400">Loading…</li>
+            <li className="px-2 py-4 text-sm text-muted">Loading…</li>
           ) : (
             entries.map((entry) => (
               <li
                 key={entry.userId}
-                className="flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50 dark:hover:bg-slate-700"
+                className="flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-surface-alt"
               >
                 {entry.avatarUrl ? (
                   <img
@@ -236,17 +236,17 @@ export function ShareDialog({ document, currentUserId, onClose }: ShareDialogPro
                     className="h-7 w-7 shrink-0 rounded-full object-cover"
                   />
                 ) : (
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand text-xs font-bold text-white">
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand text-xs font-bold text-[var(--cc-on-brand)]">
                     {(entry.name ?? entry.email ?? '?').charAt(0).toUpperCase()}
                   </div>
                 )}
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm text-slate-700 dark:text-slate-200">
+                  <p className="truncate text-sm text-ink">
                     {entry.name ?? entry.email ?? 'Unknown user'}
                     {entry.userId === currentUserId ? ' (you)' : ''}
                   </p>
                   {entry.email ? (
-                    <p className="truncate text-xs text-slate-400">{entry.email}</p>
+                    <p className="truncate text-xs text-muted">{entry.email}</p>
                   ) : null}
                 </div>
 
@@ -270,7 +270,7 @@ export function ShareDialog({ document, currentUserId, onClose }: ShareDialogPro
                     </select>
                     <button
                       type="button"
-                      className="cursor-pointer rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/30"
+                      className="cursor-pointer rounded p-1 text-muted hover:bg-danger-soft hover:text-danger dark:hover:bg-danger-soft"
                       title="Remove access"
                       onClick={() => void remove(entry.userId)}
                     >
@@ -285,7 +285,7 @@ export function ShareDialog({ document, currentUserId, onClose }: ShareDialogPro
           )}
         </ul>
 
-        <footer className="border-t border-line px-4 py-3 text-xs text-slate-400">
+        <footer className="border-t border-line px-4 py-3 text-xs text-muted">
           {isOwner
             ? 'Editors can change everything on every page. Viewers can only look.'
             : 'Only the owner can add or remove people.'}

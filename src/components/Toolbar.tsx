@@ -174,7 +174,7 @@ export function Toolbar({
   }
 
   return (
-    <header className="cc-topbar z-30 flex-none border-b border-line bg-white/90 backdrop-blur dark:bg-[#0d0d0d]/90">
+    <header className="cc-topbar z-30 flex-none border-b border-line bg-surface/90 backdrop-blur">
       {/* ---------------------------------------------------------------- */}
       {/* Row 1 — identity, present on every route                        */}
       {/* ---------------------------------------------------------------- */}
@@ -193,12 +193,12 @@ export function Toolbar({
 
         <button
           type="button"
-          className="flex min-w-0 items-center gap-2 rounded-lg px-1 py-1 hover:bg-slate-100 dark:hover:bg-[#1e1e1e]"
+          className="flex min-w-0 items-center gap-2 rounded-lg px-1 py-1 hover:bg-surface-sunken"
           onClick={() => onOpenWorkspace?.()}
           title="All workspaces"
         >
           <img src="/favicon.svg" alt="" width="22" height="22" className="shrink-0" />
-          <span className="hidden shrink-0 text-sm font-bold tracking-tight text-slate-800 dark:text-slate-100 sm:inline">
+          <span className="hidden shrink-0 text-sm font-bold tracking-tight text-ink-strong text-ink-strong sm:inline">
             ClassCards
           </span>
         </button>
@@ -211,7 +211,7 @@ export function Toolbar({
             defaultValue={documentTitle}
             aria-label="Workspace name"
             placeholder="Untitled workspace"
-            className="min-w-0 flex-1 truncate rounded-md border border-transparent bg-transparent px-1.5 py-1 text-sm font-semibold text-slate-700 outline-none hover:border-line focus:border-brand focus:bg-white dark:text-slate-200 dark:hover:bg-[#1e1e1e] dark:focus:bg-[#1a1a1a]"
+            className="min-w-0 flex-1 truncate rounded-md border border-transparent bg-transparent px-1.5 py-1 text-sm font-semibold text-ink outline-none hover:border-line focus:border-brand focus:bg-surface text-ink"
             onChange={(event) => setDocumentTitle(event.target.value)}
             onBlur={(event) => {
               const clean = event.target.value.trim()
@@ -220,7 +220,7 @@ export function Toolbar({
             }}
           />
         ) : (
-          <h1 className="min-w-0 flex-1 truncate px-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200">
+          <h1 className="min-w-0 flex-1 truncate px-1.5 text-sm font-semibold text-ink">
             All workspaces
           </h1>
         )}
@@ -233,7 +233,7 @@ export function Toolbar({
             {others.slice(0, 3).map((entry) => (
               <span
                 key={entry.userId}
-                className="-ml-1.5 flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border-2 border-white text-[10px] font-bold text-white first:ml-0 dark:border-[#0d0d0d]"
+                className="-ml-1.5 flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border-2 border-surface text-[10px] font-bold text-[var(--cc-on-brand)] first:ml-0"
                 style={{ background: entry.color }}
               >
                 {entry.avatarUrl ? (
@@ -244,7 +244,7 @@ export function Toolbar({
               </span>
             ))}
             {others.length > 3 ? (
-              <span className="-ml-1.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-slate-400 text-[10px] font-bold text-white dark:border-[#0d0d0d]">
+              <span className="-ml-1.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-surface bg-muted text-[10px] font-bold text-[var(--cc-on-brand)]">
                 +{others.length - 3}
               </span>
             ) : null}
@@ -302,7 +302,7 @@ export function Toolbar({
                 }}
               >
                 <IconSearch size={15} /> Search cards
-                <span className="ml-auto text-[11px] text-slate-400">⌘K</span>
+                <span className="ml-auto text-[11px] text-muted">⌘K</span>
               </button>
               <hr />
               <button
@@ -332,7 +332,7 @@ export function Toolbar({
                   }}
                 >
                   <IconSave size={15} /> Save now
-                  <span className="ml-auto text-[11px] text-slate-400">⌘S</span>
+                  <span className="ml-auto text-[11px] text-muted">⌘S</span>
                 </button>
               ) : null}
               <hr />
@@ -353,7 +353,7 @@ export function Toolbar({
           <div ref={userMenuRef} className="relative shrink-0">
             <button
               type="button"
-              className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-full text-xs font-bold text-white"
+              className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-full text-xs font-bold text-[var(--cc-on-brand)]"
               style={{ background: 'var(--color-brand)' }}
               title={user.email}
               onClick={() => setShowUserMenu((v) => !v)}
@@ -370,11 +370,11 @@ export function Toolbar({
             </button>
             {showUserMenu ? (
               <div className="cc-menu absolute right-0 top-10 z-50 w-52">
-                <div className="border-b border-line px-2 py-1.5 dark:border-[#2a2a2a]">
-                  <p className="truncate text-xs font-semibold text-slate-700 dark:text-slate-200">
+                <div className="border-b border-line px-2 py-1.5">
+                  <p className="truncate text-xs font-semibold text-ink">
                     {user.user_metadata?.name ?? user.email}
                   </p>
-                  <p className="truncate text-[11px] text-slate-400">{user.email}</p>
+                  <p className="truncate text-[11px] text-muted">{user.email}</p>
                 </div>
                 <button
                   type="button"
@@ -519,7 +519,7 @@ export function Toolbar({
       {/* Shortcuts sheet, opened from the overflow menu. */}
       {showShortcuts ? (
         <div
-          className="fixed inset-0 z-[70] grid place-items-center bg-slate-900/40 p-4"
+          className="fixed inset-0 z-[70] grid place-items-center bg-surface-sunken/40 p-4"
           onClick={() => setShowShortcuts(false)}
         >
           <div
@@ -529,7 +529,7 @@ export function Toolbar({
             aria-label="Keyboard shortcuts"
           >
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-bold text-slate-700 dark:text-slate-100">
+              <h2 className="text-sm font-bold text-ink-strong">
                 Keyboard shortcuts
               </h2>
               <button type="button" className="cc-btn px-1.5 py-1" onClick={() => setShowShortcuts(false)}>
@@ -540,7 +540,7 @@ export function Toolbar({
               {SHORTCUTS.map(([keys, description]) => (
                 <li key={keys} className="grid grid-cols-[7.5rem_1fr] items-center gap-2">
                   <span className="cc-kbd">{keys}</span>
-                  <span className="text-slate-600 dark:text-slate-300">{description}</span>
+                  <span className="text-ink text-muted">{description}</span>
                 </li>
               ))}
             </ul>

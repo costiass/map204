@@ -168,9 +168,9 @@ export function ConnectionTree() {
         {/* Button styled like card preview in inspector */}
         <button
           type="button"
-          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md border border-line px-2 py-1 text-left text-xs hover:opacity-80 dark:border-slate-700"
+          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md border border-line px-2 py-1 text-left text-xs hover:opacity-80 border-line"
           style={{
-            background: 'color-mix(in srgb, var(--color-slate-400) 8%, white)',
+            background: 'color-mix(in srgb, var(--cc-muted) 8%, var(--cc-surface))',
           }}
           onClick={() => jumpToCard(node)}
         >
@@ -178,15 +178,15 @@ export function ConnectionTree() {
             className="h-2 w-2 shrink-0 rounded-full"
             style={{ background: node.color }}
           />
-          <span className="min-w-0 flex-1 truncate text-slate-900 dark:text-slate-100">
+          <span className="min-w-0 flex-1 truncate text-ink-strong text-ink-strong">
             {node.title}
           </span>
-          <span className="shrink-0 text-[10px] text-slate-400">
+          <span className="shrink-0 text-[10px] text-muted">
             {node.kind === 'card' ? 'card' : 'group'}
           </span>
         </button>
         {/* Direction arrow */}
-        <span className="shrink-0 text-[10px] text-slate-400">
+        <span className="shrink-0 text-[10px] text-muted">
           {node.direction === 'in' ? '←' : '→'}
         </span>
       </div>
@@ -222,12 +222,12 @@ export function ConnectionTree() {
   return (
     <div className="cc-panel absolute bottom-3 left-3 z-40 w-72 overflow-hidden">
       <div className="flex items-center justify-between border-b border-line px-2.5 py-1.5">
-        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+        <span className="text-[11px] font-bold uppercase tracking-wider text-muted">
           Tree
         </span>
         <button
           type="button"
-          className="cursor-pointer rounded p-0.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"
+          className="cursor-pointer rounded p-0.5 text-muted hover:bg-surface-sunken"
           onClick={clearSelection}
           title="Close"
         >
@@ -237,7 +237,7 @@ export function ConnectionTree() {
       <div className="cc-scroll max-h-56 overflow-y-auto px-2 py-1">
         {incoming.length > 0 && (
           <div className="mb-1">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-muted">
               Incoming
             </div>
             {groupNodes(incoming).map(renderItem)}
@@ -245,7 +245,7 @@ export function ConnectionTree() {
         )}
         {outgoing.length > 0 && (
           <div>
-            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-muted">
               Outgoing
             </div>
             {groupNodes(outgoing).map(renderItem)}

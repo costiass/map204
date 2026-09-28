@@ -1,21 +1,64 @@
 @import 'tailwindcss';
 
-@theme {
+/* Colour lives in src/theme.ts. These aliases are how the tokens reach
+   Tailwind, so components can use `bg-surface`, `text-ink`, `border-line` and
+   never name a colour themselves. `inline` keeps the variable reference intact,
+   which is what lets one component tree serve both modes. */
+@theme inline {
+  --color-canvas: var(--cc-canvas);
+  --color-surface: var(--cc-surface);
+  --color-surface-alt: var(--cc-surface-alt);
+  --color-surface-sunken: var(--cc-surface-sunken);
+  --color-ink: var(--cc-ink);
+  --color-ink-strong: var(--cc-ink-strong);
+  --color-muted: var(--cc-muted);
+  --color-line: var(--cc-line);
+  --color-line-strong: var(--cc-line-strong);
+  --color-brand: var(--cc-brand);
+  --color-brand-hover: var(--cc-brand-hover);
+  --color-brand-soft: var(--cc-brand-soft);
+  --color-brand-ink: var(--cc-brand-ink);
+  --color-danger: var(--cc-danger);
+  --color-danger-soft: var(--cc-danger-soft);
+  --color-success: var(--cc-success);
+
   --font-sans:
     'Inter var', 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial,
     sans-serif;
-  --color-canvas: #eef1f6;
-  --color-surface: #ffffff;
-  --color-ink: #0f172a;
-  --color-muted: #64748b;
-  --color-line: #e2e8f0;
-  --color-brand: #6366f1;
 }
 
+/* Fallbacks, so the first paint is themed even before applyAppearance runs.
+   src/theme.ts overwrites every one of these on boot. */
 :root {
+  --cc-canvas: #eef1f6;
+  --cc-surface: #ffffff;
+  --cc-surface-alt: #f8fafc;
+  --cc-surface-sunken: #f1f5f9;
+  --cc-ink: #1e293b;
+  --cc-ink-strong: #0f172a;
+  --cc-muted: #64748b;
+  --cc-line: #e2e8f0;
+  --cc-line-strong: #cbd5e1;
+  --cc-brand: #6366f1;
+  --cc-brand-hover: #4f46e5;
+  --cc-brand-soft: #eef2ff;
+  --cc-brand-ink: #4338ca;
+  --cc-on-brand: #ffffff;
+  --cc-danger: #b91c1c;
+  --cc-danger-soft: #fef2f2;
+  --cc-success: #15803d;
+  --cc-scrim: rgba(15, 23, 42, 0.42);
   --cc-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
   --cc-shadow-md: 0 6px 16px -4px rgba(15, 23, 42, 0.14), 0 2px 6px -2px rgba(15, 23, 42, 0.08);
   --cc-shadow-lg: 0 18px 40px -12px rgba(15, 23, 42, 0.28);
+  --cc-code-bg: #0f172a;
+  --cc-code-ink: #e2e8f0;
+  --cc-radius-card: 12px;
+  --cc-motion: 190ms;
+
+  --cc-grid-dot: color-mix(in srgb, var(--cc-muted) 40%, transparent);
+  --cc-grid-line: color-mix(in srgb, var(--cc-muted) 22%, transparent);
+
   color-scheme: light;
 }
 
@@ -136,8 +179,8 @@
 }
 
 .dark .cc-btn[data-variant='primary']:hover:not(:disabled) {
-  background: #4f46e5;
-  border-color: #4f46e5;
+  background: var(--cc-brand-hover);
+  border-color: var(--cc-brand-hover);
 }
 
 .dark .cc-btn[data-variant='danger'] {
@@ -312,7 +355,7 @@
 }
 
 .dark .cc-grid {
-  color: #334155;
+  color: var(--cc-muted);
 }
 
 .dark input[type='range'] {
@@ -341,15 +384,21 @@ body,
 body {
   margin: 0;
   font-family: var(--font-sans);
-  color: var(--color-ink);
-  background: var(--color-canvas);
+  color: var(--cc-ink);
+  background: var(--cc-canvas);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   overscroll-behavior: none;
 }
 
 ::selection {
-  background: color-mix(in srgb, var(--color-brand) 22%, transparent);
+  background: color-mix(in srgb, var(--cc-brand) 22%, transparent);
+}
+
+/* A visible keyboard focus on every interactive element, in the accent. */
+:focus-visible {
+  outline: 2px solid var(--cc-brand);
+  outline-offset: 2px;
 }
 
 /* ---------------------------------------------------------------- */
@@ -488,14 +537,14 @@ body {
 }
 
 .cc-edge-label[data-selected='true'] {
-  border-color: var(--color-brand);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-brand) 25%, transparent);
+  border-color: var(--cc-brand);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--cc-brand) 25%, transparent);
 }
 
 .cc-marquee {
   position: absolute;
-  border: 1px solid var(--color-brand);
-  background: color-mix(in srgb, var(--color-brand) 12%, transparent);
+  border: 1px solid var(--cc-brand);
+  background: color-mix(in srgb, var(--cc-brand) 12%, transparent);
   border-radius: 4px;
   pointer-events: none;
   z-index: 9998;
@@ -587,10 +636,10 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: var(--cc-border-width, 1px) solid var(--cc-border, #e5e7eb);
-  border-radius: var(--cc-radius, 12px);
-  background: var(--cc-bg, #ffffff);
-  color: var(--cc-fg, #111827);
+  border: var(--cc-border-width, 1px) solid var(--cc-border, var(--cc-line));
+  border-radius: var(--cc-radius, var(--cc-radius-card));
+  background: var(--cc-bg, var(--cc-surface));
+  color: var(--cc-fg, var(--cc-ink));
   box-shadow: var(--cc-shadow-md);
   transform-origin: 0 0;
   contain: layout style;
@@ -615,12 +664,12 @@ body {
 }
 
 .cc-card[data-selected='true'] {
-  outline: 2px solid var(--color-brand);
+  outline: 2px solid var(--cc-brand);
   outline-offset: 1px;
 }
 
 .cc-card[data-drag-target='true'] {
-  outline: 2px dashed var(--color-brand);
+  outline: 2px dashed var(--cc-brand);
   outline-offset: 3px;
 }
 
@@ -916,7 +965,7 @@ body {
 }
 
 .cc-rich a {
-  color: var(--color-brand);
+  color: var(--cc-brand);
   text-decoration: underline;
 }
 
@@ -948,7 +997,7 @@ body {
 }
 
 .cc-rtb button[data-active='true'] {
-  background: var(--color-brand);
+  background: var(--cc-brand);
   color: #ffffff;
 }
 
@@ -959,8 +1008,8 @@ body {
 /* The app chrome. Row 1 (identity) is fixed height; row 2 (canvas tools) scrolls
    sideways rather than wrapping, so the bar never changes height by route. */
 .cc-topbar {
-  background: rgba(255, 255, 255, 0.9);
-  border-bottom: 1px solid var(--color-line);
+  background: color-mix(in srgb, var(--cc-surface) 90%, transparent);
+  border-bottom: 1px solid var(--cc-line);
   backdrop-filter: blur(8px);
 }
 
@@ -973,7 +1022,7 @@ body {
   border-radius: 8px;
   border: 1px solid transparent;
   background: transparent;
-  color: var(--color-ink);
+  color: var(--cc-ink);
   cursor: pointer;
   transition:
     background 120ms ease,
@@ -981,8 +1030,8 @@ body {
 }
 
 .cc-icon:hover:not(:disabled) {
-  background: #f1f5f9;
-  border-color: var(--color-line);
+  background: var(--cc-surface-sunken);
+  border-color: var(--cc-line);
 }
 
 .cc-icon:disabled {
@@ -990,24 +1039,15 @@ body {
   cursor: not-allowed;
 }
 
-.dark .cc-icon {
-  color: #e5e5e5;
-}
-
-.dark .cc-icon:hover:not(:disabled) {
-  background: #262626;
-  border-color: #2a2a2a;
-}
-
-.dark .cc-icon[data-active='true'] {
-  background: #1e1e1e;
-  border-color: #818cf8;
-  color: #a5b4fc;
+.cc-icon[data-active='true'] {
+  background: var(--cc-brand-soft);
+  border-color: var(--cc-brand);
+  color: var(--cc-brand-ink);
 }
 
 .cc-panel {
-  background: #ffffff;
-  border: 1px solid var(--color-line);
+  background: var(--cc-surface);
+  border: 1px solid var(--cc-line);
   border-radius: 14px;
   box-shadow: var(--cc-shadow-md);
 }
@@ -1033,18 +1073,18 @@ body {
 
 .cc-input {
   width: 100%;
-  border: 1px solid var(--color-line);
+  border: 1px solid var(--cc-line);
   border-radius: 8px;
   padding: 0.35rem 0.5rem;
   font-size: 13px;
-  background: #ffffff;
-  color: inherit;
+  background: var(--cc-surface);
+  color: var(--cc-ink);
   outline: none;
 }
 
 .cc-input:focus {
-  border-color: var(--color-brand);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-brand) 18%, transparent);
+  border-color: var(--cc-brand);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cc-brand) 18%, transparent);
 }
 
 .cc-label {
@@ -1053,7 +1093,7 @@ body {
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--color-muted);
+  color: var(--cc-muted);
   margin-bottom: 0.25rem;
 }
 
@@ -1065,9 +1105,9 @@ body {
   height: 2rem;
   padding: 0 0.6rem;
   border-radius: 8px;
-  border: 1px solid var(--color-line);
-  background: #ffffff;
-  color: var(--color-ink);
+  border: 1px solid var(--cc-line);
+  background: var(--cc-surface);
+  color: var(--cc-ink);
   font-size: 12.5px;
   font-weight: 550;
   cursor: pointer;
@@ -1078,8 +1118,8 @@ body {
 }
 
 .cc-btn:hover:not(:disabled) {
-  background: #f8fafc;
-  border-color: #cbd5e1;
+  background: var(--cc-surface-alt);
+  border-color: var(--cc-line-strong);
 }
 
 .cc-btn:disabled {
@@ -1088,9 +1128,9 @@ body {
 }
 
 .cc-btn[data-variant='primary'] {
-  background: var(--color-brand);
-  border-color: var(--color-brand);
-  color: #ffffff;
+  background: var(--cc-brand);
+  border-color: var(--cc-brand);
+  color: var(--cc-on-brand);
 }
 
 .cc-btn[data-variant='primary']:hover:not(:disabled) {
@@ -1099,19 +1139,19 @@ body {
 }
 
 .cc-btn[data-variant='danger'] {
-  color: #b91c1c;
-  border-color: #fecaca;
-  background: #fef2f2;
+  color: var(--cc-danger);
+  border-color: color-mix(in srgb, var(--cc-danger) 35%, transparent);
+  background: var(--cc-danger-soft);
 }
 
 .cc-btn[data-variant='danger']:hover:not(:disabled) {
-  background: #fee2e2;
+  background: color-mix(in srgb, var(--cc-danger) 18%, var(--cc-surface));
 }
 
 .cc-btn[data-active='true'] {
-  background: color-mix(in srgb, var(--color-brand) 12%, #ffffff);
-  border-color: color-mix(in srgb, var(--color-brand) 45%, #ffffff);
-  color: #4338ca;
+  background: var(--cc-brand-soft);
+  border-color: color-mix(in srgb, var(--cc-brand) 45%, transparent);
+  color: var(--cc-brand-ink);
 }
 
 .cc-swatches {
@@ -1134,16 +1174,16 @@ body {
 }
 
 .cc-swatch[data-active='true'] {
-  box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px var(--color-brand);
+  box-shadow: 0 0 0 2px var(--cc-surface), 0 0 0 4px var(--cc-brand);
 }
 
 .cc-seg {
   display: inline-flex;
   padding: 2px;
   gap: 2px;
-  border: 1px solid var(--color-line);
+  border: 1px solid var(--cc-line);
   border-radius: 9px;
-  background: #f8fafc;
+  background: var(--cc-surface-sunken);
 }
 
 .cc-seg button {
@@ -1153,13 +1193,13 @@ body {
   padding: 0.2rem 0.45rem;
   font-size: 11.5px;
   font-weight: 600;
-  color: var(--color-muted);
+  color: var(--cc-muted);
   cursor: pointer;
 }
 
 .cc-seg button[data-active='true'] {
-  background: #ffffff;
-  color: var(--color-ink);
+  background: var(--cc-surface);
+  color: var(--cc-ink);
   box-shadow: var(--cc-shadow-sm);
 }
 
@@ -1169,8 +1209,8 @@ body {
   min-width: 12rem;
   padding: 0.3rem;
   border-radius: 12px;
-  background: #ffffff;
-  border: 1px solid var(--color-line);
+  background: var(--cc-surface);
+  border: 1px solid var(--cc-line);
   box-shadow: var(--cc-shadow-lg);
 }
 
@@ -1192,16 +1232,16 @@ body {
 
 .cc-menu button:hover,
 .cc-menu label:hover {
-  background: #f1f5f9;
+  background: var(--cc-surface-sunken);
 }
 
 .cc-menu button[data-danger='true'] {
-  color: #b91c1c;
+  color: var(--cc-danger);
 }
 
 .cc-menu hr {
   border: 0;
-  border-top: 1px solid var(--color-line);
+  border-top: 1px solid var(--cc-line);
   margin: 0.25rem 0.15rem;
 }
 
@@ -1212,7 +1252,7 @@ body {
   display: grid;
   place-items: center;
   padding: 1rem;
-  background: rgba(15, 23, 42, 0.42);
+  background: var(--cc-scrim);
   backdrop-filter: blur(2px);
 }
 
@@ -1220,16 +1260,16 @@ body {
   display: inline-block;
   min-width: 1.15rem;
   padding: 0 0.25rem;
-  border: 1px solid var(--color-line);
+  border: 1px solid var(--cc-line);
   border-bottom-width: 2px;
   border-radius: 5px;
-  background: #f8fafc;
+  background: var(--cc-surface-alt);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 10.5px;
   font-weight: 600;
   line-height: 1.5;
   text-align: center;
-  color: #475569;
+  color: var(--cc-muted);
 }
 
 .cc-toast {
@@ -1238,18 +1278,18 @@ body {
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
   border-radius: 10px;
-  background: #0f172a;
-  color: #f8fafc;
+  background: var(--cc-code-bg);
+  color: var(--cc-code-ink);
   font-size: 12.5px;
   box-shadow: var(--cc-shadow-lg);
 }
 
 .cc-toast[data-tone='error'] {
-  background: #b91c1c;
+  background: var(--cc-danger);
 }
 
 .cc-toast[data-tone='success'] {
-  background: #15803d;
+  background: var(--cc-success);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1265,20 +1305,20 @@ body {
   background: transparent;
   font-size: 12px;
   font-weight: 600;
-  color: var(--color-muted);
+  color: var(--cc-muted);
   cursor: pointer;
 }
 
 .cc-tab[data-active='true'] {
-  background: #eef2ff;
-  color: #4338ca;
-  box-shadow: inset 0 0 0 1px #c7d2fe;
+  background: var(--cc-brand-soft);
+  color: var(--cc-brand-ink);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cc-brand) 35%, transparent);
 }
 
 .cc-inline-code {
   padding: 0.05rem 0.25rem;
   border-radius: 4px;
-  background: #f1f5f9;
+  background: var(--cc-surface-sunken);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.9em;
 }
@@ -1408,8 +1448,8 @@ body {
   margin: 0 0 0.5em;
   padding: 0.5em 0.6em;
   border-radius: 8px;
-  background: #0f172a;
-  color: #e2e8f0;
+  background: var(--cc-code-bg);
+  color: var(--cc-code-ink);
   overflow-x: auto;
 }
 
@@ -1494,5 +1534,28 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .cc-panel {
     animation: none;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Reduced motion                                                       */
+/* ------------------------------------------------------------------ */
+/* Set by the "Reduce motion" setting, or honoured from the OS. */
+:root[data-motion='reduced'] *,
+:root[data-motion='reduced'] *::before,
+:root[data-motion='reduced'] *::after {
+  animation-duration: 1ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 1ms !important;
+  scroll-behavior: auto !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
   }
 }

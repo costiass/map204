@@ -86,8 +86,8 @@ export function WorkspacePage({ userId, onOpenDocument }: WorkspacePageProps) {
             heading: title and count on the left, primary action on the right. */}
         <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Workspaces</h1>
-            <p className="mt-0.5 text-[13px] text-slate-500 dark:text-slate-400">
+            <h1 className="text-xl font-bold text-ink-strong text-ink-strong">Workspaces</h1>
+            <p className="mt-0.5 text-[13px] text-muted">
               {loading
                 ? 'Loading…'
                 : documents.length === 0
@@ -130,19 +130,19 @@ export function WorkspacePage({ userId, onOpenDocument }: WorkspacePageProps) {
             {[0, 1, 2, 3].map((key) => (
               <div
                 key={key}
-                className="h-[7.5rem] animate-pulse rounded-xl border border-line bg-white/60 dark:bg-[#1a1a1a]/60"
+                className="h-[7.5rem] animate-pulse rounded-xl border border-line bg-surface/60"
               />
             ))}
           </div>
         ) : documents.length === 0 ? (
           <div className="grid place-items-center rounded-2xl border border-dashed border-line py-16 text-center">
-            <div className="mb-3 grid h-12 w-12 place-items-center rounded-2xl bg-white shadow-sm dark:bg-[#1e1e1e]">
+            <div className="mb-3 grid h-12 w-12 place-items-center rounded-2xl bg-surface shadow-sm dark:bg-[#1e1e1e]">
               <IconPlus size={20} className="text-brand" />
             </div>
-            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+            <h2 className="text-sm font-semibold text-ink">
               No workspaces yet
             </h2>
-            <p className="mt-1 max-w-xs text-[13px] text-slate-500">
+            <p className="mt-1 max-w-xs text-[13px] text-muted">
               A workspace holds as many pages of cards and arrows as your course needs. Name one
               above to get started.
             </p>
@@ -177,12 +177,12 @@ export function WorkspacePage({ userId, onOpenDocument }: WorkspacePageProps) {
               ) : (
                 <article
                   key={doc.id}
-                  className="group relative flex flex-col rounded-xl border border-line bg-white p-4 text-left shadow-sm transition hover:border-slate-300 hover:shadow-md dark:bg-[#1a1a1a] dark:hover:border-[#3a3a3a]"
+                  className="group relative flex flex-col rounded-xl border border-line bg-surface p-4 text-left shadow-sm transition hover:border-line-strong hover:shadow-md hover:border-line-strong"
                 >
                   <div className="mb-2 flex items-start justify-between gap-2">
                     <button
                       type="button"
-                      className="grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-lg bg-slate-100 text-slate-500 dark:bg-[#252525] dark:text-slate-400"
+                      className="grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-lg bg-surface-sunken text-muted"
                       aria-label={`Open ${doc.title}`}
                       onClick={() => onOpenDocument(doc.id)}
                     >
@@ -199,7 +199,7 @@ export function WorkspacePage({ userId, onOpenDocument }: WorkspacePageProps) {
                         <>
                           <button
                             type="button"
-                            className="cursor-pointer rounded p-1 text-slate-400 opacity-100 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100 dark:hover:bg-[#252525]"
+                            className="cursor-pointer rounded p-1 text-muted opacity-100 transition hover:bg-surface-sunken hover:text-ink focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100 dark:hover:bg-[#252525]"
                             title="Rename workspace"
                             aria-label={`Rename ${doc.title}`}
                             onClick={() => setRenamingId(doc.id)}
@@ -208,7 +208,7 @@ export function WorkspacePage({ userId, onOpenDocument }: WorkspacePageProps) {
                           </button>
                           <button
                             type="button"
-                            className="cursor-pointer rounded p-1 text-slate-400 opacity-100 transition hover:bg-red-50 hover:text-red-600 focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100 dark:hover:bg-red-900/30"
+                            className="cursor-pointer rounded p-1 text-muted opacity-100 transition hover:bg-danger-soft hover:text-danger focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100 dark:hover:bg-danger-soft"
                             title="Delete workspace"
                             aria-label={`Delete ${doc.title}`}
                             onClick={() => {
@@ -233,11 +233,11 @@ export function WorkspacePage({ userId, onOpenDocument }: WorkspacePageProps) {
                     className="min-w-0 cursor-pointer text-left outline-none"
                     onClick={() => onOpenDocument(doc.id)}
                   >
-                    <span className="block truncate text-sm font-semibold text-slate-700 group-hover:text-brand dark:text-slate-200 dark:group-hover:text-[#a5b4fc]">
+                    <span className="block truncate text-sm font-semibold text-ink group-hover:text-brand text-ink">
                       {doc.title}
                     </span>
                   </button>
-                  <p className="mt-1 text-xs text-slate-400">
+                  <p className="mt-1 text-xs text-muted">
                     Edited {new Date(doc.updated_at).toLocaleDateString()}
                   </p>
                 </article>

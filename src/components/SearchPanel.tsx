@@ -59,12 +59,12 @@ export function SearchPanel() {
     <div className="absolute left-3 top-3 z-40 w-[19rem] max-w-[calc(100%-1.5rem)]">
       <div className="cc-panel overflow-hidden">
         <div className="flex items-center gap-2 border-b border-line px-2.5 py-2">
-          <IconSearch size={15} className="shrink-0 text-slate-400" />
+          <IconSearch size={15} className="shrink-0 text-muted" />
           <input
             ref={inputRef}
             value={query}
             placeholder="Search titles, notes, tags…"
-            className="min-w-0 flex-1 border-0 bg-transparent text-sm outline-none placeholder:text-slate-400"
+            className="min-w-0 flex-1 border-0 bg-transparent text-sm outline-none placeholder:text-muted"
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Escape') {
@@ -77,7 +77,7 @@ export function SearchPanel() {
           />
           <button
             type="button"
-            className="shrink-0 cursor-pointer rounded p-1 text-slate-400 hover:bg-slate-100"
+            className="shrink-0 cursor-pointer rounded p-1 text-muted hover:bg-surface-sunken"
             title="Close search"
             onClick={() => setSearchOpen(false)}
           >
@@ -87,11 +87,11 @@ export function SearchPanel() {
 
         <div className="cc-scroll max-h-[22rem] overflow-y-auto">
           {results.length === 0 ? (
-            <p className="px-3 py-4 text-xs text-slate-500">
+            <p className="px-3 py-4 text-xs text-muted">
               {active ? 'No cards match these filters.' : 'No cards on this page yet.'}
             </p>
           ) : (
-            <ul className="divide-y divide-slate-100">
+            <ul className="divide-y divide-line">
               {results.map((card) => {
                 const { before, match, after } = splitMatch(card.title, query)
                 const snippet = markdownToPlainText(card.content).slice(0, 90)
@@ -99,12 +99,12 @@ export function SearchPanel() {
                   <li key={card.id}>
                     <button
                       type="button"
-                      className="flex w-full cursor-pointer flex-col gap-1 px-3 py-2 text-left hover:bg-slate-50"
+                      className="flex w-full cursor-pointer flex-col gap-1 px-3 py-2 text-left hover:bg-surface-alt"
                       onClick={() => focusCard(card.id)}
                     >
                       <span className="flex items-center gap-2">
                         <span className="h-3 w-3 shrink-0 rounded-sm" style={{ background: card.style.accentColor }} />
-                        <span className="truncate text-[13px] font-semibold text-slate-800">
+                        <span className="truncate text-[13px] font-semibold text-ink-strong">
                           {match ? (
                             <>
                               {before}
@@ -116,7 +116,7 @@ export function SearchPanel() {
                           )}
                         </span>
                       </span>
-                      {snippet ? <span className="line-clamp-1 pl-5 text-[11px] text-slate-500">{snippet}</span> : null}
+                      {snippet ? <span className="line-clamp-1 pl-5 text-[11px] text-muted">{snippet}</span> : null}
                       {card.tags.length > 0 ? (
                         <span className="flex flex-wrap gap-1 pl-5">
                           {card.tags.map((tag) => (
@@ -141,14 +141,14 @@ export function SearchPanel() {
           )}
         </div>
 
-        <div className="flex items-center justify-between border-t border-line px-3 py-1.5 text-[11px] text-slate-500">
+        <div className="flex items-center justify-between border-t border-line px-3 py-1.5 text-[11px] text-muted">
           <span>
             {results.length} of {page?.cards.length ?? 0} cards
           </span>
           {active ? (
             <button
               type="button"
-              className="cursor-pointer font-semibold text-indigo-600 hover:underline"
+              className="cursor-pointer font-semibold text-brand-ink hover:underline"
               onClick={clearFilters}
             >
               Clear filters

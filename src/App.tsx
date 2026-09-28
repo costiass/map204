@@ -50,12 +50,14 @@ export default function App() {
     useUserSettings.setState({ userId: null, loaded: false })
   }, [user])
 
+  // The theme owns the document root (variables, `.dark`, colour-scheme), so
+  // this only forwards the canvas-level preferences.
   useEffect(() => {
     const store = useCanvasStore.getState()
-    store.setDarkMode(settings.theme === 'dark')
     store.setSnapToGrid(settings.defaultSnapToGrid)
     store.setGridPattern(settings.defaultGridPattern)
     store.setGridSize(settings.defaultGridSize)
+    store.setDarkMode(settings.theme === 'dark')
   }, [settings])
 
   // Hash routing: #workspace/<docId> opens a document, anything else is the list.
@@ -141,11 +143,7 @@ export default function App() {
 
   const shell = (children: React.ReactNode) => (
     <AuthGuard onUserChange={setUser}>
-      <div
-        className={`flex h-full w-full flex-col overflow-hidden bg-canvas ${
-          settings.theme === 'dark' ? 'dark' : ''
-        }`}
-      >
+      <div className="flex h-full w-full flex-col overflow-hidden bg-canvas">
         {/* The route — not the store — decides what the chrome shows. */}
         <Toolbar
           user={user}
@@ -208,7 +206,7 @@ export default function App() {
 
         <div className="relative flex min-w-0 flex-1">
           {loadingDoc ? (
-            <div className="absolute inset-0 z-20 flex items-center justify-center bg-canvas/70 text-sm text-slate-400">
+            <div className="absolute inset-0 z-20 flex items-center justify-center bg-canvas/70 text-sm text-muted">
               Opening workspace…
             </div>
           ) : null}

@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { useUserSettings } from '@/store/userSettings'
+import { ACCENTS, getAccent } from '@/theme'
 import type { SupabaseUser } from '@/lib/supabase'
 
 interface UserSettingsPageProps {
@@ -10,28 +11,34 @@ interface UserSettingsPageProps {
 
 interface RowProps {
   label: string
+  hint?: string
   children: ReactNode
 }
 
 /**
- * Every control calls a setter; the store debounces the matching
- * `POST /user_settings` upsert, so nothing here talks to Supabase directly.
+ * Every control calls a setter; the store repaints the document root at once
+ * and debounces the matching `POST /user_settings` upsert, so nothing here
+ * talks to Supabase directly.
  */
 export function UserSettingsPage({ user, onClose }: UserSettingsPageProps) {
   const settings = useUserSettings((s) => s.settings)
   const loaded = useUserSettings((s) => s.loaded)
   const setTheme = useUserSettings((s) => s.setTheme)
+  const setAccent = useUserSettings((s) => s.setAccent)
+  const setCardRadius = useUserSettings((s) => s.setCardRadius)
+  const setReduceMotion = useUserSettings((s) => s.setReduceMotion)
   const setDefaultSnapToGrid = useUserSettings((s) => s.setDefaultSnapToGrid)
   const setDefaultGridPattern = useUserSettings((s) => s.setDefaultGridPattern)
   const setDefaultGridSize = useUserSettings((s) => s.setDefaultGridSize)
 
   const avatar = user.user_metadata?.avatar_url ?? user.user_metadata?.picture
+  const accent = getAccent(settings.accent)
 
   return (
     <div className="fixed inset-0 z-50 flex" onClick={onClose}>
       <div className="flex-1" />
       <aside
-        className="flex h-full w-[clamp(30%,36vw,50%)] flex-col border-l border-line bg-white shadow-lg dark:bg-slate-800"
+        className="cc-scroll flex h-full w-[clamp(20rem,28vw,26rem)] flex-col overflow-y-auto border-l border-line bg-surface"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-label="User settings"
@@ -40,64 +47,104 @@ export function UserSettingsPage({ user, onClose }: UserSettingsPageProps) {
           {avatar ? (
             <img src={avatar} alt="" className="h-8 w-8 rounded-full object-cover" />
           ) : (
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand text-sm font-bold text-white">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand text-sm font-bold text-[var(--cc-on-brand)]">
               {user.email.charAt(0).toUpperCase()}
             </div>
           )}
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-bold text-slate-700 dark:text-slate-200">
-              {user.user_metadata?.name ?? user.email}
-            </p>
-            <p className="truncate text-xs text-slate-400">{user.email}</p>
+            <p className="truncate text-sm font-bold text-ink">{user.user_metadata?.name ?? user.email}</p>
+            <p className="truncate text-xs text-muted">{user.email}</p>
           </div>
-          <button type="button" className="cc-btn px-1.5 py-1" onClick={onClose} aria-label="Close">
-            ✕
+          <button type="button" className="cc-icon" onClick={onClose} aria-label="Close settings">
+            <span aria-hidden>✕</span>
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4">
-          <h2 className="mb-4 text-sm font-bold uppercase tracking-wider text-slate-500">
-            Settings
-          </h2>
-
-          {!loaded ? (
-            <p className="text-sm text-slate-400">Loading your settings…</p>
-          ) : (
-            <div className="space-y-6">
+        {!loaded ? (
+          <p className="p-4 text-sm text-muted">Loading your settings…</p>
+        ) : (
+          <div className="flex-1 space-y-7 p-4">
+            {/* ---------------------------------------------------------- */}
+            {/* Appearance                                                  */}
+            {/* ---------------------------------------------------------- */}
+            <Section title="Appearance">
               <Row label="Theme">
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    className="cc-btn"
-                    data-active={settings.theme === 'light'}
-                    onClick={() => setTheme('light')}
-                  >
+                <div className="cc-seg">
+                  <button type="button" data-active={settings.theme === 'light'} onClick={() => setTheme('light')}>
                     Light
                   </button>
-                  <button
-                    type="button"
-                    className="cc-btn"
-                    data-active={settings.theme === 'dark'}
-                    onClick={() => setTheme('dark')}
-                  >
+                  <button type="button" data-active={settings.theme === 'dark'} onClick={() => setTheme('dark')}>
                     Dark
                   </button>
                 </div>
               </Row>
 
-              <Row label="Default snap to grid">
-                <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+              <Row label="Accent" hint="Buttons, focus rings, links and selection">
+                <div className="flex flex-wrap gap-1.5">
+                  {ACCENTS.map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      className="h-7 w-7 rounded-full transition"
+                      style={{
+                        background: option.base,
+                        boxShadow:
+                          settings.accent === option.id
+                            ? `0 0 0 2px var(--cc-surface), 0 0 0 4px ${option.base}`
+                            : 'none',
+                      }}
+                      title={option.label}
+                      aria-label={option.label}
+                      aria-pressed={settings.accent === option.id}
+                      onClick={() => setAccent(option.id)}
+                    />
+                  ))}
+                </div>
+              </Row>
+
+              <Row label="Card corner radius" hint={`${settings.cardRadius}px`}>
+                <input
+                  type="range"
+                  min={0}
+                  max={24}
+                  step={2}
+                  value={settings.cardRadius}
+                  onChange={(e) => setCardRadius(Number(e.target.value))}
+                  className="w-full accent-[var(--cc-brand)]"
+                  aria-label="Card corner radius"
+                />
+              </Row>
+
+              <Row label="Reduce motion" hint="Turns off panel and toast animation">
+                <label className="flex items-center gap-2 text-sm text-ink">
                   <input
                     type="checkbox"
-                    className="accent-indigo-500"
-                    checked={settings.defaultSnapToGrid}
-                    onChange={(event) => setDefaultSnapToGrid(event.target.checked)}
+                    className="accent-[var(--cc-brand)]"
+                    checked={settings.reduceMotion}
+                    onChange={(e) => setReduceMotion(e.target.checked)}
                   />
-                  New pages start with snap to grid enabled
+                  Animate panels
+                </label>
+              </Row>
+            </Section>
+
+            {/* ---------------------------------------------------------- */}
+            {/* Canvas defaults                                             */}
+            {/* ---------------------------------------------------------- */}
+            <Section title="Canvas defaults">
+              <Row label="Snap to grid">
+                <label className="flex items-center gap-2 text-sm text-ink">
+                  <input
+                    type="checkbox"
+                    className="accent-[var(--cc-brand)]"
+                    checked={settings.defaultSnapToGrid}
+                    onChange={(e) => setDefaultSnapToGrid(e.target.checked)}
+                  />
+                  New pages start snapped
                 </label>
               </Row>
 
-              <Row label="Default grid pattern">
+              <Row label="Grid pattern">
                 <div className="cc-seg">
                   <button
                     type="button"
@@ -123,36 +170,69 @@ export function UserSettingsPage({ user, onClose }: UserSettingsPageProps) {
                 </div>
               </Row>
 
-              <Row label={`Default grid size: ${settings.defaultGridSize}px`}>
+              <Row label="Grid size" hint={`${settings.defaultGridSize}px`}>
                 <input
                   type="range"
                   min={10}
                   max={50}
                   step={2}
                   value={settings.defaultGridSize}
-                  onChange={(event) => setDefaultGridSize(Number(event.target.value))}
-                  className="w-full accent-indigo-500"
+                  onChange={(e) => setDefaultGridSize(Number(e.target.value))}
+                  className="w-full accent-[var(--cc-brand)]"
+                  aria-label="Grid size"
                 />
               </Row>
-            </div>
-          )}
-        </div>
+            </Section>
 
-        <p className="border-t border-line px-4 py-3 text-xs text-slate-400">
-          Changes are saved to your account as you make them.
+            {/* ---------------------------------------------------------- */}
+            {/* Preview                                                     */}
+            {/* ---------------------------------------------------------- */}
+            <Section title="Preview">
+              <div
+                className="rounded-xl border border-line p-3"
+                style={{ borderRadius: settings.cardRadius }}
+              >
+                <div
+                  className="mb-2 px-2 py-1 text-xs font-bold"
+                  style={{
+                    borderRadius: Math.max(2, settings.cardRadius - 6),
+                    background: `color-mix(in srgb, ${accent.base} 14%, var(--cc-surface))`,
+                  }}
+                >
+                  {settings.theme === 'dark' ? 'Dark' : 'Light'} · {accent.label}
+                </div>
+                <p className="text-[13px] text-muted">
+                  Cards and links use the colours you pick for them. Everything else follows the
+                  theme.
+                </p>
+              </div>
+            </Section>
+          </div>
+        )}
+
+        <p className="border-t border-line px-4 py-3 text-xs text-muted">
+          Changes apply immediately and are saved to your account.
         </p>
       </aside>
     </div>
   )
 }
 
-function Row({ label, children }: RowProps) {
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section>
+      <h2 className="cc-label">{title}</h2>
+      <div className="space-y-4">{children}</div>
+    </section>
+  )
+}
+
+function Row({ label, hint, children }: RowProps) {
   return (
     <div>
-      <div className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-200">
-        {label}
-      </div>
+      <div className="mb-1.5 block text-sm font-semibold text-ink">{label}</div>
       {children}
+      {hint ? <p className="mt-1 text-xs text-muted">{hint}</p> : null}
     </div>
   )
 }

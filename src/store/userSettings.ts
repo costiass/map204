@@ -1,14 +1,26 @@
 import { create } from 'zustand'
+
 import { supabase } from '@/lib/supabase'
 import type { SupabaseUser } from '@/lib/supabase'
+import {
+  DEFAULT_APPEARANCE,
+  applyAppearance,
+  type AccentId,
+  type ThemeMode,
+} from '@/theme'
 
-export type ThemeMode = 'light' | 'dark'
-export type GridPattern = 'none' | 'dots' | 'lines'
+export type { AccentId, ThemeMode }
 
+/** What the account stores. Appearance and the grid defaults live together. */
 export interface UserSettings {
+  // Appearance
   theme: ThemeMode
+  accent: AccentId
+  cardRadius: number
+  reduceMotion: boolean
+  // Canvas defaults
   defaultSnapToGrid: boolean
-  defaultGridPattern: GridPattern
+  defaultGridPattern: 'none' | 'dots' | 'lines'
   defaultGridSize: number
 }
 
@@ -19,8 +31,11 @@ interface UserSettingsStore {
   /** The signed-in user, remembered so a change can be written out on its own. */
   userId: string | null
   setTheme: (theme: ThemeMode) => void
+  setAccent: (accent: AccentId) => void
+  setCardRadius: (radius: number) => void
+  setReduceMotion: (reduce: boolean) => void
   setDefaultSnapToGrid: (enabled: boolean) => void
-  setDefaultGridPattern: (pattern: GridPattern) => void
+  setDefaultGridPattern: (pattern: UserSettings['defaultGridPattern']) => void
   setDefaultGridSize: (size: number) => void
   /** `GET /user_settings` — creates the row on first run. */
   loadSettings: (user: SupabaseUser) => Promise<void>
@@ -29,7 +44,10 @@ interface UserSettingsStore {
 }
 
 const DEFAULT_SETTINGS: UserSettings = {
-  theme: 'light',
+  theme: DEFAULT_APPEARANCE.mode,
+  accent: DEFAULT_APPEARANCE.accent,
+  cardRadius: DEFAULT_APPEARANCE.cardRadius,
+  reduceMotion: DEFAULT_APPEARANCE.reduceMotion,
   defaultSnapToGrid: true,
   defaultGridPattern: 'dots',
   defaultGridSize: 20,
@@ -41,9 +59,23 @@ const SAVE_DEBOUNCE_MS = 400
 export const useUserSettings = create<UserSettingsStore>()((set, get) => {
   let saveTimer: ReturnType<typeof setTimeout> | null = null
 
-  /** Every setter goes through here: change the state, then persist it. */
+  /**
+   * Every setter goes through here: change the state, repaint the document
+   * root immediately so the UI responds without waiting for the network, then
+   * persist it.
+   */
   const update = (patch: Partial<UserSettings>) => {
-    set((state) => ({ settings: { ...state.settings, ...patch } }))
+    set((state) => {
+      const settings = { ...state.settings, ...patch }
+      applyAppearance({
+        mode: settings.theme,
+        accent: settings.accent,
+        cardRadius: settings.cardRadius,
+        reduceMotion: settings.reduceMotion,
+      })
+      return { settings }
+    })
+
     if (saveTimer) clearTimeout(saveTimer)
     saveTimer = setTimeout(() => {
       saveTimer = null
@@ -58,6 +90,9 @@ export const useUserSettings = create<UserSettingsStore>()((set, get) => {
     userId: null,
 
     setTheme: (theme) => update({ theme }),
+    setAccent: (accent) => update({ accent }),
+    setCardRadius: (cardRadius) => update({ cardRadius }),
+    setReduceMotion: (reduceMotion) => update({ reduceMotion }),
     setDefaultSnapToGrid: (defaultSnapToGrid) => update({ defaultSnapToGrid }),
     setDefaultGridPattern: (defaultGridPattern) => update({ defaultGridPattern }),
     setDefaultGridSize: (defaultGridSize) => update({ defaultGridSize }),
@@ -68,7 +103,9 @@ export const useUserSettings = create<UserSettingsStore>()((set, get) => {
 
       const { data, error } = await supabase
         .from('user_settings')
-        .select('theme, default_snap_to_grid, default_grid_pattern, default_grid_size')
+        .select(
+          'theme, accent, card_radius, reduce_motion, default_snap_to_grid, default_grid_pattern, default_grid_size',
+        )
         .eq('user_id', user.id)
         .maybeSingle()
 
@@ -78,24 +115,33 @@ export const useUserSettings = create<UserSettingsStore>()((set, get) => {
         return
       }
 
-      if (data) {
-        set({
-          settings: {
+      const next: UserSettings = data
+        ? {
             theme: (data.theme as ThemeMode) ?? 'light',
+            accent: (data.accent as AccentId) ?? DEFAULT_APPEARANCE.accent,
+            cardRadius: data.card_radius ?? DEFAULT_APPEARANCE.cardRadius,
+            reduceMotion: data.reduce_motion ?? false,
             defaultSnapToGrid: data.default_snap_to_grid ?? true,
-            defaultGridPattern: (data.default_grid_pattern as GridPattern) ?? 'dots',
+            defaultGridPattern:
+              (data.default_grid_pattern as UserSettings['defaultGridPattern']) ?? 'dots',
             defaultGridSize: data.default_grid_size ?? 20,
-          },
-          loading: false,
-          loaded: true,
-        })
-        return
-      }
+          }
+        : DEFAULT_SETTINGS
 
-      // The signup trigger normally creates this row; if it is missing for any
-      // reason (an account that predates the trigger), create it now.
-      set({ loading: false, loaded: true })
-      await get().saveSettings(user)
+      // Repaint before flipping `loaded`, so the panel never renders light.
+      applyAppearance({
+        mode: next.theme,
+        accent: next.accent,
+        cardRadius: next.cardRadius,
+        reduceMotion: next.reduceMotion,
+      })
+      set({ settings: next, loading: false, loaded: true })
+
+      if (!data) {
+        // The signup trigger normally creates this row; if it is missing for any
+        // reason (an account that predates the trigger), create it now.
+        await get().saveSettings(user)
+      }
     },
 
     saveSettings: async (user) => {
@@ -112,6 +158,9 @@ export const useUserSettings = create<UserSettingsStore>()((set, get) => {
           {
             user_id: userId,
             theme: settings.theme,
+            accent: settings.accent,
+            card_radius: settings.cardRadius,
+            reduce_motion: settings.reduceMotion,
             default_snap_to_grid: settings.defaultSnapToGrid,
             default_grid_pattern: settings.defaultGridPattern,
             default_grid_size: settings.defaultGridSize,

@@ -30,9 +30,9 @@ export function PageSidebar({ onClose }: PageSidebarProps) {
   const filtering = isFiltering({ query: '', tags: filterTags, color: filterColor })
 
   return (
-    <aside className="cc-scroll flex h-full w-[15.5rem] shrink-0 flex-col overflow-y-auto border-r border-line bg-white">
+    <aside className="cc-scroll flex h-full w-[15.5rem] shrink-0 flex-col overflow-y-auto border-r border-line bg-surface">
       <div className="flex items-center justify-between px-3 pb-1 pt-3">
-        <h2 className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Pages</h2>
+        <h2 className="text-[11px] font-bold uppercase tracking-wider text-muted">Pages</h2>
         {onClose ? (
           <button type="button" className="cc-btn px-1.5 py-1 lg:hidden" onClick={onClose} aria-label="Close sidebar">
             <IconX size={14} />
@@ -47,7 +47,7 @@ export function PageSidebar({ onClose }: PageSidebarProps) {
             <li key={page.id}>
               <div
                 className={`group flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm ${
-                  active ? 'bg-indigo-50 font-semibold text-indigo-700' : 'text-slate-700 hover:bg-slate-50'
+                  active ? 'bg-brand-soft font-semibold text-brand-ink' : 'text-ink hover:bg-surface-alt'
                 }`}
               >
                 <button
@@ -61,7 +61,7 @@ export function PageSidebar({ onClose }: PageSidebarProps) {
                   title={`${page.title} · ${page.cards.length} cards`}
                 >
                   {page.title || 'Untitled page'}
-                  <span className="ml-1.5 text-[11px] font-normal text-slate-400">{page.cards.length}</span>
+                  <span className="ml-1.5 text-[11px] font-normal text-muted">{page.cards.length}</span>
                 </button>
                 {renamingId === page.id ? (
                   <input
@@ -79,7 +79,7 @@ export function PageSidebar({ onClose }: PageSidebarProps) {
                 ) : (
                   <button
                     type="button"
-                    className="cursor-pointer rounded p-1 text-slate-400 opacity-0 hover:bg-slate-200 hover:text-slate-700 group-hover:opacity-100"
+                    className="cursor-pointer rounded p-1 text-muted opacity-0 hover:bg-surface-sunken hover:text-ink group-hover:opacity-100"
                     title="Delete page"
                     onClick={() => deletePage(page.id)}
                   >
@@ -94,7 +94,7 @@ export function PageSidebar({ onClose }: PageSidebarProps) {
 
       <button
         type="button"
-        className="mx-2 mt-1 flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+        className="mx-2 mt-1 flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-muted hover:bg-surface-alt hover:text-ink-strong"
         onClick={() => addPage()}
       >
         <IconPlus size={14} /> New page
@@ -102,11 +102,11 @@ export function PageSidebar({ onClose }: PageSidebarProps) {
 
       <div className="mt-3 border-t border-line px-3 pt-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Filter</h2>
+          <h2 className="text-[11px] font-bold uppercase tracking-wider text-muted">Filter</h2>
           {filtering ? (
             <button
               type="button"
-              className="cursor-pointer text-[11px] font-semibold text-indigo-600 hover:underline"
+              className="cursor-pointer text-[11px] font-semibold text-brand-ink hover:underline"
               onClick={clearFilters}
             >
               Clear
@@ -115,7 +115,7 @@ export function PageSidebar({ onClose }: PageSidebarProps) {
         </div>
 
         {tags.length === 0 ? (
-          <p className="mt-2 text-[11px] leading-snug text-slate-400">
+          <p className="mt-2 text-[11px] leading-snug text-muted">
             Tags on this page show up here as filters.
           </p>
         ) : (
@@ -147,7 +147,7 @@ export function PageSidebar({ onClose }: PageSidebarProps) {
               columns={6}
               onChange={(color) => setFilterColor(normalizeColor(color) === normalizeColor(filterColor) ? null : color)}
             />
-            <p className="mt-1 text-[10.5px] text-slate-400">Click a colour to filter cards by it.</p>
+            <p className="mt-1 text-[10.5px] text-muted">Click a colour to filter cards by it.</p>
           </div>
         ) : null}
       </div>

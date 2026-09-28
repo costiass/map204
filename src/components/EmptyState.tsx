@@ -8,13 +8,13 @@ export function EmptyState({ onFit }: { onFit: () => void }) {
   return (
     <div className="pointer-events-none absolute inset-0 grid place-items-center">
       <div className="pointer-events-auto max-w-sm text-center">
-        <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-white shadow-md">
+        <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-surface shadow-md">
           <IconPlus size={22} className="text-brand" />
         </div>
-        <h2 className="text-lg font-semibold text-slate-800">
+        <h2 className="text-lg font-semibold text-ink-strong">
           {cards === 0 ? 'This page is empty' : 'Nothing to show'}
         </h2>
-        <p className="mt-1 text-sm text-slate-500">
+        <p className="mt-1 text-sm text-muted">
           Press <span className="cc-kbd">C</span> or double-click the canvas to drop a card.{' '}
           <span className="cc-kbd">G</span> adds a group. Drag a card by its header, and drag from
           a dot on a card edge to connect two things.
