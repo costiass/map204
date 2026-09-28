@@ -104,6 +104,20 @@ export function Toolbar({
   const setSidebarOpen = useCanvasStore((s) => s.setSidebarOpen)
   const viewportSize = useCanvasStore((s) => s.viewportSize)
   const pushToast = useCanvasStore((s) => s.pushToast)
+
+  /*
+   * Whether this canvas can be written to at all, as state so the toolbar re-renders
+   * when the answer changes -- switching from a map you own to one you were shown,
+   * or starting and stopping a presentation.
+   *
+   * Everything below this line that *writes* is behind `editable`: the buttons that
+   * create, undo and redo. Everything that reads or navigates is not -- zoom, the
+   * grid, search, the sidebar, and presenting -- because a viewer who cannot move
+   * the camera or start a presentation is not looking at a map, they are looking at
+   * a picture of one.
+   */
+  const readOnlyReason = useCanvasStore((s) => s.readOnlyReason)
+  const editable = readOnlyReason === null
   const setViewport = useCanvasStore((s) => s.setViewport)
   const flushCommit = useCanvasStore((s) => s.flushCommit)
   const requestFitView = useCanvasStore((s) => s.requestFitView)
@@ -481,36 +495,68 @@ export function Toolbar({
               instead of on the face of the button: a letter in a chip reads as a
               label for the button — "button C" — rather than as a hint about
               what else the keyboard does. */}
-          <button
-            type="button"
-            className="cc-btn shrink-0"
-            data-variant="primary"
-            title="New note (C)"
-            onClick={() => addElement('note')}
-          >
-            <StickyNote size={14} />
-            Card
-          </button>
-          <button
-            type="button"
-            className="cc-btn shrink-0"
-            title="New group (G)"
-            onClick={() => addGroup()}
-          >
-            <Frame size={14} />
-            Group
-          </button>
-          {/* Choosing a kind sits beside the two things you make, not up in the
-              identity row. It is a tool rather than an identity, and Share is
-              the only primary action on this screen. */}
-          <InsertCardMenu />
+          {/*
+            Making things. Absent for a viewer rather than disabled: these four
+            buttons are the toolbar's whole reason for existing, and a toolbar
+            reading "Card, Group, ... disabled" tells a guest they are missing
+            something rather than that this map is not theirs to change.
+
+            `InsertCardMenu` makes its own decision from the same flag, so the three
+            are gated together here rather than independently in three files.
+          */}
+          {editable ? (
+            <>
+              <button
+                type="button"
+                className="cc-btn shrink-0"
+                data-variant="primary"
+                title="New note (C)"
+                onClick={() => addElement('note')}
+              >
+                <StickyNote size={14} />
+                Card
+              </button>
+              <button
+                type="button"
+                className="cc-btn shrink-0"
+                title="New group (G)"
+                onClick={() => addGroup()}
+              >
+                <Frame size={14} />
+                Group
+              </button>
+              {/* Choosing a kind sits beside the two things you make, not up in the
+                  identity row. It is a tool rather than an identity, and Share is
+                  the only primary action on this screen. */}
+              <InsertCardMenu />
+            </>
+          ) : null}
 
           <span className="mx-0.5 h-5 w-px shrink-0 bg-line" />
 
-          <button type="button" className="cc-icon shrink-0" title="Undo (Ctrl+Z)" disabled={!canUndo} onClick={undo}>
+          {/*
+            Undo and redo are writes with extra steps -- they replay an edit -- so a
+            viewer does not get them. `disabled` rather than absent here, because
+            unlike the buttons above these are a pair whose absence would leave a
+            hole, and because a greyed undo is a truthful "there is nothing here for
+            you to undo".
+          */}
+          <button
+            type="button"
+            className="cc-icon shrink-0"
+            title="Undo (Ctrl+Z)"
+            disabled={!editable || !canUndo}
+            onClick={undo}
+          >
             <IconUndo size={16} />
           </button>
-          <button type="button" className="cc-icon shrink-0" title="Redo (Ctrl+Shift+Z)" disabled={!canRedo} onClick={redo}>
+          <button
+            type="button"
+            className="cc-icon shrink-0"
+            title="Redo (Ctrl+Shift+Z)"
+            disabled={!editable || !canRedo}
+            onClick={redo}
+          >
             <IconRedo size={16} />
           </button>
 

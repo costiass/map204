@@ -62,9 +62,19 @@ export function PresentMenu() {
     }
   }, [open])
 
-  // A viewer can be *shown* a presentation by whoever is presenting, but they
-  // cannot write steps into the document they are only allowed to read.
-  if (readOnlyReason === 'viewing') return null
+  /*
+   * A viewer may start a presentation; they may not build one.
+   *
+   * The two were conflated here, and the whole menu was hidden for a viewer, which
+   * meant someone invited to a map could not run the presentation that map was built
+   * for. That is not editing: presenting moves a camera and reads steps somebody else
+   * wrote, and writes nothing.
+   *
+   * So the flag splits the menu rather than removing it. Everything below the first
+   * rule -- adding a step, editing the steps, capturing the camera -- is a write to
+   * the document, and a viewer does not get it. `canEditSteps` is what gates those.
+   */
+  const canEditSteps = readOnlyReason !== 'viewing'
 
   const zoom = page?.viewport.zoom ?? 1
   const cards = page?.elements ?? []
@@ -137,44 +147,63 @@ export function PresentMenu() {
 
           <hr />
 
-          <button
-            type="button"
-            onClick={() => {
-              setOpen(false)
-              setPresentationOpen(true)
-            }}
-          >
-            <Settings2 size={15} className="opacity-70" />
-            Edit the steps…
-          </button>
-
-          <button
-            type="button"
-            disabled={!canAddSelection}
-            onClick={() => {
-              addForSelection()
-            }}
-            title={canAddSelection ? undefined : 'Select a card or a group first'}
-          >
-            <Plus size={15} className="opacity-70" />
-            Add step for selection
-            <span className="ml-auto text-[11px] text-muted">@{captured.toFixed(2)}×</span>
-          </button>
-
-          <button type="button" onClick={() => addFor(null, 'page')}>
-            <Plus size={15} className="opacity-70" />
-            Add step for the whole page
-          </button>
-
-          {steps.length === 0 ? (
+          {canEditSteps ? (
             <button
               type="button"
-              onClick={addForEverything}
-              disabled={cards.length === 0}
+              onClick={() => {
+                setOpen(false)
+                setPresentationOpen(true)
+              }}
             >
-              <Plus size={15} className="opacity-70" />
-              Start from every card
+              <Settings2 size={15} className="opacity-70" />
+              Edit the steps…
             </button>
+          ) : (
+            /*
+              Said plainly rather than hidden. A viewer who opens the Present menu
+              and finds the step-building gone learns nothing; one who is told the
+              steps belong to whoever made the map understands the whole thing at
+              once. It is also the honest description -- the steps are in the
+              document, and the document is not theirs.
+            */
+            <p className="px-3 py-2 text-[11px] leading-snug text-muted">
+              The steps belong to whoever made this map. You can present them, but
+              not change them.
+            </p>
+          )}
+
+          {/*
+            Everything from here down writes steps into the document. A viewer jumps
+            straight to the step *list*, which is readable and lets them present from
+            any step -- so they lose the building and keep the using.
+          */}
+          {canEditSteps ? (
+            <>
+              <button
+                type="button"
+                disabled={!canAddSelection}
+                onClick={() => {
+                  addForSelection()
+                }}
+                title={canAddSelection ? undefined : 'Select a card or a group first'}
+              >
+                <Plus size={15} className="opacity-70" />
+                Add step for selection
+                <span className="ml-auto text-[11px] text-muted">@{captured.toFixed(2)}×</span>
+              </button>
+
+              <button type="button" onClick={() => addFor(null, 'page')}>
+                <Plus size={15} className="opacity-70" />
+                Add step for the whole page
+              </button>
+
+              {steps.length === 0 ? (
+                <button type="button" onClick={addForEverything} disabled={cards.length === 0}>
+                  <Plus size={15} className="opacity-70" />
+                  Start from every card
+                </button>
+              ) : null}
+            </>
           ) : null}
 
           {steps.length > 0 ? (
@@ -202,41 +231,50 @@ export function PresentMenu() {
                   </button>
 
                   {/* Re-capture: frame the card the way you want it, then take the
-                      zoom from wherever the canvas is now. */}
-                  <button
-                    type="button"
-                    title="Take this step's zoom from the current view"
-                    aria-label="Re-capture zoom from the current view"
-                    onClick={() => updateStep(step.id, { zoom: captured })}
-                  >
-                    <ChevronUp size={13} className="opacity-60" />
-                  </button>
-                  <button
-                    type="button"
-                    disabled={index === 0}
-                    title="Move up"
-                    aria-label="Move step up"
-                    onClick={() => moveStep(step.id, -1)}
-                  >
-                    <ChevronUp size={13} className="rotate-180 opacity-60" />
-                  </button>
-                  <button
-                    type="button"
-                    disabled={index === steps.length - 1}
-                    title="Move down"
-                    aria-label="Move step down"
-                    onClick={() => moveStep(step.id, 1)}
-                  >
-                    <ChevronDown size={13} className="opacity-60" />
-                  </button>
-                  <button
-                    type="button"
-                    title="Remove this step"
-                    aria-label="Remove step"
-                    onClick={() => removeStep(step.id)}
-                  >
-                    <Trash2 size={13} className="opacity-60 hover:opacity-100" />
-                  </button>
+                      zoom from wherever the canvas is now. Writing, so a viewer does
+                      not get it. */}
+                  {canEditSteps ? (
+                    <button
+                      type="button"
+                      title="Take this step's zoom from the current view"
+                      aria-label="Re-capture zoom from the current view"
+                      onClick={() => updateStep(step.id, { zoom: captured })}
+                    >
+                      <ChevronUp size={13} className="opacity-60" />
+                    </button>
+                  ) : null}
+                  {canEditSteps ? (
+                    <button
+                      type="button"
+                      disabled={index === 0}
+                      title="Move up"
+                      aria-label="Move step up"
+                      onClick={() => moveStep(step.id, -1)}
+                    >
+                      <ChevronUp size={13} className="rotate-180 opacity-60" />
+                    </button>
+                  ) : null}
+                  {canEditSteps ? (
+                    <button
+                      type="button"
+                      disabled={index === steps.length - 1}
+                      title="Move down"
+                      aria-label="Move step down"
+                      onClick={() => moveStep(step.id, 1)}
+                    >
+                      <ChevronDown size={13} className="opacity-60" />
+                    </button>
+                  ) : null}
+                  {canEditSteps ? (
+                    <button
+                      type="button"
+                      title="Remove this step"
+                      aria-label="Remove step"
+                      onClick={() => removeStep(step.id)}
+                    >
+                      <Trash2 size={13} className="opacity-60 hover:opacity-100" />
+                    </button>
+                  ) : null}
                 </div>
               ))}
             </>

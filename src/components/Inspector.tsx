@@ -53,7 +53,23 @@ export function Inspector() {
   const pageZoom = useCanvasStore((s) => s.doc.pages.find((p) => p.id === s.activePageId)?.viewport.zoom ?? 1)
 
   const open = cardCount > 0 || Boolean(connection) || Boolean(group)
-  if (!open) return null
+
+  /*
+   * A viewer gets no inspector at all.
+   *
+   * Every panel in here is an editing surface -- a title field, a colour picker, a
+   * delete button -- so "hide the controls" would mean auditing each one, and the
+   * next one added would be editable by a guest by default. The panel as a whole is
+   * the thing that is wrong for a viewer.
+   *
+   * Nothing is lost by this: a viewer cannot select an element to begin with (the
+   * canvas does not hand them a selection), and the title of whatever they were
+   * looking at is on the element itself. This is the backstop for the paths that
+   * could produce a selection anyway -- the keyboard, a marquee that outlived a role
+   * change -- rather than the primary lock.
+   */
+  const readOnlyReason = useCanvasStore((s) => s.readOnlyReason)
+  if (!open || readOnlyReason !== null) return null
 
   const heading = card
     ? card.title || 'Untitled'

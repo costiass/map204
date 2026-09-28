@@ -366,7 +366,21 @@ function WorkspaceCard({
 
   return (
     <div
-      className="group relative flex h-full flex-col rounded-xl border border-line bg-surface p-3 text-left shadow-sm transition hover:border-line-strong hover:shadow-md"
+      /*
+       * A pointing hand, because the card is a `role="button"` that opens the map.
+       *
+       * The site's cursors are drawn, not taken from the operating system -- see the
+       * four `--cc-cursor-*` properties in index.css -- and every one of them is
+       * assigned by a rule. A `div` is not a button as far as those rules are
+       * concerned, because the selector is `button, [role='button']` and this is
+       * neither; so the whole card list was on the default arrow while looking
+       * exactly as clickable as the buttons beside it.
+       *
+       * `.cc-cursor-open` rather than a Tailwind `cursor-pointer`, for the same
+       * reason the rest of the app does it: the utility would win over the
+       * stylesheet's own rule and put the system hand back.
+       */
+      className="cc-cursor-open group relative flex h-full flex-col rounded-xl border border-line bg-surface p-3 text-left shadow-sm transition hover:border-line-strong hover:shadow-md"
       style={{ borderTopColor: accent.base, borderTopWidth: 2 }}
       role="button"
       tabIndex={0}
@@ -538,7 +552,7 @@ function WorkspaceRow({
 
   return (
     <div
-      className="group relative flex items-center gap-3 rounded-xl border border-line bg-surface p-3 shadow-sm transition hover:border-line-strong hover:shadow-md"
+      className="cc-cursor-open group relative flex items-center gap-3 rounded-xl border border-line bg-surface p-3 shadow-sm transition hover:border-line-strong hover:shadow-md"
       // The whole row is the button. A keyboard focus lands on this, and Enter
       // and Space both open, because it is a real <button>.
       role="button"

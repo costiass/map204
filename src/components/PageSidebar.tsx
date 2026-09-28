@@ -17,6 +17,16 @@ export function PageSidebar({ onClose }: PageSidebarProps) {
   const addPage = useCanvasStore((s) => s.addPage)
   const deletePage = useCanvasStore((s) => s.deletePage)
   const renamePage = useCanvasStore((s) => s.renamePage)
+
+  /*
+   * Read from the store as state rather than `getState()` inside a handler, so that
+   * switching between a map you own and one you were shown re-renders this panel
+   * with the right controls. A `getState()` guard inside each click would stop the
+   * *write* and still leave a viewer looking at a page list full of buttons that
+   * do nothing.
+   */
+  const readOnlyReason = useCanvasStore((s) => s.readOnlyReason)
+  const editable = readOnlyReason === null
   const filterTags = useCanvasStore((s) => s.filterTags)
   const filterColor = useCanvasStore((s) => s.filterColor)
   const toggleFilterTag = useCanvasStore((s) => s.toggleFilterTag)
@@ -126,24 +136,28 @@ export function PageSidebar({ onClose }: PageSidebarProps) {
                   <span className="flex shrink-0 items-center gap-0.5">
                     {/* Rename was double-click only, which is invisible and
                         unreachable by keyboard. */}
-                    <button
-                      type="button"
-                      className="cursor-pointer rounded p-1 text-muted opacity-100 transition hover:bg-surface-sunken hover:text-ink focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
-                      title="Rename page"
-                      aria-label={`Rename ${page.title || 'page'}`}
-                      onClick={() => setRenamingId(page.id)}
-                    >
-                      <IconPencil size={13} />
-                    </button>
-                    <button
-                      type="button"
-                      className="cursor-pointer rounded p-1 text-muted opacity-100 transition hover:bg-danger-soft hover:text-danger focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
-                      title="Delete page"
-                      aria-label={`Delete ${page.title || 'page'}`}
-                      onClick={() => deletePage(page.id)}
-                    >
-                      <IconTrash size={13} />
-                    </button>
+                    {editable ? (
+                      <button
+                        type="button"
+                        className="cursor-pointer rounded p-1 text-muted opacity-100 transition hover:bg-surface-sunken hover:text-ink focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+                        title="Rename page"
+                        aria-label={`Rename ${page.title || 'page'}`}
+                        onClick={() => setRenamingId(page.id)}
+                      >
+                        <IconPencil size={13} />
+                      </button>
+                    ) : null}
+                    {editable ? (
+                      <button
+                        type="button"
+                        className="cursor-pointer rounded p-1 text-muted opacity-100 transition hover:bg-danger-soft hover:text-danger focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+                        title="Delete page"
+                        aria-label={`Delete ${page.title || 'page'}`}
+                        onClick={() => deletePage(page.id)}
+                      >
+                        <IconTrash size={13} />
+                      </button>
+                    ) : null}
                   </span>
                 )}
               </div>
@@ -152,13 +166,27 @@ export function PageSidebar({ onClose }: PageSidebarProps) {
         })}
       </ul>
 
-      <button
-        type="button"
-        className="mx-2 mt-1 flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-muted hover:bg-surface-alt hover:text-ink-strong"
-        onClick={() => addPage()}
-      >
-        <IconPlus size={14} /> New page
-      </button>
+      {/*
+        New page.
+
+        Not rendered for a viewer, and this is the one the database would refuse
+        anyway -- a viewer cannot write to the pages table, so the button could only
+        ever have produced an error in the console and a page that did not appear.
+        The RLS policy is the real lock; this is the interface agreeing with it
+        instead of arguing with it in front of the person using it.
+
+        Everything below this -- filtering, and switching between pages -- is reading,
+        so it stays.
+      */}
+      {editable ? (
+        <button
+          type="button"
+          className="mx-2 mt-1 flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-muted hover:bg-surface-alt hover:text-ink-strong"
+          onClick={() => addPage()}
+        >
+          <IconPlus size={14} /> New page
+        </button>
+      ) : null}
 
       <div className="mt-3 border-t border-line px-3 pt-3">
         <div className="flex items-center justify-between">

@@ -117,8 +117,15 @@ function ElementNodeImpl({
     })
   }
 
-  /** The four edge handles and the resize grip — the same on every kind. */
-  const handles = (
+  /**
+   * The four edge handles and the resize grip — the same on every kind.
+   *
+   * Rendered only when the canvas can be written to. Not disabled, *absent*: a
+   * resize grip a viewer cannot use is a lie about what the element is, and it sits
+   * right on the corner people click when they are looking rather than editing. The
+   * same goes for the connection anchors.
+   */
+  const handles = editable ? (
     <>
       {ANCHORS.map((side) => (
         <span
@@ -135,7 +142,7 @@ function ElementNodeImpl({
         onPointerDown={(event) => onResizePointerDown(event, element.id)}
       />
     </>
-  )
+  ) : null
 
   /*
    * One shell for every kind.
@@ -166,9 +173,13 @@ function ElementNodeImpl({
       data-spotlight={spotlight ? 'true' : undefined}
       data-collapsed={element.collapsed ? 'true' : undefined}
       data-drag-target={dragTarget ? 'true' : undefined}
+      // Drives the cursor: a read-only element must not look draggable. The
+      // handlers are already gone, so this is about not promising something the
+      // canvas will refuse.
+      data-editable={editable ? 'true' : 'false'}
       data-dragging={dragging ? 'true' : undefined}
       data-shadow={noteStyle.shadow ? 'true' : 'false'}
-      onContextMenu={(event) => onContextMenu(event, element.id)}
+      onContextMenu={editable ? (event) => onContextMenu(event, element.id) : undefined}
     >
       <span className="cc-card__accent" />
 
@@ -186,42 +197,57 @@ function ElementNodeImpl({
         }}
       >
         <span className="cc-card__title">{element.title || 'Untitled'}</span>
-        <button
-          type="button"
-          className="cc-card__btn"
-          title={element.collapsed ? 'Expand element' : 'Collapse element'}
-          aria-label={element.collapsed ? 'Expand element' : 'Collapse element'}
-          aria-expanded={!element.collapsed}
-          data-no-drag=""
-          onPointerDown={stop}
-          onClick={() => toggleElementCollapsed([element.id])}
-        >
-          {/*
-            The chevron points the way the *click* goes, not the way the element is
-            currently folded. Collapsed, it points down to unfold; expanded, it
-            points up to fold. The old version rotated the other way, so a
-            collapsed card showed a down-chevron as though pressing it would
-            collapse it again.
-          */}
-          <IconChevron
-            size={14}
-            style={{
-              transform: element.collapsed ? 'none' : 'rotate(180deg)',
-              transition: 'transform 140ms ease',
-            }}
-          />
-        </button>
-        <button
-          type="button"
-          className="cc-card__btn"
-          title="Element menu"
-          aria-label="Element menu"
-          data-no-drag=""
-          onPointerDown={stop}
-          onClick={openMenu}
-        >
-          <IconMore size={14} />
-        </button>
+        {/*
+          Collapse and menu, for a canvas that can be written to.
+
+          Both are writes -- collapsing changes the element and is saved, and the
+          menu is the front door to rename, duplicate and delete. A viewer must not
+          have either, so they are not rendered rather than disabled: a chevron that
+          cannot collapse anything still says "this collapses".
+
+          A viewer does get the *title bar itself*, because it is what a reader
+          looks at. Only the controls in it go.
+        */}
+        {editable ? (
+          <>
+            <button
+              type="button"
+              className="cc-card__btn"
+              title={element.collapsed ? 'Expand element' : 'Collapse element'}
+              aria-label={element.collapsed ? 'Expand element' : 'Collapse element'}
+              aria-expanded={!element.collapsed}
+              data-no-drag=""
+              onPointerDown={stop}
+              onClick={() => toggleElementCollapsed([element.id])}
+            >
+              {/*
+                The chevron points the way the *click* goes, not the way the element
+                is currently folded. Collapsed, it points down to unfold; expanded,
+                it points up to fold. The old version rotated the other way, so a
+                collapsed card showed a down-chevron as though pressing it would
+                collapse it again.
+              */}
+              <IconChevron
+                size={14}
+                style={{
+                  transform: element.collapsed ? 'none' : 'rotate(180deg)',
+                  transition: 'transform 140ms ease',
+                }}
+              />
+            </button>
+            <button
+              type="button"
+              className="cc-card__btn"
+              title="Element menu"
+              aria-label="Element menu"
+              data-no-drag=""
+              onPointerDown={stop}
+              onClick={openMenu}
+            >
+              <IconMore size={14} />
+            </button>
+          </>
+        ) : null}
       </header>
 
       {!element.collapsed ? (
@@ -237,13 +263,23 @@ function ElementNodeImpl({
         */
         <div
           className="cc-card__scroll cc-scroll"
-          data-no-drag={element.kind === 'flash' ? undefined : ''}
+          // A viewer gets no `data-no-drag` and no handlers at all. Not because the
+          // canvas would refuse the drag -- `handleCardPointerDown` already checks
+          // `canEdit()` -- but because selection is itself a write: it opens the
+          // inspector, and the inspector is an editing surface.
+          //
+          // What is deliberately *not* blocked is scrolling. A long note on a map
+          // somebody was invited to read has to be readable, and a viewer who
+          // cannot scroll a card cannot use the thing they were invited to use.
+          data-no-drag={element.kind === 'flash' || !editable ? undefined : ''}
           onPointerDown={
-            element.kind === 'flash'
+            !editable || element.kind === 'flash'
               ? undefined
               : (event) => onElementPointerDown(event, element.id)
           }
-          onDoubleClick={element.kind === 'flash' ? undefined : () => setInspectorTab('content')}
+          onDoubleClick={
+            !editable || element.kind === 'flash' ? undefined : () => setInspectorTab('content')
+          }
         >
           <ElementBody element={element} childTitles={childTitles} editable={editable} />
         </div>

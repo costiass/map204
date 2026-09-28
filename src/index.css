@@ -811,6 +811,24 @@ body {
 }
 
 /*
+ * A read-only element does not look draggable.
+ *
+ * The handlers are already absent, so this is not about refusing anything -- it is
+ * about not promising it. A cursor that says "pick me up" on a canvas where
+ * pressing does nothing is the kind of small lie that makes an interface feel
+ * broken rather than restricted, and a viewer is a guest: they should be able to
+ * tell at a glance that the map is not theirs to rearrange.
+ *
+ * The body still scrolls, so `cursor: default` rather than `not-allowed` -- nothing
+ * here is forbidden, it is simply not editable.
+ */
+.cc-card[data-editable='false'] .cc-card__header,
+.cc-card[data-editable='false'] .cc-card__title,
+.cc-card[data-editable='false'] .cc-card__scroll {
+  cursor: default;
+}
+
+/*
  * The body of an element is a *button*, not a label.
  *
  * Clicking it selects the element, which opens the inspector -- which is the
@@ -1890,6 +1908,23 @@ body {
  * less to keep in step.
  */
 .cc-cursor-point-override {
+  cursor: var(--cc-cursor-point);
+}
+
+/*
+ * Something that opens on a press but is not a `<button>`.
+ *
+ * The rule further down matches `button, [role='button']`, and it is applied by role
+ * so a new button needs no class. It misses the case here: the workspace cards are
+ * `div`s with `role="button"` that open a map, and they were on the default arrow
+ * while sitting right beside real buttons -- the one place on the screen where a
+ * pointer that does not change is most obviously wrong.
+ *
+ * Named rather than a Tailwind `cursor-pointer` utility because a utility is emitted
+ * in `@layer utilities`, which beats this unlayered stylesheet, and would put the
+ * operating system's hand back.
+ */
+.cc-cursor-open {
   cursor: var(--cc-cursor-point);
 }
 
