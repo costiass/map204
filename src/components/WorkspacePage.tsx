@@ -112,7 +112,12 @@ export function WorkspacePage({ userId, onOpenDocument }: WorkspacePageProps) {
 
   const remove = async (docId: string) => {
     const ok = await deleteDocument(docId)
-    if (!ok) return
+    if (!ok) {
+      // `deleteDocument` already logged the reason. Say something, so a refused
+      // delete is not just a tile that reappears on the next load.
+      pushToast('That workspace could not be deleted.', 'error')
+      return
+    }
     setDocuments((docs) => docs.filter((entry) => entry.document.id !== docId))
   }
 

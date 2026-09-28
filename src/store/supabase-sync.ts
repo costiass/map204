@@ -4,7 +4,6 @@ import { supabase, supabaseAnonKey, supabaseUrl } from '@/lib/supabase'
 import { handleWriteError } from '@/store/writeErrors'
 import type { DocSettings, LineStyle, Routing, ArrowStyle } from '@/types'
 import type { Card, Connection, Group, Page, Position, Viewport } from '@/types'
-import { uid } from '@/utils/id'
 
 /**
  * Supabase data layer — every REST call the app makes against PostgREST.
@@ -353,21 +352,30 @@ export async function deleteDocument(documentId: string): Promise<boolean> {
 /* ------------------------------------------------------------------ */
 
 /**
- * `POST /pages` — a new page in an existing document (client-generated id).
+ * `POST /pages` — a new page in an existing document, content included.
  *
- * The id comes from the app, so a page from an imported file can already exist.
- * That page may well belong to a *different* workspace, and the `pages` policies
- * decide access per document — so an id collision is not something to paper over
- * by overwriting the row. Doing that tried to move a page between workspaces,
- * which RLS correctly refused with
+ * The id comes from the app, so a page can in principle already exist. It used
+ * to be papered over by overwriting the colliding row, which tried to move a
+ * page between workspaces and was refused by RLS:
+ *
  *   42501  new row violates row-level security policy for table "pages"
- * and, worse, would have done it silently where the caller did have rights.
  *
- * So a colliding id is resolved where the conflict can be seen: the import
- * renumbers the page (see `replaceDocumentPages`). This function only inserts,
- * and reports a collision rather than hiding it.
+ * A collision is now impossible by construction — an import re-issues every id
+ * before it arrives here (`reissueIds`), so a page being created was minted
+ * moments ago by this client. The insert is therefore plain, and a collision is
+ * reported rather than silently resolved: it would mean two clients generated
+ * the same id, which is a bug worth seeing.
+ *
+ * The ordinal is written here rather than patched afterwards. Writing `0` and
+ * correcting it in a second request meant every page briefly sat at the front of
+ * the list, and a failure between the two left a permanently misordered page
+ * list that no later write would repair.
  */
-export async function createPage(documentId: string, page: Page): Promise<PageRow | null> {
+export async function createPage(
+  documentId: string,
+  page: Page,
+  ordinal = 0,
+): Promise<PageRow | null> {
   const db = authRequired()
   if (!db) return null
 
@@ -377,7 +385,7 @@ export async function createPage(documentId: string, page: Page): Promise<PageRo
       id: page.id,
       document_id: documentId,
       title: page.title,
-      ordinal: 0,
+      ordinal,
       position: page.position ?? DEFAULT_PAGE_POSITION,
       viewport: page.viewport ?? DEFAULT_PAGE_VIEWPORT,
       cards: page.cards ?? [],
@@ -389,34 +397,6 @@ export async function createPage(documentId: string, page: Page): Promise<PageRo
     .single()
 
   if (!error && data) return data as PageRow
-
-  if (error?.code === '23505') {
-    // The caller's id is taken somewhere this client cannot see. Retrying with
-    // a fresh id is the only correct move; the caller is told which id won.
-    const fresh = uid('page')
-    const { data: inserted, error: retryError } = await db
-      .from('pages')
-      .insert({
-        id: fresh,
-        document_id: documentId,
-        title: page.title,
-        ordinal: 0,
-        position: page.position ?? DEFAULT_PAGE_POSITION,
-        viewport: page.viewport ?? DEFAULT_PAGE_VIEWPORT,
-        cards: page.cards ?? [],
-        groups: page.groups ?? [],
-        connections: page.connections ?? [],
-        version: 0,
-      })
-      .select('*')
-      .single()
-
-    if (retryError) {
-      await handleWriteError(retryError, 'sync:createPage:retry')
-      return null
-    }
-    return inserted as PageRow
-  }
 
   await handleWriteError(error, 'sync:createPage')
   return null
@@ -555,85 +535,52 @@ export interface WrittenPage {
 }
 
 /**
- * Makes the server hold exactly `pages`, in order. Used by "Replace document"
- * in the import dialog: pages that are new are inserted with their content,
- * pages that already exist are rewritten, and the leftovers are deleted.
+ * Makes the server hold exactly `pages`, in order — the whole-document rewrite
+ * behind "Replace document" in the import dialog.
  *
- * Writes happen before deletes so the "a document always has a page" trigger is
- * never in danger.
+ * Every page is inserted, then the workspace's previous pages are deleted. The
+ * previous version branched on whether a page id already existed and either
+ * updated or inserted, but the import re-issues every id before it gets here
+ * (`reissueIds`), so an incoming id never matches an existing one and the
+ * update branch was unreachable. Removing it left one request per page instead
+ * of two, and removed a remap the caller had to reconcile against.
  *
- * Returns the ids the server actually holds, which is not always the ids that
- * were passed in. A page id from the file may already be in use by another
- * workspace; those pages are renumbered on the way in, because a page id
- * identifies one page in one workspace and two files may legitimately share
- * one. Nothing inside a page refers to its page id — connections point at cards
- * and groups — so renumbering is safe.
+ * Inserts happen before deletes deliberately: `trg_prevent_last_page_delete`
+ * refuses to remove a workspace's final page, and a workspace whose only page is
+ * being replaced would otherwise veto its own import.
+ *
+ * Returns null if any write failed, in which case the server may hold a mixture
+ * of old and new pages — the caller re-reads rather than assuming success.
  */
 export async function replaceDocumentPages(
   documentId: string,
   pages: Page[],
-): Promise<{ written: WrittenPage[]; remap: Record<string, string> } | null> {
+): Promise<WrittenPage[] | null> {
   const db = authRequired()
   if (!db) return null
-  if (pages.length === 0) return { written: [], remap: {} }
 
   const existing = await listPages(documentId)
-  const existingById = new Map(existing.map((row) => [row.id, row]))
+
+  // An empty import would delete every page and leave the workspace unusable,
+  // so it is refused here rather than half-applied.
+  if (pages.length === 0) return null
+
   const written: WrittenPage[] = []
-  const remap: Record<string, string> = {}
-
   for (const [ordinal, page] of pages.entries()) {
-    const current = existingById.get(page.id)
-    const body = {
-      title: page.title,
-      ordinal,
-      position: page.position ?? DEFAULT_PAGE_POSITION,
-      viewport: page.viewport ?? DEFAULT_PAGE_VIEWPORT,
-      cards: page.cards ?? [],
-      groups: page.groups ?? [],
-      connections: page.connections ?? [],
-    }
-
-    if (current) {
-      const { data, error } = await db
-        .from('pages')
-        .update({ ...body, version: (current.version ?? 0) + 1 })
-        .eq('id', page.id)
-        .select('version')
-        .maybeSingle()
-      if (error || !data) {
-        await handleWriteError(error, 'sync:replaceDocumentPages')
-        return null
-      }
-      written.push({ id: page.id, title: page.title, ordinal, version: (data as PageRow).version })
-      continue
-    }
-
-    const row = await createPage(documentId, page)
+    const row = await createPage(documentId, page, ordinal)
     if (!row) return null
-
-    // The row may carry a different id to the one we asked for, if that id was
-    // already taken elsewhere. The caller needs the truth, not the request.
-    if (row.id !== page.id) {
-      remap[page.id] = row.id
-      await updatePageMeta(row.id, { ordinal })
-    } else {
-      await updatePageMeta(page.id, { ordinal })
-    }
-
     written.push({ id: row.id, title: page.title, ordinal, version: row.version ?? 0 })
   }
 
-  // Only pages of *this* workspace can be deleted, and only the ones the import
-  // did not keep. A page the import renumbered is not in `wanted`, but it was
-  // never in `existing` either, so nothing here can touch another workspace.
+  // Only rows that belonged to this workspace are touched, so a page of somebody
+  // else's can never be removed by an import here.
   const wanted = new Set(pages.map((page) => page.id))
   for (const row of existing) {
     if (wanted.has(row.id)) continue
     await deletePage(row.id)
   }
 
-  return { written, remap }
+  return written
 }
 
 /* ------------------------------------------------------------------ */

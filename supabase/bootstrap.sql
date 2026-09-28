@@ -41,6 +41,7 @@ drop function if exists public.profiles_needing_resync() cascade;
 drop function if exists public.realtime_document_id() cascade;
 drop function if exists public.realtime_page_id() cascade;
 drop function if exists public.resync_all_profiles() cascade;
+drop function if exists public.shares_document_with(p_a uuid, p_b uuid) cascade;
 drop function if exists public.sync_profile() cascade;
 drop function if exists public.sync_profile_for(p_user_id uuid) cascade;
 drop function if exists public.touch_updated_at() cascade;
@@ -75,6 +76,8 @@ $$;
 -- ---- 20261001090700_app_name.sql ---------------------------------------
 -- ---- 20261001090800_workspace_look.sql ---------------------------------
 -- ---- 20261001090900_tutorial_depth.sql ---------------------------------
+-- ---- 20261001091000_delete_and_cascade.sql -----------------------------
+-- ---- 20261001091100_profile_policy.sql ---------------------------------
 
 -- =============================================================================
 -- 20261001090000_initial_schema.sql
@@ -1868,6 +1871,163 @@ where d.title = 'tutorial'
     select 1 from public.pages p where p.id = 'page_tutorial_maps'
   );
 
+-- =============================================================================
+-- 20261001091000_delete_and_cascade.sql
+-- =============================================================================
+-- 010 · Make a workspace deletable again
+--
+-- ----------------------------------------------------------------
+-- What was broken
+-- ----------------------------------------------------------------
+-- `pages.document_id` is `on delete cascade`, so deleting a workspace deletes
+-- its pages. But `trg_prevent_last_page_delete` fires on that cascade too, and
+-- the workspace's only page vetoes its own removal:
+--
+--   DELETE /documents?id=eq.…            400 Bad Request
+--   P0001  A workspace must keep at least one page. Add another page before
+--          deleting this one.
+--
+-- The rule is right — a workspace you can still open must have a page — but it
+-- is the wrong rule for a workspace on its way out. The trigger could not tell
+-- the two cases apart, so it applied the stricter one to both and made every
+-- workspace undeletable.
+--
+-- ----------------------------------------------------------------
+-- Why not fix it in the client
+-- ----------------------------------------------------------------
+-- The tempting workaround is to delete the pages first, then the workspace. That
+-- would leave the rule in the database, which is where it belongs, but it
+-- spreads one invariant across two writers: anything else deleting a workspace
+-- would hit the same wall. The database should know the difference.
+--
+-- ----------------------------------------------------------------
+-- How the two cases are told apart
+-- ----------------------------------------------------------------
+-- `pg_trigger_depth()`. A row deleted by a cascade runs with a deeper trigger
+-- stack than one deleted by a direct statement, because the foreign key's own
+-- trigger fires first. This is not a guess about depth: a `document_collaborators`
+-- row also cascades, so the stack varies with the shape of the delete, which is
+-- exactly why the check is "deeper than a plain delete" rather than a fixed
+-- number.
+--
+-- `security definer` is also added here, and it matters. Without it the
+-- trigger's own `select … from pages` runs as the calling user and is subject to
+-- the `pages` RLS policies. A collaborator who can read the pages but holds only
+-- `viewer` on the document could see zero rows from inside the trigger, and the
+-- rule would then veto an ordinary page delete — the failure the trigger exists
+-- to prevent, caused by the trigger itself. As a definer function it sees the
+-- same rows the constraint is about.
+--
+-- The error code becomes `check_violation` (23514) rather than the default
+-- `raise_exception` (P0001), so the client can tell "you asked for something
+-- impossible" apart from "the server broke".
+
+create or replace function public.prevent_deleting_last_page()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  -- Removed as part of deleting the workspace that contains it, so that
+  -- workspace is going too and will not be left without a page.
+  if pg_trigger_depth() > 1 then
+    return old;
+  end if;
+
+  if not exists (
+    select 1 from public.pages p
+    where p.document_id = old.document_id
+      and p.id <> old.id
+  ) then
+    raise exception
+      'A workspace must keep at least one page. Add another page before deleting this one.'
+      using errcode = 'check_violation';
+  end if;
+
+  return old;
+end;
+$$;
+
+-- =============================================================================
+-- 20261001091100_profile_policy.sql
+-- =============================================================================
+-- 011 · Give a profile a SECURITY DEFINER helper, so its policy stops reading
+--        another RLS table
+--
+-- ----------------------------------------------------------------
+-- The rule that was broken
+-- ----------------------------------------------------------------
+-- 001 states the rule this whole schema runs on:
+--
+--   **a policy never queries another table that also has RLS.**
+--
+-- ...because the first version did, and Postgres answered every request with
+--   42P17  infinite recursion detected in policy for relation "documents"
+-- which is not a permissions problem, it is a dead application.
+--
+-- Every other cross-table check in the schema honours that, through a
+-- `security definer` helper: `can_view_document`, `can_edit_document`,
+-- `can_view_page`, `can_edit_page`.
+--
+-- The `profiles` read policy did not:
+--
+--   create policy "can read profile" on public.profiles for select
+--   using (
+--     id = auth.uid()
+--     or exists (
+--       select 1 from public.document_collaborators mine
+--       join public.document_collaborators theirs
+--         on theirs.document_id = mine.document_id
+--       where mine.user_id = auth.uid() and theirs.user_id = profiles.id
+--     )
+--   );
+--
+-- `document_collaborators` has RLS. So this policy's subquery is itself filtered
+-- by `can_view_document`, and whether a profile is visible ends up depending on a
+-- second, independent evaluation of the collaborator rules. It happens not to
+-- recurse, because the helpers terminate the chain — but it is the shape that
+-- caused 42P17 the first time, and it is one policy edit away from it again.
+--
+-- ----------------------------------------------------------------
+-- The fix
+-- ----------------------------------------------------------------
+-- The question "do these two people share a workspace?" moves into a
+-- `security definer` function, like every other cross-table question here. As a
+-- definer it reads the tables with the owner's rights, so RLS does not re-enter
+-- and the policy is a plain function call.
+
+create or replace function public.shares_document_with(p_a uuid, p_b uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  -- One self-join is the whole question: a row for each of the two people on a
+  -- workspace they share. The owner counts, because `add_document_owner` gives
+  -- them a row too, and a person compared with themselves is a row joining
+  -- itself — which is why the caller checks `id = auth.uid()` separately.
+  select exists (
+    select 1
+    from public.document_collaborators mine
+    join public.document_collaborators theirs
+      on theirs.document_id = mine.document_id
+    where mine.user_id = p_a and theirs.user_id = p_b
+  );
+$$;
+
+grant execute on function public.shares_document_with(uuid, uuid) to authenticated;
+
+drop policy if exists "can read profile" on public.profiles;
+
+create policy "can read profile"
+  on public.profiles for select
+  using (
+    id = auth.uid()
+    or public.shares_document_with(auth.uid(), profiles.id)
+  );
+
 -- -----------------------------------------------------------------------------
 -- 3. Record these as applied
 -- -----------------------------------------------------------------------------
@@ -1897,7 +2057,9 @@ values
     ('20261001090600', 'profile_repair'),
     ('20261001090700', 'app_name'),
     ('20261001090800', 'workspace_look'),
-    ('20261001090900', 'tutorial_depth')
+    ('20261001090900', 'tutorial_depth'),
+    ('20261001091000', 'delete_and_cascade'),
+    ('20261001091100', 'profile_policy')
 on conflict (version) do nothing;
 
 -- =============================================================================

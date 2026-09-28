@@ -103,39 +103,30 @@ function ImportExportBody({ initialTab }: { initialTab: Tab }) {
     if (mode === 'replace' && documentId) {
       // The server must end up holding exactly these pages, so it is rewritten
       // first and the page-list diff is re-primed before the canvas swaps.
-      const result = await replaceDocumentPages(documentId, incoming.pages)
-      if (!result) {
-        // The reason is in the console — handleWriteError already logged it.
-        pushToast('The import could not be saved — see the console for the reason.', 'error')
+      const written = await replaceDocumentPages(documentId, incoming.pages)
+      if (!written) {
+        pushToast('The import could not be saved — the reason is in the console.', 'error')
         return
       }
 
-      // Ids are re-issued, so a page id is still the one place a collision can
-      // happen: `pages.id` is a primary key across every workspace. If the
-      // server had to renumber one, the local copy must use the id it actually
-      // stored — otherwise the canvas would hold a page that does not exist and
-      // the next write would fail.
-      const localDoc: CanvasDoc =
-        Object.keys(result.remap).length > 0
-          ? {
-              ...incoming,
-              pages: incoming.pages.map((page) => ({
-                ...page,
-                id: result.remap[page.id] ?? page.id,
-              })),
-            }
-          : incoming
-
-      // The page list the server now holds is exactly what was written, so the
-      // diff must not treat it as a set of new pages.
+      // Read the pages back rather than trusting the local copy. The server is
+      // the authority on what exists now, and re-reading means a write that
+      // silently did not land cannot leave the canvas holding a page the
+      // database has never heard of — which is what the next save would then
+      // try, and fail, to create.
       const refreshed = await loadDocument(documentId)
       if (!refreshed) {
         pushToast('The pages were written but could not be read back.', 'error')
         return
       }
+
       primePageSync(documentId, refreshed)
-      replaceDoc(localDoc)
-      pushToast(`Imported ${incoming.pages.length} page(s).`, 'success')
+      replaceDoc({
+        version: 1,
+        pages: refreshed.pages,
+        settings: refreshed.settings,
+      })
+      pushToast(`Imported ${written.length} page(s).`, 'success')
       setDialog(null)
       return
     }
