@@ -14,7 +14,12 @@
 --
 -- This migration makes the profile sync a function that can be called on demand
 -- and re-runs it for every account with an update, so a blank row is repaired
--- rather than skipped. `resync_profiles()` is safe to call whenever.
+-- rather than skipped. To do it by hand later:
+--
+--   select public.profiles_needing_resync();   -- how many are blank
+--   select public.resync_all_profiles();        -- fix them all
+--
+-- Both are safe to run at any time.
 
 create or replace function public.sync_profile_for(p_user_id uuid)
 returns void
@@ -66,8 +71,10 @@ begin
 end;
 $$;
 
--- The one button to press when profiles look wrong.
-create or replace function public.resync_profiles()
+-- How many accounts would change if they were re-derived. A diagnostic, so you
+-- can look before changing anything. `language sql`, because this body really is
+-- a single query.
+create or replace function public.profiles_needing_resync()
 returns integer
 language sql
 security definer
@@ -83,10 +90,18 @@ as $$
      );
 $$;
 
-/** Re-derive every profile from auth.users. Returns how many were re-derived. */
+/**
+ * Re-derive every profile from auth.users. Returns how many it touched.
+ *
+ * PL/pgSQL, not `language sql`: the body is a `declare` / `begin` / `end` block
+ * with an `into` and a `perform`, none of which the SQL-language parser accepts.
+ * Postgres rejects that combination at parse time, before it reads the body, so
+ * a mismatched `language` here is a hard failure with a misleading message —
+ * "syntax error at or near integer" points at the `declare`, not at the cause.
+ */
 create or replace function public.resync_all_profiles()
 returns integer
-language sql
+language plpgsql
 security definer
 set search_path = public
 as $$
@@ -100,6 +115,7 @@ end;
 $$;
 
 grant execute on function public.sync_profile_for(uuid) to service_role;
+grant execute on function public.profiles_needing_resync() to service_role;
 grant execute on function public.resync_all_profiles() to service_role;
 
 -- Repair the rows that are already wrong. An update, not a skip.
