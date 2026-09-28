@@ -13,6 +13,8 @@ import { useCanvasStore } from '@/store/useCanvasStore'
  */
 
 let reported = false
+/** One toast per distinct explanation, so a retry loop cannot spam the screen. */
+const explained = new Set<string>()
 
 export async function handleWriteError(
   error: { code?: string; message?: string } | null,
@@ -31,10 +33,29 @@ export async function handleWriteError(
     return
   }
 
+  // 42501 with "row-level security policy" is Postgres naming the rule that
+  // refused the write, which tells a developer everything and a person using the
+  // app nothing. Every row in this schema is behind RLS, so it is the expected
+  // answer for "you do not have permission to do that" — worth saying in words,
+  // once, rather than leaving the raw string in the console to be decoded.
+  if (error?.code === '42501' && /row-level security/i.test(error.message ?? '')) {
+    const key = `rls:${context}`
+    if (!explained.has(key)) {
+      explained.add(key)
+      useCanvasStore
+        .getState()
+        .pushToast(
+          'You do not have permission to change this workspace. Ask the owner for edit access.',
+          'error',
+        )
+    }
+  }
+
   console.error(`[${context}]`, error?.message ?? error)
 }
 
 /** Lets a later sign-in report the problem again. */
 export function resetAuthErrorReport(): void {
   reported = false
+  explained.clear()
 }

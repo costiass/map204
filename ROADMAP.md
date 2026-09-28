@@ -48,10 +48,26 @@ Work to do, in the order it makes sense. Each item is checked off as it lands.
 
 ## Import
 
-- [x] **Importing a JSON file works.** Re-importing a file this workspace
-      exported reuses its page ids, which collided with rows that already
-      existed; a duplicate page id now overwrites the row instead of failing. The
-      error toast points at the console, where the reason is logged.
+- [x] **Importing a JSON file works.** Importing with no workspace open says so
+      instead of queueing pages for whichever workspace is opened next, which is
+      what produced the misleading `42501`.
+- [x] **An import reproduces the file rather than copying it.** Every id is
+      re-issued — page, card, group and connection — and all six places that
+      reference them are rewritten. The user sees the same document; the result
+      shares no identity with the file, so importing the same file twice gives
+      two independent documents instead of one that silently overwrites the
+      other. Positions, styling, text, tags and ordering are untouched.
+  - [x] `npm run test:reissue` asserts the *shape* survives, not merely that
+        the function runs: every connection still resolves, every group
+        membership and parent link survives, nothing but ids moved, the input is
+        not mutated, and two imports share no ids. The failure mode is silent —
+        `normalizeDoc` drops references to unknown ids rather than throwing — so
+        a check that only looked for exceptions would pass while a user's map
+        quietly came apart.
+  - [x] Verified by deliberately breaking it: deleting the `parentId` remap and
+        dropping group membership each make the test fail. An earlier version of
+        the test missed the group-membership case, which is what prompted the
+        count assertions.
 
 ## Import, again
 

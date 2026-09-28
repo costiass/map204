@@ -12,8 +12,14 @@ import type { Point } from '@/types'
  * client's own viewport — a cursor sits over the same card for everyone, even
  * when they have panned or zoomed differently.
  *
- * The layer sits above the cards and takes no pointer events, so it never
- * interferes with dragging or selecting.
+ * This renders as a sibling of the transformed `.cc-world`, not inside it. The
+ * world element already applies the pan and zoom, so placing screen-space
+ * coordinates inside it would scale them twice; and because `.cc-world` is
+ * sized by its children rather than filling the canvas, an absolutely
+ * positioned overlay inside it has no area to sit in at all. Both faults are
+ * invisible in the code and produce a layer that renders nothing.
+ *
+ * It takes no pointer events, so it never interferes with dragging or selecting.
  */
 export function CursorLayer() {
   const entries = usePresence((s) => s.entries)
@@ -53,6 +59,8 @@ export function CursorLayer() {
     store.setViewport(centerOn(cursor, store.viewportSize, page.viewport.zoom))
   }, [cursor, cursorPageId, activePageId, spacePressed])
 
+  // A cursor is only meaningful on the page its owner is looking at. Somebody
+  // browsing another page still appears in the avatar cluster, just not here.
   const visible = entries.filter(
     (entry) => entry.cursor && entry.pageId === activePageId,
   )
@@ -60,14 +68,21 @@ export function CursorLayer() {
   if (visible.length === 0) return null
 
   return (
-    <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+    <div
+      className="pointer-events-none absolute inset-0 z-[9997] overflow-hidden"
+      aria-hidden="true"
+    >
       {visible.map((entry) => {
         const point = worldToScreen(entry.cursor as Point, viewport)
         return (
           <div
             key={entry.userId}
-            className="absolute left-0 top-0 transition-transform duration-75 ease-out"
-            style={{ transform: `translate3d(${point.x}px, ${point.y}px, 0)` }}
+            // The pointer must keep its size at every zoom, so the scale is
+            // undone here rather than letting the viewport shrink the glyph.
+            className="absolute left-0 top-0 origin-top-left transition-transform duration-75 ease-out"
+            style={{
+              transform: `translate3d(${point.x}px, ${point.y}px, 0) scale(${1 / viewport.zoom})`,
+            }}
           >
             <svg width="18" height="18" viewBox="0 0 18 18" className="drop-shadow-sm">
               <path

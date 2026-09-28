@@ -388,7 +388,25 @@ export function usePageSync() {
         if (!previous) {
           // Added locally: give it a row of its own, content included.
           const row = await createPage(documentId, page)
-          if (row) setKnownPageVersion(page.id, row.version)
+          if (row) {
+            setKnownPageVersion(page.id, row.version)
+          } else {
+            // The insert was refused. Say so in terms of the user, and stop
+            // retrying: leaving the page out of `knownPages` would make every
+            // subsequent pass try the same doomed insert, which is how one
+            // refused write turns into a console full of them.
+            //
+            // A 42501 here means the signed-in account cannot edit *this*
+            // workspace — most often a viewer, who can open a shared workspace
+            // and then cannot add a page to it.
+            useCanvasStore
+              .getState()
+              .pushToast(
+                `Could not add the page “${page.title}” to this workspace. You may have view-only access.`,
+                'error',
+              )
+            return
+          }
           knownPages.set(page.id, { title: page.title, ordinal })
           continue
         }

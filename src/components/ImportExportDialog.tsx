@@ -5,6 +5,7 @@ import { primePageSync } from '@/hooks/usePageSync'
 import { loadDocument, replaceDocumentPages } from '@/store/supabase-sync'
 import { useCanvasStore } from '@/store/useCanvasStore'
 import { downloadDoc, parseDoc, serializeDoc } from '@/utils/serialize'
+import { reissueIds } from '@/utils/reissue'
 import { formatBytes } from '@/utils/image'
 import type { CanvasDoc } from '@/types'
 
@@ -92,30 +93,38 @@ function ImportExportBody({ initialTab }: { initialTab: Tab }) {
     const store = useCanvasStore.getState()
     const documentId = store.documentId
 
+    // An import **reproduces** the file rather than copying it: same cards,
+    // positions, connections, styling and text, but every id re-issued. So the
+    // result shares no identity with the file it came from, and importing the
+    // same file twice gives you two independent documents rather than one that
+    // quietly overwrites the other.
+    const incoming = reissueIds(parsed).doc
+
     if (mode === 'replace' && documentId) {
       // The server must end up holding exactly these pages, so it is rewritten
       // first and the page-list diff is re-primed before the canvas swaps.
-      const result = await replaceDocumentPages(documentId, parsed.pages)
+      const result = await replaceDocumentPages(documentId, incoming.pages)
       if (!result) {
         // The reason is in the console — handleWriteError already logged it.
         pushToast('The import could not be saved — see the console for the reason.', 'error')
         return
       }
 
-      // A page id that was already in use elsewhere is renumbered on the way
-      // in, so the local copy has to use the ids the server actually stored.
-      // Anything still holding the old id would then be a page that does not
-      // exist, and the next write would fail.
+      // Ids are re-issued, so a page id is still the one place a collision can
+      // happen: `pages.id` is a primary key across every workspace. If the
+      // server had to renumber one, the local copy must use the id it actually
+      // stored — otherwise the canvas would hold a page that does not exist and
+      // the next write would fail.
       const localDoc: CanvasDoc =
         Object.keys(result.remap).length > 0
           ? {
-              ...parsed,
-              pages: parsed.pages.map((page) => ({
+              ...incoming,
+              pages: incoming.pages.map((page) => ({
                 ...page,
                 id: result.remap[page.id] ?? page.id,
               })),
             }
-          : parsed
+          : incoming
 
       // The page list the server now holds is exactly what was written, so the
       // diff must not treat it as a set of new pages.
@@ -126,24 +135,38 @@ function ImportExportBody({ initialTab }: { initialTab: Tab }) {
       }
       primePageSync(documentId, refreshed)
       replaceDoc(localDoc)
-      pushToast(`Imported ${parsed.pages.length} page(s).`, 'success')
+      pushToast(`Imported ${incoming.pages.length} page(s).`, 'success')
       setDialog(null)
       return
     }
 
     if (mode === 'replace') {
-      replaceDoc(parsed)
-      pushToast(
-        `Imported ${parsed.pages.length} page(s) — open a workspace to keep them.`,
-        'info',
+      // No workspace is open, so there is nowhere to save. Say so plainly.
+      //
+      // The tempting shortcut is to drop the pages into the local document and
+      // let the page-list diff persist them later. That is what this used to do,
+      // and it is a trap: the diff cannot tell an imported page from one you
+      // typed, so the next workspace you opened would try to insert these pages
+      // *into that workspace*. The insert then fails on
+      //   42501 new row violates row-level security policy for table "pages"
+      // for anyone without edit rights on the workspace they happened to open
+      // next — an error that names the database and says nothing about an
+      // import done several clicks earlier.
+      setError(
+        'Open a workspace first — there is nowhere to save these pages yet.',
       )
-      setDialog(null)
       return
     }
 
-    mergeDoc(parsed)
+    // Merging also needs a workspace, for the same reason.
+    if (!documentId) {
+      setError('Open a workspace first — there is nowhere to save these pages yet.')
+      return
+    }
+
+    mergeDoc(incoming)
     pushToast(
-      `Merged ${parsed.pages.length} page(s) into the document.`,
+      `Merged ${incoming.pages.length} page(s) into the document.`,
       'success',
     )
     setDialog(null)

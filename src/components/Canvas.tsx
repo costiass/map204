@@ -1079,11 +1079,15 @@ export function Canvas() {
             style={{ left: marqueeRect.x, top: marqueeRect.y, width: marqueeRect.width, height: marqueeRect.height }}
           />
         ) : null}
-
-        {/* Other people's pointers, above the cards. Ephemeral: broadcast only,
-            never part of the document or anybody's undo history. */}
-        <CursorLayer />
       </div>
+
+      {/* Other people's pointers. A sibling of `.cc-world`, not a child: that
+          element is already pan- and zoom-transformed, so anything inside it
+          would have its coordinates scaled a second time — and because it is
+          sized by its children, an `inset-0` overlay inside it collapses to
+          zero. Screen-space placement belongs outside the transform. Ephemeral:
+          broadcast only, never part of the document or anybody's undo history. */}
+      <CursorLayer />
 
       {cards.length === 0 ? <EmptyState onFit={fitView} /> : null}
     </div>
