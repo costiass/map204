@@ -275,7 +275,7 @@ function normalizeConnection(raw: unknown): Connection {
  * still a step somebody meant; an unusable number is not, because there is no
  * sensible way to guess which number was meant.
  */
-const STEP_TRANSITIONS: StepTransition[] = ['ease', 'linear', 'instant']
+const STEP_TRANSITIONS: StepTransition[] = ['ease', 'linear', 'drift', 'instant']
 const STEP_TRIGGERS: StepTrigger[] = ['manual', 'timed', 'hold']
 const STEP_FOCUSES: StepFocus[] = ['none', 'dim', 'spotlight']
 

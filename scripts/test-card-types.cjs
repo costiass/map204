@@ -15,6 +15,7 @@ const ROLDOWN_CLI = 'node_modules/rolldown/bin/cli.mjs'
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cardtype-'))
 const bundle = path.join(dir, 'serialize.mjs')
 const geometryBundle = path.join(dir, 'geometry.mjs')
+const curvesBundle = path.join(dir, 'curves.mjs')
 
 const bundleTo = (entry, out) => {
   execFileSync(
@@ -33,6 +34,7 @@ const asFileUrl = (file) => `pathToFileURL(file).href`
 try {
   bundleTo('src/utils/serialize.ts', bundle)
   bundleTo('src/utils/geometry.ts', geometryBundle)
+  bundleTo('src/utils/cameraCurves.ts', curvesBundle)
 } catch (error) {
   console.log(`FAIL  could not bundle: ${error.stderr ?? error.message}`)
   process.exit(1)
@@ -44,9 +46,13 @@ try {
 // arguments so the source stays readable and needs no escaping.
 const script = `
 import { pathToFileURL } from 'node:url'
-const [serializePath, geometryPath] = process.argv.slice(2)
-Promise.all([import(pathToFileURL(serializePath).href), import(pathToFileURL(geometryPath).href)])
-  .then(([m, g]) => {
+const [serializePath, geometryPath, curvesPath] = process.argv.slice(2)
+Promise.all([
+  import(pathToFileURL(serializePath).href),
+  import(pathToFileURL(geometryPath).href),
+  import(pathToFileURL(curvesPath).href),
+])
+  .then(([m, g, c]) => {
     const failures = []
     const fail = (msg) => failures.push(msg)
 
@@ -294,6 +300,61 @@ Promise.all([import(pathToFileURL(serializePath).href), import(pathToFileURL(geo
       fail(\`an endless countdown was allowed: \${tooSlow.autoAdvanceMs}\`)
     }
 
+    // Every curve a step can name must be a real curve, and every one of them
+    // must actually *end* where it aimed. A transition that overshoots on the
+    // final frame leaves the camera somewhere the step did not ask for, and
+    // the presenter has to press a key to fix it — which is the presentation
+    // equivalent of a page that flickers on load.
+    for (const name of ['ease', 'drift', 'linear', 'instant']) {
+      const curve = c.cameraCurve(name)
+      if (Math.abs(curve(0)) > 1e-9) fail(\`\${name} does not start at 0: \${curve(0)}\`)
+      if (Math.abs(curve(1) - 1) > 1e-9) fail(\`\${name} does not end at 1: \${curve(1)}\`)
+      for (let i = 0; i <= 20; i += 1) {
+        const t = i / 20
+        const v = curve(t)
+        if (!Number.isFinite(v)) fail(\`\${name} gave \${v} at t=\${t}\`)
+      }
+    }
+
+    // A curve that rises past 1 and comes back is a deliberate overshoot; one
+    // that does not is not. Only \`drift\` is allowed to overshoot, and it must
+    // overshoot by a *little*: too little is invisible, too much reads as the
+    // camera being wrong about where it was going.
+    const overshootOf = (name) => {
+      const curve = c.cameraCurve(name)
+      let peak = 0
+      for (let i = 0; i <= 200; i += 1) peak = Math.max(peak, curve(i / 200))
+      return peak - 1
+    }
+    for (const name of ['ease', 'linear']) {
+      if (overshootOf(name) > 1e-9) fail(\`\${name} overshoots by \${overshootOf(name)}\`)
+    }
+    const driftOver = overshootOf('drift')
+    if (driftOver <= 0) fail('drift does not overshoot at all, so it is just ease')
+    if (driftOver > 0.15) fail(\`drift overshoots by \${driftOver}, which reads as a mistake\`)
+
+    // A curve must not wobble. The camera passing its destination on the way
+    // *there* — rather than the one deliberate overshoot at the very end — is
+    // what makes a presentation feel like it is fighting itself.
+    //
+    // \`drift\` is the one exception, and only in the last quarter: it rises past
+    // the destination and comes back. So the check is that the only fall
+    // anywhere in any curve is inside that window, and that it happens once.
+    for (const name of ['ease', 'linear', 'drift']) {
+      const curve = c.cameraCurve(name)
+      let falls = 0
+      let fellBeforeTheEnd = false
+      for (let i = 1; i <= 400; i += 1) {
+        const t = i / 400
+        if (curve(t) < curve((i - 1) / 400) - 1e-9) {
+          falls += 1
+          if (name !== 'drift' || t <= 0.75) fellBeforeTheEnd = true
+        }
+      }
+      if (fellBeforeTheEnd) fail(\`\${name} wobbles where it should not\`)
+      if (name === 'drift' && falls === 0) fail('drift never comes back from its overshoot')
+    }
+
     // Every round trip: these four fields have to survive an export, or a
     // presentation somebody built on another machine arrives with every step
     // set to the defaults.
@@ -375,7 +436,7 @@ try {
   // as arguments, so the source needs no escaping.
   const scriptFile = path.join(dir, 'checks.mjs')
   fs.writeFileSync(scriptFile, script)
-  const output = execFileSync(process.execPath, [scriptFile, bundle, geometryBundle], {
+  const output = execFileSync(process.execPath, [scriptFile, bundle, geometryBundle, curvesBundle], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -391,7 +452,7 @@ for (const message of failures) console.log(`FAIL  ${message}`)
 
 if (failures.length === 0) {
   console.log(
-    'card kinds and steps: old documents open unchanged, video/pdf/flash round-trip, hostile input rejected, steps clamped, step zoom never crops its target',
+    'card kinds, steps and camera: old documents open unchanged, video/pdf/flash round-trip, hostile input rejected, steps clamped, step zoom never crops its target, every curve lands where it aimed',
   )
 } else {
   console.log(`\n${failures.length} check(s) failed.`)

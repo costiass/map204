@@ -7,7 +7,7 @@ import { MIN_ZOOM } from '@/types'
 /**
  * Building a presentation, and starting one.
  *
- * A step's zoom is not typed as a number. It is *captured from the camera* â€” you
+ * A step's zoom is not typed as a number. It is *captured from the camera* — you
  * frame a card the way you want it seen, add a step, and the zoom is whatever
  * the canvas was doing. Typing "1.4" tells you nothing about whether the card
  * fits; framing it first does, and it is the same thing the presenter will see.
@@ -158,7 +158,7 @@ export function PresentMenu() {
           >
             <Plus size={15} className="opacity-70" />
             Add step for selection
-            <span className="ml-auto text-[11px] text-muted">@{captured.toFixed(2)}Ã—</span>
+            <span className="ml-auto text-[11px] text-muted">@{captured.toFixed(2)}×</span>
           </button>
 
           <button type="button" onClick={() => addFor(null, 'page')}>
@@ -196,8 +196,8 @@ export function PresentMenu() {
                       {index + 1}. {titleOf(step.targetId, step.targetKind)}
                     </span>
                     <span className="block text-[10.5px] opacity-55">
-                      {step.targetKind === 'page' ? 'whole page' : step.targetKind} Â·{' '}
-                      {step.zoom.toFixed(2)}Ã— Â· {step.durationMs}ms
+                      {step.targetKind === 'page' ? 'whole page' : step.targetKind} ·{' '}
+                      {step.zoom.toFixed(2)}× · {step.durationMs}ms
                     </span>
                   </button>
 

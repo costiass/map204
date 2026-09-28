@@ -40,7 +40,7 @@ export default function App() {
   const presentationOpen = useCanvasStore((s) => s.presentationOpen)
   const setPresentationOpen = useCanvasStore((s) => s.setPresentationOpen)
 
-  // Real paths: `/`, `/w/<docId>`, `/settings`. Anything else is a 404.
+  // Real paths: `/`, `/doc/<docId>`, `/settings`. Anything else is a 404.
   // Runs once, before the first route is read, so a saved `#workspace/…` link
   // lands on its real address instead of the home page.
   useEffect(() => {

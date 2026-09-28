@@ -35,6 +35,7 @@ import {
   zoomAtPoint,
 } from '@/utils/geometry'
 import { isFiltering, matchesFilters } from '@/utils/filters'
+import { cameraCurve } from '@/utils/cameraCurves'
 
 interface DragState {
   pointerId: number
@@ -151,6 +152,12 @@ export function Canvas() {
   const focusTargetId = useCanvasStore((s) => s.focusTargetId)
   const focusMode = useCanvasStore((s) => s.focusMode)
   const presenting = useCanvasStore((s) => s.presenting)
+
+  // A presentation owns the camera. Panning and zooming are both *navigation*,
+  // and during a presentation the step's framing is the navigation — so a drag
+  // or a wheel that moves the view is not "looking around", it is abandoning the
+  // step. Both the background and the cards below check this.
+  const cameraLocked = presenting
   // `spotlight` dims the rest *and* rings the target; `dim` only dims. Ringed
   // only when the step asked for it, because a ring the step did not ask for
   // is a second thing competing for the eye it is meant to direct.
@@ -253,20 +260,14 @@ export function Canvas() {
     }
 
     const started = performance.now()
-    const linear = cameraRequest.transition === 'linear'
+    const curve = cameraCurve(cameraRequest.transition)
     const tick = (now: number) => {
       const t = Math.min(1, (now - started) / duration)
-      // Ease in and out. A linear camera move reads as a mechanical jump between
-      // two stills, which is exactly what a presentation is trying not to be.
-      // It stays available for a step that is chosen as `linear`, where the
-      // timing of the arrival is the point and easing would misplace it.
-      const eased = linear ? t : t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2
+      const eased = curve(t)
 
       viewportRef.current = {
         x: from.x + (to.x - from.x) * eased,
         y: from.y + (to.y - from.y) * eased,
-        // Zoom interpolated on a log scale, so a move from 0.5 to 2 feels
-        // constant. Interpolated directly, the first half of it barely moves.
         zoom: from.zoom * (to.zoom / from.zoom) ** eased,
       }
       applyViewport()
@@ -506,6 +507,8 @@ export function Canvas() {
     cancelViewportAnimation()
 
     if (event.button === 1 || store.spacePressed || event.altKey) {
+      // Same rule as on a card: while presenting, a pan modifier does not pan.
+      if (store.presenting) return
       event.preventDefault()
       beginPan(event)
       return
@@ -527,10 +530,12 @@ export function Canvas() {
     if (event.button !== 0) return
     // Dimmed groups (filtered out) are not interactive.
     if (dimmedCardIds.has(groupId)) return
-    // Panning is still allowed; dragging a group is not.
+    // Panning is still allowed; dragging a group is not. Except while
+    // presenting, when the camera belongs to the step — so the pan modifier does
+    // nothing either, rather than quietly moving the map off the slide.
     if (!useCanvasStore.getState().canEdit()) {
       cancelViewportAnimation()
-      if (useCanvasStore.getState().spacePressed || event.altKey) {
+      if (!cameraLocked && (useCanvasStore.getState().spacePressed || event.altKey)) {
         event.preventDefault()
         beginPan(event)
       }
@@ -538,6 +543,7 @@ export function Canvas() {
     }
     cancelViewportAnimation()
     if (useCanvasStore.getState().spacePressed || event.altKey) {
+      if (cameraLocked) return
       event.preventDefault()
       beginPan(event)
       return
@@ -578,13 +584,14 @@ export function Canvas() {
     if (event.button !== 0) return
     // Dimmed cards (filtered out) are not interactive.
     if (dimmedCardIds.has(cardId)) return
-    // Panning is navigation, not editing, so it stays available while reading or
-    // presenting — being unable to look around a map you may not change is the
-    // one thing that would make the mode useless. Everything below this line
-    // moves or edits something.
+    // Panning is navigation, not editing, so it stays available while *reading* —
+    // being unable to look around a map you may not change is the one thing that
+    // would make view-only useless. Presenting is different: there, the step's
+    // framing is the whole point, so the camera is locked and nothing pans.
+    // Everything below this line moves or edits something.
     if (!useCanvasStore.getState().canEdit()) {
       cancelViewportAnimation()
-      if (useCanvasStore.getState().spacePressed || event.altKey) {
+      if (!cameraLocked && (useCanvasStore.getState().spacePressed || event.altKey)) {
         event.preventDefault()
         beginPan(event)
       }
@@ -592,6 +599,7 @@ export function Canvas() {
     }
     cancelViewportAnimation()
     if (useCanvasStore.getState().spacePressed || event.altKey) {
+      if (cameraLocked) return
       event.preventDefault()
       beginPan(event)
       return
@@ -980,6 +988,12 @@ export function Canvas() {
           return
         }
       }
+
+      // Reading a card is allowed while presenting; moving the map is not. This
+      // check is after the scroller test above on purpose — a step's card is
+      // often taller than the window, and locking that would make the
+      // presentation unreadable.
+      if (useCanvasStore.getState().presenting) return
 
       event.preventDefault()
       cancelViewportAnimation()

@@ -168,6 +168,7 @@ export function PresentationInspector({ onClose }: { onClose: () => void }) {
                 value={step.transition}
                 options={[
                   ['ease', 'Ease'],
+                  ['drift', 'Drift'],
                   ['linear', 'Linear'],
                   ['instant', 'Instant'],
                 ]}
@@ -318,6 +319,7 @@ export function PresentationInspector({ onClose }: { onClose: () => void }) {
 
 const TRANSITION_HINTS: Record<StepTransition, string> = {
   ease: 'In and out. Reads as a deliberate move rather than a jump.',
+  drift: 'Ease, with a small overshoot and a settle. Reads as a hand carrying the view.',
   linear: 'Constant speed. Use it when the timing of the arrival is the point.',
   instant: 'No camera move. For a step about something already on screen.',
 }

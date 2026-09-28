@@ -55,6 +55,9 @@ export function FlashCard({
   const hasBack = card.content.trim().length > 0
   const backHtml = renderMarkdown(card.content)
 
+  // Scrolling the answer is reading it, so it is allowed even while presenting.
+  // A presentation is *read*; a card whose answer is taller than the card and
+  // cannot be scrolled is a card that cannot be read from the back row.
   const canFlip = editable && hasBack
 
   const requestFlip = () => {
@@ -145,7 +148,14 @@ export function FlashCard({
               by side, and a list's items along a line. Centring the block that
               *contains* the answer centres the answer without deciding anything
               about how the answer is laid out. */}
-          <div className="flex h-full w-full items-center justify-center overflow-y-auto px-3 py-4 text-center cc-scroll">
+          <div
+            className="flex h-full w-full items-center justify-center overflow-y-auto px-3 py-4 text-center cc-scroll"
+            // Scrolling this is reading it, so the page must not scroll behind
+            // it. Without this the wheel moves the canvas and the answer stays
+            // exactly where it was.
+            onWheel={(event) => event.stopPropagation()}
+            data-no-drag=""
+          >
             <div className="cc-markdown w-full" dangerouslySetInnerHTML={{ __html: backHtml }} />
           </div>
         </div>

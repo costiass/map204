@@ -145,9 +145,24 @@ Work to do, in the order it makes sense. Each item is checked off as it lands.
       body. Each type is a separate thing that does one job — not one embed field
       with a dropdown bolted on, which is how a single unreadable card type
       happens.
-  - [x] **The toolbar, not the right-click menu.** A context menu is a place you
-        have to already know to go, and the first thing a new card kind can do is
-        *be noticed*. A button in the toolbar is on screen the whole time.
+  - [x] **The toolbar is the place it is *discovered*.** A context menu is a
+        place you have to already know to go, and the first thing a new card kind
+        can do is *be noticed*. A button in the toolbar is on screen the whole
+        time.
+  - [x] **The right-click menu offers the same list.** Removing it when the
+        button arrived was right about discovery and wrong about speed. The two
+        routes are the same work, so they offer the same choices — and a
+        right-click insert lands the card **where you clicked** rather than in the
+        middle of the window, which a new card appearing elsewhere quietly denies.
+  - [x] The menu is positioned against the **viewport**, not its parent. It lives
+        in a row that scrolls sideways, which is what makes an absolutely
+        positioned menu inside it wrong twice over: the scroller clips it, and it
+        then scrolls away with the button.
+  - [x] The icons and the "needs a link first" answer live in one module, typed
+        against `CardType`. Three components each had their own copy, and a kind
+        added to the list without adding it to a map is a runtime `undefined` in a
+        menu — an entry that renders blank and looks like a bug in the app rather
+        than in the code.
   - [x] Choosing a kind is one click, not a dialog. A note and a flash card need
         nothing else and appear at once; the two kinds that point at something
         open the link dialog already set to that kind.
@@ -320,6 +335,123 @@ Work to do, in the order it makes sense. Each item is checked off as it lands.
         and a step can point at a card that is not on the page it is presented
         from. That is a defect as much as a design: a step aimed at a card on
         page two, presented from page one, silently falls back to a wide shot.
+
+## Character usage
+
+- [x] **The keyboard shortcut hints are off the buttons and in the tooltips.** A
+      letter in a chip on the face of a button reads as a label for the button —
+      "button C" — rather than as a hint about what else the keyboard does. Three
+      buttons also had three different single-letter chips and no way to tell what
+      any of them made; each now has its own icon, and the letters are in the
+      `?` panel and the tooltips.
+- [x] **Both "add" buttons were a plus sign**, which made three buttons in a row
+      look like the same button. Note, group and insert each have their own icon.
+- [x] **A check for mojibake, in `npm test`.** A UTF-8 file read without being
+      told it is UTF-8 — PowerShell's `Get-Content -Raw` on Windows, for one — is
+      reinterpreted byte by byte in the local codepage and written back as UTF-8.
+      Every non-ASCII character in the file is corrupted by the same edit that
+      looks like a one-line change: an em dash becomes three characters, a `CO₂`
+      becomes four, and a `⌘` becomes two.
+  - [x] This was not hypothetical. Nine files were affected, five of them by
+        edits made while building the features above, and the worst were in
+        `sample.ts`, where `CO₂` and `30–32 ATP` were unreadable.
+  - [x] Detection is a round trip, not a list of bad words, because the bad words
+        are a list of symptoms: a run of characters from a Windows-1252 reading
+        of UTF-8 decodes cleanly as UTF-8 when re-encoded to Windows-1252, and
+        genuine accented letters do not.
+  - [x] **Node's `latin1` is ISO-8859-1, not Windows-1252.** The first version
+        used it and missed every em dash, because the euro sign in the mangled
+        run encodes to `0xAC` rather than `0x80` and the round trip produced the
+        wrong bytes. The table of the two code pages' difference is in the test,
+        and the search pattern is *generated from that table* — writing the list
+        twice is how the first version lost the tilde in `⌘`.
+  - [x] `npm run fix:encoding` repairs, replacing only the corrupted runs.
+
+## Addresses
+
+- [x] **`/doc/<id>`, not `/w/<id>`.** `w` stands for *workspace*, which is the
+      wrong word for a thing that will not be a workspace, and the second kind of
+      document is coming.
+  - [x] **`/w/` still opens the same document.** A route is not a string that
+        happens to work: it ends up in a bookmark, in a message somebody sends,
+        in a screenshot. A 404 for a link that used to work is how a rename costs
+        somebody access to a document still sitting in the database, perfectly
+        fine. `npm run test:routes` asserts both halves.
+  - [x] The old address is **replaced**, not pushed, and the bar is tidied. A
+        redirect that leaves a history entry means Back walks you to `/w/…`, which
+        redirects again, which walks you back.
+- [x] **Every document says what kind it is**, next to its title and on its tile.
+  - [ ] **Not a column yet**, on purpose. There is one kind and nobody can choose
+        another, so a `kind` column would be a migration to undo the day a second
+        kind exists. What exists is the *place* for it: the badge, the lookup, and
+        the optional `kind` field on `DocumentRow`, so the day the column lands
+        nothing outside `supabase-sync.ts` changes. The list is the harder screen
+        to retrofit — a tile is a component, and a badge rendering nothing for
+        most rows is a badge nobody notices until it is needed.
+
+## Presenting, again
+
+- [x] **The camera curves were the harsh part, not the duration.** The default
+      was a quadratic ease-in-out, whose acceleration never reaches a peak and
+      whose deceleration starts too late — so the first tenth of a move looks like
+      nothing is happening and the last tenth looks like a hard stop. At
+      presentation speed, watched by a room, that is a lurch.
+  - [x] Replaced with cubic in-out, which has a real peak. `npm run
+        test:card-types` asserts every curve starts at 0, ends at exactly 1, and
+        never wobbles — because a camera that overshoots and does not come back
+        leaves the audience looking at the wrong thing until the presenter presses
+        a key.
+  - [x] **`drift`**, a new transition: ease, plus a 6% overshoot and a settle back,
+        which reads as a hand carrying the view rather than a machine parking it.
+        The overshoot is a *fraction of the distance*, so it is equally small on a
+        50px move and a 5000px one, and it is resolved entirely within the last
+        quarter so most of the move is the ordinary ease.
+  - [x] The zoom was already interpolated on a log scale, which is why a move
+        from 0.5 to 2 feels constant. Only the curve shape was wrong.
+
+- [x] **Nothing pans or zooms while presenting.** A step's framing *is* the
+      navigation, so a wheel or a stray drag is not "looking around" — it is
+      abandoning the step.
+  - [x] Blocked with one capture-phase listener above everything, not in the
+        pointer handlers. Blocking it per-handler would leave a dozen paths — the
+        wheel, a trackpad scroll, a pinch, a middle-drag — each of which has to be
+        found and closed separately, and one missed is a map that wanders off
+        while you talk.
+  - [x] **Reading a card is still allowed.** Scrolling inside a card is reading
+        it, and a step's card is often taller than the window. A presentation you
+        cannot read is not a presentation. View-only is untouched: panning there
+        is navigation you need, and the two are different modes for that reason.
+- [x] **The chrome reappears on its own.** `hover` alone meant a presenter who
+      moved the mouse to the button and then stopped had to move it *again* to get
+      it back — and the obvious thing to do with a mouse that does nothing is try
+      the keyboard, which then fires a step change as well, so the presentation
+      skips. It now comes back on any pointer movement and hides again after a
+      couple of seconds.
+- [x] The keyboard hints are behind a `?` button rather than always on screen.
+
+## Saving
+
+- [x] **A small saving state in the top bar**, next to the document's name.
+  - [x] **Four states, not two**, and the two extra ones are the whole point:
+        `unsaved` (an edit is not on the server yet), `saving` (a write is in
+        flight), `clean`, and `failed`.
+  - [x] `unsaved` is the one that earns the space. The debounce is about a
+        second, so it is visible for a second after every burst of typing — which
+        is exactly when somebody glances up to check.
+  - [x] It is set the moment an edit is *made*, not when the debounce fires. The
+        gap between those is a second of a map that has already changed on screen
+        but is not on the server, and that is the second somebody checks.
+  - [x] A successful write reports `clean` **only if nothing arrived during it**,
+        so an edit made mid-round-trip does not get reported as safe.
+  - [x] `failed` is sticky and red, and clicking it retries. A failure that
+        quietly reverts to "saved" is the most dangerous thing this could do.
+  - [x] Mirrored from the write path rather than derived in the store: the thing
+        that knows whether a write is in flight *is* the write. Deriving it would
+        duplicate the debounce's timing, and the two would disagree exactly when
+        it mattered.
+  - [x] Deliberately near-invisible when clean. A permanent "Saved" in the corner
+        is noise that trains people to stop reading it, and the one time it
+        matters is the moment they are not looking.
 
 ## Notes
 

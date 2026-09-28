@@ -1,16 +1,22 @@
 import { useState } from 'react'
+import { CheckSquare, Frame, Maximize } from 'lucide-react'
 
 import {
   IconBringFront,
   IconCollapse,
   IconCopy,
+  IconDownload,
   IconLink,
   IconPalette,
   IconSendBack,
   IconTrash,
+  IconUpload,
 } from '@/components/Icons'
+import { openInsertCard } from '@/components/InsertCardDialog'
 import { useCanvasStore } from '@/store/useCanvasStore'
 import { CARD_ACCENTS, CARD_BACKGROUNDS } from '@/types'
+import { CARD_TYPES } from '@/utils/embeds'
+import { INSERT_ICONS, NEEDS_LINK } from '@/components/InsertCardIcons'
 
 export function ContextMenu() {
   const menu = useCanvasStore((s) => s.contextMenu)
@@ -97,10 +103,10 @@ export function ContextMenu() {
                 close()
               }}
             >
-              <IconLink size={14} /> Connect toÃ¢â‚¬Â¦
+              <IconLink size={14} /> Connect to…
             </button>
             <button type="button" onClick={() => setShowColors((v) => !v)}>
-              <IconPalette size={14} /> ColourÃ¢â‚¬Â¦
+              <IconPalette size={14} /> Colour…
             </button>            {showColors ? (
               <div className="px-1 pb-1">
                 <span className="cc-label">Background</span>
@@ -162,7 +168,7 @@ export function ContextMenu() {
         {group ? (
           <>
             <div className="px-2 py-1 text-[11px] text-slate-500">
-              {group.memberCardIds.length} card{group.memberCardIds.length === 1 ? '' : 's'} Ã‚Â· {group.memberGroupIds.length} group{group.memberGroupIds.length === 1 ? '' : 's'}
+              {group.memberCardIds.length} card{group.memberCardIds.length === 1 ? '' : 's'} · {group.memberGroupIds.length} group{group.memberGroupIds.length === 1 ? '' : 's'}
             </div>
             <button
               type="button"
@@ -181,7 +187,7 @@ export function ContextMenu() {
           <>
             <div className="px-2 py-1 text-[11px] text-slate-500">
               {connection.relationshipType}
-              {connection.label ? ` Ã‚Â· ${connection.label}` : ''}
+              {connection.label ? ` · ${connection.label}` : ''}
             </div>
             <div className="cc-swatches px-1 pb-1">
               {['#6366F1', '#0EA5E9', '#22C55E', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#64748B', '#111827'].map(
@@ -236,24 +242,58 @@ export function ContextMenu() {
 
         {!card && !connection && !group ? (
           <>
+            {/* Every kind, not just "new card". A right-click menu is the
+                fastest route to a card, and forcing anybody who wants a video
+                card to find the toolbar first is a step in the way for no
+                reason — the two routes are the same work, so they should offer
+                the same choices.
+
+                "Here" means where the pointer is, so each of these places the
+                card under the cursor. */}
+            <p className="cc-menu-label">Insert a card</p>
+            {CARD_TYPES.map((kind) => {
+              const KindIcon = INSERT_ICONS[kind.id]
+              return (
+                <button
+                  key={kind.id}
+                  type="button"
+                  title={kind.hint}
+                  onClick={() => {
+                    if (NEEDS_LINK.has(kind.id)) {
+                      // It needs a link before it can exist, so the dialog opens
+                      // with the kind already chosen and a note of where the
+                      // card will land.
+                      close()
+                      openInsertCard(menu.x, menu.y, kind.id)
+                      return
+                    }
+                    addCard({ type: kind.id }, { atScreen: { x: menu.x, y: menu.y } })
+                    close()
+                  }}
+                >
+                  <KindIcon size={14} className="shrink-0 opacity-70" />
+                  {kind.label}
+                </button>
+              )
+            })}
             <button type="button" onClick={() => { addGroup(); close() }}>
-              <span className="cc-kbd">G</span> New group here
+              <Frame size={14} className="shrink-0 opacity-70" /> Group
             </button>
-            <button type="button" onClick={() => { addCard(); close() }}>
-              <span className="cc-kbd">C</span> New card here
-            </button>
+
+            <hr />
+            <p className="cc-menu-label">The page</p>
             <button type="button" onClick={() => { selectAllCards(); close() }}>
-              <span className="cc-kbd">Ã¢Å’ËœA</span> Select all cards
+              <CheckSquare size={14} className="shrink-0 opacity-70" /> Select all cards
             </button>
             <button type="button" onClick={() => { requestFitView(); close() }}>
-              <span className="cc-kbd">F</span> Fit view
+              <Maximize size={14} className="shrink-0 opacity-70" /> Fit view
             </button>
             <hr />
             <button type="button" onClick={() => { setDialog('import'); close() }}>
-              Import JSONÃ¢â‚¬Â¦
+              <IconUpload size={14} className="shrink-0 opacity-70" /> Import JSON…
             </button>
             <button type="button" onClick={() => { setDialog('export'); close() }}>
-              Export JSONÃ¢â‚¬Â¦
+              <IconDownload size={14} className="shrink-0 opacity-70" /> Export JSON…
             </button>
           </>
         ) : null}

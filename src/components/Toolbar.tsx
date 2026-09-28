@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
+import { Frame, StickyNote } from 'lucide-react'
 
-import { LoginPage } from '@/components/LoginPage'
+import { DocTypeBadge } from '@/components/DocTypeBadge'
 import { InsertCardMenu } from '@/components/InsertCardMenu'
+import { LoginPage } from '@/components/LoginPage'
 import { PresentMenu } from '@/components/PresentMenu'
+import { SaveIndicator } from '@/components/SaveIndicator'
 import { WorkspaceMark } from '@/components/WorkspaceMark'
 import { getWorkspaceAccent, getWorkspaceIconLabel } from '@/theme'
 import { supabase } from '@/lib/supabase'
@@ -14,7 +17,6 @@ import {
   IconMagnet,
   IconMoon,
   IconMore,
-  IconPlus,
   IconRedo,
   IconSave,
   IconSearch,
@@ -46,7 +48,7 @@ const SHORTCUTS: Array<[string, string]> = [
   ['Ctrl + D', 'Duplicate selection'],
   ['Space + drag', 'Pan canvas'],
   ['Alt + drag', 'Pan canvas'],
-  ['Scroll', 'Pan Â· Ctrl + scroll to zoom'],
+  ['Scroll', 'Pan · Ctrl + scroll to zoom'],
   ['Shift + click', 'Add to selection'],
   ['Escape', 'Cancel drag / close menus'],
   ['F', 'Fit all cards'],
@@ -68,8 +70,8 @@ interface ToolbarProps {
  * The app chrome, in the two rows every editor uses: identity on top, tools
  * below.
  *
- *   row 1  [sidebar] [logo] [document name] â€¦â€¦â€¦ [people] [share] [theme] [â‹¯] [avatar]
- *   row 2  add Â· history Â· zoom Â· grid Â· search        (canvas route only)
+ *   row 1  [sidebar] [logo] [document name] ……… [people] [share] [theme] [⋯] [avatar]
+ *   row 2  add · history · zoom · grid · search        (canvas route only)
  *
  * Row 1 is the same height and the same arrangement on every route, so nothing
  * shifts when you open a workspace. Row 2 appears only on the canvas, and
@@ -188,7 +190,7 @@ export function Toolbar({
   return (
     <header className="cc-topbar z-30 flex-none border-b border-line bg-surface/90 backdrop-blur">
       {/* ---------------------------------------------------------------- */}
-      {/* Row 1 â€” identity, present on every route                        */}
+      {/* Row 1 — identity, present on every route                        */}
       {/* ---------------------------------------------------------------- */}
       <div className="flex h-12 items-center gap-2 px-2 sm:px-3">
         {isCanvas ? (
@@ -241,6 +243,11 @@ export function Toolbar({
                 else setDocumentTitle('Untitled')
               }}
             />
+            {/* What kind of document this is, next to the name. There is only one
+                kind today, so it reads as a quiet badge rather than a label that
+                claims a choice nobody can make yet. */}
+            <DocTypeBadge />
+            <SaveIndicator />
           </div>
         ) : (
           <h1 className="min-w-0 flex-1 truncate px-1.5 text-sm font-semibold text-ink">
@@ -347,7 +354,7 @@ export function Toolbar({
                 }}
               >
                 <IconSearch size={15} /> Search cards
-                <span className="ml-auto text-[11px] text-muted">âŒ˜K</span>
+                <span className="ml-auto text-[11px] text-muted">⌘K</span>
               </button>
               <hr />
               <button
@@ -377,7 +384,7 @@ export function Toolbar({
                   }}
                 >
                   <IconSave size={15} /> Save now
-                  <span className="ml-auto text-[11px] text-muted">âŒ˜S</span>
+                  <span className="ml-auto text-[11px] text-muted">⌘S</span>
                 </button>
               ) : null}
               <hr />
@@ -462,19 +469,36 @@ export function Toolbar({
       </div>
 
       {/* ---------------------------------------------------------------- */}
-      {/* Row 2 â€” canvas tools                                             */}
+      {/* Row 2 — canvas tools                                             */}
       {/* ---------------------------------------------------------------- */}
       {isCanvas ? (
         <div className="cc-scroll flex h-10 items-center gap-1 overflow-x-auto border-t border-line px-2 sm:px-3">
-          <button type="button" className="cc-btn shrink-0" data-variant="primary" onClick={() => addCard()}>
-            <IconPlus size={14} />
+          {/* Each of the three makes a different thing, so each gets its own
+              icon. Two of them were a plus sign, which made three buttons that
+              all looked like the same button.
+
+              The shortcut letters are in the tooltips and the shortcuts panel
+              instead of on the face of the button: a letter in a chip reads as a
+              label for the button — "button C" — rather than as a hint about
+              what else the keyboard does. */}
+          <button
+            type="button"
+            className="cc-btn shrink-0"
+            data-variant="primary"
+            title="New note (C)"
+            onClick={() => addCard()}
+          >
+            <StickyNote size={14} />
             Card
-            <span className="cc-kbd ml-0.5 hidden lg:inline">C</span>
           </button>
-          <button type="button" className="cc-btn shrink-0" onClick={() => addGroup()}>
-            <IconPlus size={14} />
+          <button
+            type="button"
+            className="cc-btn shrink-0"
+            title="New group (G)"
+            onClick={() => addGroup()}
+          >
+            <Frame size={14} />
             Group
-            <span className="cc-kbd ml-0.5 hidden lg:inline">G</span>
           </button>
           {/* Choosing a kind sits beside the two things you make, not up in the
               identity row. It is a tool rather than an identity, and Share is
@@ -582,7 +606,7 @@ export function Toolbar({
                 Keyboard shortcuts
               </h2>
               <button type="button" className="cc-btn px-1.5 py-1" onClick={() => setShowShortcuts(false)}>
-                âœ•
+                ✕
               </button>
             </div>
             <ul className="grid gap-1.5 text-xs">

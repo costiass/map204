@@ -1,5 +1,5 @@
-import { useEffect } from 'react'
-import { ChevronLeft, ChevronRight, Minimize2, Play, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { ChevronLeft, ChevronRight, Keyboard, Minimize2, Play, X } from 'lucide-react'
 
 import { useCanvasStore } from '@/store/useCanvasStore'
 
@@ -52,17 +52,27 @@ export function PresentOverlay() {
 
   useEffect(() => {
     if (!presenting) return
-    // A presentation runs on a projector, and a stray scroll or a browser
-    // gesture is not what the audience is watching. Only the keys this overlay
-    // handles should reach the page at all.
+    // While a presentation is running, *nothing* pans or zooms. The camera
+    // belongs to the step, and a wheel or a stray drag taking it somewhere else
+    // mid-sentence is the one thing that cannot be undone in front of an
+    // audience.
+    //
+    // This is deliberately absolute. Blocking it in the pointer handlers instead
+    // would leave a dozen paths — the wheel, a trackpad scroll, a pinch, a
+    // middle-drag — each of which has to be found and closed separately, and any
+    // one of them missed is a map that wanders off while you talk. One capture
+    // listener above all of it closes every path at once.
     const block = (event: Event) => {
       if (event.cancelable) event.preventDefault()
     }
-    window.addEventListener('wheel', block, { passive: false })
-    window.addEventListener('contextmenu', block)
+    const opts = { passive: false, capture: true }
+    window.addEventListener('wheel', block, opts)
+    window.addEventListener('gesturestart', block, opts)
+    window.addEventListener('contextmenu', block, opts)
     return () => {
-      window.removeEventListener('wheel', block)
-      window.removeEventListener('contextmenu', block)
+      window.removeEventListener('wheel', block, opts)
+      window.removeEventListener('gesturestart', block, opts)
+      window.removeEventListener('contextmenu', block, opts)
     }
   }, [presenting])
 
@@ -80,6 +90,36 @@ export function PresentOverlay() {
     window.addEventListener('click', onClick)
     return () => window.removeEventListener('click', onClick)
   }, [presenting, nextStep])
+
+  /* --- the chrome --------------------------------------------------- */
+
+  // Revealed on any pointer movement, and hidden again a couple of seconds after
+  // the last one. `hover` alone was not enough: a presenter who moves the mouse
+  // to the button and then stops has to move it *again* to get it back, and the
+  // obvious thing to do with a mouse that does nothing is to try the keyboard —
+  // which then fires a step change as well, so the presentation skips.
+  const [chromeVisible, setChromeVisible] = useState(false)
+  useEffect(() => {
+    if (!presenting) {
+      setChromeVisible(false)
+      return
+    }
+    let hideTimer = 0
+    const reveal = () => {
+      setChromeVisible(true)
+      window.clearTimeout(hideTimer)
+      hideTimer = window.setTimeout(() => setChromeVisible(false), 2600)
+    }
+    reveal()
+    window.addEventListener('pointermove', reveal)
+    return () => {
+      window.clearTimeout(hideTimer)
+      window.removeEventListener('pointermove', reveal)
+    }
+  }, [presenting])
+
+  // Off by default, since it is four words nobody reads twice.
+  const [showKeys, setShowKeys] = useState(false)
 
   /* --- the timer ---------------------------------------------------- */
 
@@ -112,8 +152,8 @@ export function PresentOverlay() {
         aria-label="Previous step"
         data-present-chrome
         onClick={prevStep}
-        className={`fixed inset-y-0 left-0 z-40 w-1/4 cursor-w-resize transition ${
-          stepIndex > 0 ? 'opacity-0 hover:opacity-100' : 'pointer-events-none opacity-0'
+        className={`fixed inset-y-0 left-0 z-40 w-1/4 cursor-w-resize transition-opacity duration-200 ${
+          stepIndex > 0 && chromeVisible ? 'opacity-0 hover:opacity-100' : 'pointer-events-none opacity-0'
         }`}
       >
         <span className="grid h-full place-items-center">
@@ -125,7 +165,9 @@ export function PresentOverlay() {
 
       <div
         data-present-chrome
-        className="group fixed inset-y-0 right-0 z-40 flex w-1/4 cursor-e-resize items-center justify-end opacity-0 transition-opacity duration-200 hover:opacity-100 focus-within:opacity-100"
+        className={`fixed inset-y-0 right-0 z-40 flex w-1/4 cursor-e-resize items-center justify-end transition-opacity duration-200 ${
+          chromeVisible ? 'opacity-0 hover:opacity-100 focus-within:opacity-100' : 'pointer-events-none opacity-0'
+        }`}
       >
         <button
           type="button"
@@ -137,12 +179,16 @@ export function PresentOverlay() {
         </button>
       </div>
 
-      {/* The bar. Hidden until the mouse goes near the bottom of the screen, so
-          a bar sitting across every slide is not what the audience sees. */}
+      {/* The bar. Hidden until the mouse moves, and hidden again a few seconds
+          after it stops — so a bar sitting across every slide is not what the
+          audience is looking at, and a presenter who has put the mouse down does
+          not have to pick it up again to find the next button. */}
       <div className="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex justify-center p-4">
         <div
           data-present-chrome
-          className="pointer-events-auto flex max-w-[min(100%,64rem)] items-center gap-3 rounded-xl border border-line bg-surface/95 px-3 py-2 opacity-0 shadow-lg backdrop-blur transition-opacity duration-200 hover:opacity-100 focus-within:opacity-100"
+          className={`flex max-w-[min(100%,64rem)] items-center gap-3 rounded-xl border border-line bg-surface/95 px-3 py-2 shadow-lg backdrop-blur transition-opacity duration-300 ${
+            chromeVisible ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
+          }`}
         >
           <button
             type="button"
@@ -177,6 +223,25 @@ export function PresentOverlay() {
             <AutoCountdown ms={autoAdvance} key={`${stepIndex}-${autoAdvance}`} />
           ) : null}
 
+          {/* The keyboard, spelled out. Hidden by default because it is four
+              words nobody reads twice — but a presenter who has lost the map of
+              the controls should not have to leave the presentation to find it. */}
+          {showKeys ? (
+            <span className="shrink-0 text-[11px] text-muted">
+              Left and right arrows to move &middot; 1 to 9 to jump &middot; Esc to stop
+            </span>
+          ) : (
+            <button
+              type="button"
+              className="cc-icon shrink-0"
+              title="Show the presentation shortcuts (?)"
+              aria-label="Show the presentation shortcuts"
+              onClick={() => setShowKeys(true)}
+            >
+              <Keyboard size={15} />
+            </button>
+          )}
+
           {/* A strip of the whole run, so the presenter can see how much is left
               and click to jump. */}
           {total > 1 ? (
@@ -200,10 +265,6 @@ export function PresentOverlay() {
               ))}
             </div>
           ) : null}
-
-          <span className="hidden shrink-0 text-[11px] text-muted sm:inline">
-            ← → to move · Esc to stop
-          </span>
 
           <button
             type="button"

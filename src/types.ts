@@ -189,11 +189,19 @@ export interface Page {
  *   linear   constant speed. Useful when a step's *timing* matters more than
  *            how it arrives — an animation whose timing you are reading against
  *            a voice-over, where easing would put the reveal in the wrong place.
+ *   drift    the camera does not stop dead. It eases toward the destination and
+ *            keeps going very slightly past it before settling, which reads as a
+ *            hand carrying the view rather than a machine parking it.
  *   instant  no camera move at all. The right choice when the step is about
  *            something already on screen and moving the camera would be a
  *            distraction from the thing being pointed at.
+ *
+ * The *zoom* is always interpolated on a log scale in every case but `linear`.
+ * The difference is not the shape of the curve but what is being eased: `ease`
+ * moves zoom the way it moves position, and `drift` overshoots the zoom as well,
+ * which on a long jump is the difference between arriving and arriving *gracefully*.
  */
-export type StepTransition = 'ease' | 'linear' | 'instant'
+export type StepTransition = 'ease' | 'linear' | 'drift' | 'instant'
 
 /**
  * What makes a step give way to the next one.

@@ -1,7 +1,7 @@
 // A cheap structural check for the tutorial migration.
 //
 // The content is hand-written JSONB, so the failure mode is a missing comma or
-// an unbalanced paren â€” neither of which `tsc` or `oxlint` can see, and both of
+// an unbalanced paren — neither of which `tsc` or `oxlint` can see, and both of
 // which only surface when the migration runs against a live database. This
 // catches them at commit time instead.
 

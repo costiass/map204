@@ -79,6 +79,50 @@ interface PageRuntime {
 
 const runtime = new Map<string, PageRuntime>()
 
+/* ------------------------------------------------------------------ */
+/* The save indicator                                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * How the app's saving is doing, for the indicator in the top bar.
+ *
+ * Four states, not two, and the two extra ones are the point:
+ *
+ *   clean    everything is on the server. Nothing to say.
+ *   unsaved  there are changes, and the debounce has not fired yet. This is the
+ *            state nobody shows, and it is the one that matters — a map that
+ *            says "saved" while your last edit is sitting in a timer is lying to
+ *            you, and you close the tab believing it is safe.
+ *   saving   a write is in flight.
+ *   failed   the write was refused. Sticky: it stays until something succeeds,
+ *            because a failure that quietly reverts to "clean" is worse than no
+ *            indicator at all.
+ */
+export type SaveState = 'clean' | 'unsaved' | 'saving' | 'failed'
+
+let saveState: SaveState = 'clean'
+
+/** Read by the store, which is what the top bar subscribes to. */
+export function getSaveState(): SaveState {
+  return saveState
+}
+
+function setSaveState(next: SaveState): void {
+  if (saveState === next) return
+  saveState = next
+  // A plain subscription rather than a React hook, because the write path runs
+  // outside React — it is a promise chain in a debounce timer.
+  useCanvasStore.getState().setSaveState(next)
+}
+
+/** Called by the store whenever a local edit makes the page dirty. */
+export function markUnsaved(): void {
+  const entry = runtime.get(useCanvasStore.getState().activePageId)
+  if (!entry?.dirty) return
+  if (entry.saving) return
+  setSaveState('unsaved')
+}
+
 function runtimeFor(pageId: string): PageRuntime {
   let entry = runtime.get(pageId)
   if (!entry) {
@@ -537,6 +581,11 @@ export function usePageSync() {
     const entry = runtimeFor(activePageId)
     entry.dirty = true
     entry.localEditAt = Date.now()
+    // The indicator says "unsaved" from this moment, not from when the debounce
+    // fires. The gap between them is about a second of a map that has already
+    // changed on screen but is not on the server yet, and that is exactly the
+    // second somebody checks the indicator in.
+    setSaveState('unsaved')
 
     // 1. Realtime: everyone else sees the edit now.
     const payload: PageUpdatePayload & { origin: string } = {
@@ -671,12 +720,17 @@ async function writePage(pageId: string): Promise<void> {
   if (!page) return
 
   entry.saving = true
+  setSaveState('saving')
   try {
     const outcome = await savePageSnapshot(page, entry.version)
 
     if (outcome.status === 'saved') {
       entry.version = outcome.version
       entry.dirty = false
+      // Only "clean" if nothing arrived while this write was in flight. An edit
+      // made during the round trip is already queued for the next debounce, and
+      // reporting clean now would say the map is safe when it is not.
+      setSaveState(entry.dirty ? 'unsaved' : 'clean')
       return
     }
 
@@ -701,12 +755,15 @@ async function writePage(pageId: string): Promise<void> {
         // Already durable, so the store update must not queue another write.
         lastBroadcastSignature.set(pageId, pageSignature(reconciled))
         store.applyRemotePage(pageId, reconciled)
+        setSaveState(entry.dirty ? 'unsaved' : 'clean')
         return
       }
+      setSaveState('failed')
       store.pushToast('Could not save this page — try again.', 'error')
       return
     }
 
+    setSaveState('failed')
     store.pushToast(`Could not save: ${outcome.error}`, 'error')
   } finally {
     entry.saving = false

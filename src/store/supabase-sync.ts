@@ -26,6 +26,15 @@ export interface DocumentRow {
   icon?: string | null
   /** Document-wide defaults (`DocSettings`), `{}` until the user changes them. */
   settings?: Partial<DocSettings> | null
+  /**
+   * What kind of document this is — `'map'` today, and nothing else.
+   *
+   * Optional and nullable on purpose. There is no column for it yet, and adding
+   * one that can only ever hold one value is a migration to undo the day a second
+   * kind exists. The field is here so the *call sites* already pass it, and the
+   * day the column lands nothing outside this file has to change.
+   */
+  kind?: string | null
   created_at: string
   updated_at: string
 }

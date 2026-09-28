@@ -1,8 +1,8 @@
 // Guards the three places a workspace's colour and icon are enumerated.
 //
-//   1. src/theme.ts                     â€” what the app offers
-//   2. the database check constraints    â€” what the server will accept
-//   3. supabase/functions/â€¦/_workspace_look.ts â€” what the email describes
+//   1. src/theme.ts                     — what the app offers
+//   2. the database check constraints    — what the server will accept
+//   3. supabase/functions/…/_workspace_look.ts — what the email describes
 //
 // Three hand-written lists for one concept is three chances to disagree, and the
 // failure is silent: a value the app offers but the database rejects shows up
@@ -34,7 +34,7 @@ const between = (text, start, end) => {
 /* ---- accents --------------------------------------------------------- */
 
 // The workspace accent list in the theme: the `ACCENTS` array, plus the neutral
-// `slate` that only workspaces use. Scoped to `ACCENTS` deliberately â€” a naive
+// `slate` that only workspaces use. Scoped to `ACCENTS` deliberately — a naive
 // scan of the file also picks up the *palettes*, which are a different concept
 // with their own ids, and comparing those against the database is meaningless.
 const accentBlock = between(theme, 'export const WORKSPACE_ACCENTS', 'export const DEFAULT_WORKSPACE_ACCENT')
@@ -104,7 +104,7 @@ for (const id of edgeAccents) {
 // The hex values must match too, or the email names a different colour than the
 // workspace it is describing.
 // The hex for each accent. `id: 'slate' as AccentId` carries a cast, so the
-// pattern has to tolerate one â€” SLATE is declared in its own block.
+// pattern has to tolerate one — SLATE is declared in its own block.
 const accentSource = `${userAccents}\n${between(theme, 'const SLATE: Accent', 'export const WORKSPACE_ACCENTS')}`
 for (const [, id, hex] of accentSource.matchAll(
   /id: '([a-z]+)'(?: as \w+)?,\s*label: '[^']*',\s*base: '(#[0-9a-f]{6})'/g,

@@ -74,8 +74,8 @@ const cards: Card[] = [
     title: 'Chloroplast Structure',
     content:
       'Double-membrane organelle, only in plants & algae.\n\n' +
-      '- **Grana** â€” stacked thylakoids\n' +
-      '- **Stroma** â€” enzyme-rich fluid\n\n' +
+      '- **Grana** — stacked thylakoids\n' +
+      '- **Stroma** — enzyme-rich fluid\n\n' +
       '![Simplified chloroplast diagram](' +
       chloroplastImage +
       ')',
@@ -133,7 +133,7 @@ const cards: Card[] = [
     type: 'note',
     embed: null,
     title: 'Calvin Cycle',
-    content: 'Happens in the **stroma**. Fixes COâ‚‚ into sugar using the ATP and NADPH from light reactions.',
+    content: 'Happens in the **stroma**. Fixes CO₂ into sugar using the ATP and NADPH from light reactions.',
     image: { src: null, alt: '' },
     position: { x: 820, y: 400, width: 290, height: 270, zIndex: 4 },
     style: {
@@ -149,7 +149,7 @@ const cards: Card[] = [
     collapsed: false,
     parentId: 'card_01',
     checklist: [
-      { id: 'item_05', text: 'COâ‚‚ fixation by RuBisCO', done: false },
+      { id: 'item_05', text: 'CO₂ fixation by RuBisCO', done: false },
       { id: 'item_06', text: 'G3P sugar generated', done: false },
       { id: 'item_07', text: 'RuBP regenerated', done: false },
     ],
@@ -178,7 +178,7 @@ const cards: Card[] = [
     parentId: null,
     checklist: [
       { id: 'item_08', text: 'Light intensity', done: false },
-      { id: 'item_09', text: 'COâ‚‚ concentration', done: false },
+      { id: 'item_09', text: 'CO₂ concentration', done: false },
       { id: 'item_10', text: 'Temperature', done: false },
     ],
     createdAt: T,
@@ -265,7 +265,7 @@ const connections: Connection[] = [
     target: { kind: 'card', id: 'card_04' },
     sourceAnchor: 'bottom',
     targetAnchor: 'top',
-    label: 'COâ‚‚ supply',
+    label: 'CO₂ supply',
     relationshipType: 'example of',
     style: {
       color: '#8B5CF6',
@@ -303,7 +303,7 @@ const respirationCards: Card[] = [
     type: 'note',
     embed: null,
     title: 'Cell Respiration',
-    content: 'Breaks down glucose to release ATP. Aerobic = 30â€“32 ATP per glucose.',
+    content: 'Breaks down glucose to release ATP. Aerobic = 30–32 ATP per glucose.',
     image: { src: null, alt: '' },
     position: { x: 120, y: 120, width: 300, height: 220, zIndex: 1 },
     style: {

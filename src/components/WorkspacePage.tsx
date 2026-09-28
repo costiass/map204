@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { IconCheck, IconPalette, IconPencil, IconPlus, IconTrash } from '@/components/Icons'
+import { DocTypeBadge } from '@/components/DocTypeBadge'
 import { LookPicker } from '@/components/LookPicker'
 import { WorkspaceDot, WorkspaceMark } from '@/components/WorkspaceMark'
 import {
@@ -321,9 +322,13 @@ export function WorkspacePage({ userId, onOpenDocument }: WorkspacePageProps) {
                       {doc.title}
                     </span>
                   </button>
-                  <p className="mt-1 flex items-center gap-1.5 text-xs text-muted">
+                  <p className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted">
                     <WorkspaceDot accent={doc.accent} size={7} />
-                    Edited {new Date(doc.updated_at).toLocaleDateString()}
+                    Edited {new Date(doc.updated_at).toLocaleDateString()}                    {/* The kind of document, beside the date it was touched. A
+                        list that has never labelled its tiles cannot grow a
+                        second kind of document without going back and touching
+                        every one of them. */}
+                    <DocTypeBadge kind={doc.kind} />
                   </p>
 
                   {/* The picker hangs off the bottom of the tile rather than

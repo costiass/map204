@@ -156,6 +156,22 @@ export interface CanvasStore {
   resetViewport: () => void
   requestFitView: () => void
 
+  /* --- saving ------------------------------------------------------- */
+  /**
+   * Whether everything on screen is on the server.
+   *
+   * Mirrored from the write path rather than derived here, because the thing
+   * that knows whether a write is in flight is the write. Deriving it in the
+   * store would mean duplicating the debounce's timing, and the two would
+   * disagree exactly when it mattered — showing "saved" while an edit is still
+   * in the timer.
+   */
+  saveState: 'clean' | 'unsaved' | 'saving' | 'failed'
+  setSaveState: (state: 'clean' | 'unsaved' | 'saving' | 'failed') => void
+  /** Wall clock of the last successful write, for "saved a moment ago". */
+  savedAt: number
+  setSavedAt: (at: number) => void
+
   /* --- presentation ------------------------------------------------- */
   /** The steps of the active page's document, in order. */
   steps: () => PresentationStep[]
@@ -204,7 +220,10 @@ export interface CanvasStore {
   setInspectorTab: (tab: 'content' | 'settings') => void
 
   /* --- cards ------------------------------------------------------- */
-  addCard: (input?: Partial<Card>, options?: { select?: boolean; silent?: boolean }) => string
+  addCard: (
+    input?: Partial<Card>,
+    options?: { select?: boolean; silent?: boolean; atScreen?: Point },
+  ) => string
   updateCard: (cardId: string, patch: Partial<Omit<Card, 'id'>>, options?: { silent?: boolean }) => void
   updateCardStyle: (cardId: string, patch: Partial<CardStyle>, options?: { silent?: boolean }) => void
   commitCardPositions: (entries: Array<{ id: string; x: number; y: number }>) => void
@@ -416,6 +435,8 @@ export const useCanvasStore = create<CanvasStore>()(
       focusTargetId: null,
       focusMode: 'none',
       presentationOpen: false,
+      saveState: 'clean',
+      savedAt: 0,
       viewportSize: { width: 1200, height: 800 },
       fitViewToken: 0,
       darkMode: false,
@@ -766,6 +787,12 @@ export const useCanvasStore = create<CanvasStore>()(
 
       setPresentationOpen: (presentationOpen) => set({ presentationOpen }),
 
+      setSaveState: (saveState) => {
+        set({ saveState })
+        if (saveState === 'clean') set({ savedAt: Date.now() })
+      },
+      setSavedAt: (savedAt) => set({ savedAt }),
+
       toggleDarkMode: () => set((state) => { state.darkMode = !state.darkMode }),
 
       /* ------------------------------------------------------------ */
@@ -780,22 +807,30 @@ export const useCanvasStore = create<CanvasStore>()(
         const page = state.doc.pages.find((p) => p.id === state.activePageId)
         if (!page) return ''
 
-        const center = screenToWorld(
-          { x: state.viewportSize.width / 2, y: state.viewportSize.height / 2 },
-          page.viewport,
-        )
+        // A right-click insert means *here* — the point you clicked, not the
+        // middle of the window. A new card appearing somewhere else is a small
+        // lie about where you asked for it, and on a wide screen it is a long
+        // walk to find.
+        const anchor =
+          input?.position ??
+          (options?.atScreen
+            ? screenToWorld(options.atScreen, page.viewport)
+            : screenToWorld(
+                { x: state.viewportSize.width / 2, y: state.viewportSize.height / 2 },
+                page.viewport,
+              ))
 
         // Nudge new cards so repeated presses do not stack them exactly.
-        let x = input?.position?.x ?? Math.round(center.x - 140)
-        let y = input?.position?.y ?? Math.round(center.y - 110)
+        let x = input?.position?.x ?? Math.round(anchor.x - 140)
+        let y = input?.position?.y ?? Math.round(anchor.y - 110)
         if (!input?.position) {
           const occupied = page.cards.some(
             (card) => Math.abs(card.position.x - x) < 24 && Math.abs(card.position.y - y) < 24,
           )
           if (occupied) {
             for (let i = 1; i <= 8; i++) {
-              x = Math.round(center.x - 140) + i * 32
-              y = Math.round(center.y - 110) + i * 28
+              x = Math.round(anchor.x - 140) + i * 32
+              y = Math.round(anchor.y - 110) + i * 28
               const clash = page.cards.some(
                 (card) => Math.abs(card.position.x - x) < 24 && Math.abs(card.position.y - y) < 24,
               )

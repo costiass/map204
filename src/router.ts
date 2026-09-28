@@ -8,31 +8,64 @@ import { useEffect, useState } from 'react'
  * has an address you can bookmark, share and hit Back on:
  *
  *   /                     the workspace list
- *   /w/<docId>            one workspace's canvas
+ *   /doc/<docId>          one document's canvas
  *   /settings             preferences
  *
- * Anything else is a genuine 404, and `/w/<id>` for a workspace that cannot be
- * opened sends you home rather than leaving you on a dead screen.
+ * `/doc/` rather than the `/w/` this used to be, because the second kind of
+ * document is coming and `w` stands for *workspace*, which is the wrong word for
+ * a thing that will not be a workspace. `/w/` still works: it redirects once
+ * and rewrites the address, so a link somebody already sent keeps opening the
+ * document it named.
+ *
+ * Anything else is a genuine 404, and a document that cannot be opened sends you
+ * home rather than leaving you on a dead screen.
  */
 export type Route =
   | { name: 'home' }
-  | { name: 'workspace'; docId: string }
+  /**
+   * `legacy` means the address in the bar is the old `/w/…` one. The document is
+   * the same and the caller should not care, but the address has to be tidied —
+   * otherwise the old path stays a second, permanent way to reach the same
+   * document, and the two drift apart in every link anybody copies out.
+   */
+  | { name: 'workspace'; docId: string; legacy?: boolean }
   | { name: 'settings' }
   | { name: 'not-found'; path: string }
 
 export const HOME_PATH = '/'
 export const SETTINGS_PATH = '/settings'
-export const workspacePath = (docId: string): string => `/w/${encodeURIComponent(docId)}`
 
-function parse(pathname: string): Route {
+/** The one address a document is known by. */
+export const workspacePath = (docId: string): string => `/doc/${encodeURIComponent(docId)}`
+
+/** The old address, kept only so old links can be sent somewhere. */
+const LEGACY_WORKSPACE_PATH = /^\/w\/([^/]+)$/
+
+/**
+ * An address, as a route.
+ *
+ * Exported so it can be tested directly. It is a pure function of a string, and
+ * a pure function of a string is the easiest thing in the app to check — which
+ * matters, because the failure mode is a 404 on a link somebody already sent.
+ */
+export function parse(pathname: string): Route {
   const path = pathname.replace(/\/+$/, '') || '/'
   if (path === '/') return { name: 'home' }
   if (path === SETTINGS_PATH) return { name: 'settings' }
 
-  const workspace = path.match(/^\/w\/([^/]+)$/)
-  if (workspace) {
-    const docId = decodeURIComponent(workspace[1])
+  const document = path.match(/^\/doc\/([^/]+)$/)
+  if (document) {
+    const docId = decodeURIComponent(document[1])
     if (docId) return { name: 'workspace', docId }
+  }
+
+  // An old link is not a 404. The document it names still exists, and answering
+  // "not found" to a link that used to work is the kind of breakage that loses
+  // somebody's notes — the page is still in the database, just unreachable.
+  const legacy = path.match(LEGACY_WORKSPACE_PATH)
+  if (legacy) {
+    const docId = decodeURIComponent(legacy[1])
+    if (docId) return { name: 'workspace', docId, legacy: true }
   }
 
   return { name: 'not-found', path }
@@ -47,6 +80,18 @@ export function useRoute(): Route {
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
   }, [])
+
+  // An old `/w/…` address is tidied here rather than in the screen that renders
+  // it, so the redirect happens the same way whether you arrived by typing the
+  // link, clicking a bookmark, or following a message somebody sent you.
+  //
+  // `replace`, not `push`: a redirect that leaves a history entry means Back
+  // walks you to `/w/…`, which redirects again, which walks you back. A trap.
+  useEffect(() => {
+    if (route.name !== 'workspace' || !route.legacy) return
+    window.history.replaceState(null, '', workspacePath(route.docId))
+    setRoute({ name: 'workspace', docId: route.docId })
+  }, [route])
 
   return route
 }

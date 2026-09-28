@@ -242,7 +242,7 @@ function CardNodeImpl({
           ) : null}
 
           {/* A video or PDF card leads with what it points at. The Markdown body
-              still renders below it, but only when there is one â€” an empty
+              still renders below it, but only when there is one — an empty
               "Nothing here yet" placeholder under a playing video is noise. */}
           {card.type !== 'note' ? (
             <div className="mb-2">
