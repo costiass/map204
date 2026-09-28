@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# Edge Function secrets. `*.local` covers .env.local, but be explicit: a file
+# holding RESEND_API_KEY must never be committed, whatever it is called.
+supabase/functions/.env
+supabase/functions/.env.*
+!supabase/functions/.env.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -246,13 +246,23 @@ export function usePageSync() {
         const previous = new Map(
           usePresence.getState().entries.map((entry) => [entry.userId, entry]),
         )
-        usePresence.getState().setEntries(
-          [...seen.values()].map((entry) => ({
-            ...entry,
-            cursor: entry.cursor ?? previous.get(entry.userId)?.cursor ?? null,
-            pageId: entry.pageId ?? previous.get(entry.userId)?.pageId ?? null,
-          })),
-        )
+        const merged = [...seen.values()].map((entry) => ({
+          ...entry,
+          cursor: entry.cursor ?? previous.get(entry.userId)?.cursor ?? null,
+          pageId: entry.pageId ?? previous.get(entry.userId)?.pageId ?? null,
+        }))
+
+        // A cursor broadcast can land before that person's presence snapshot.
+        // Dropping it here would make the pointer blink out of existence the
+        // moment they arrive, and it would not come back until they moved the
+        // mouse again. Hold on to any unseen entry that still has a pointer;
+        // the next presence sync, when they really have left, clears it.
+        for (const [userId, entry] of previous) {
+          if (seen.has(userId) || !entry.cursor) continue
+          merged.push(entry)
+        }
+
+        usePresence.getState().setEntries(merged)
       })
       // Somebody else's pointer. Broadcast only — it is never stored anywhere.
       .on('broadcast', { event: 'cursor' }, ({ payload }) => {
@@ -261,6 +271,7 @@ export function usePageSync() {
           userId: string
           name: string
           color: string
+          avatarUrl: string | null
           pageId: string
           point: { x: number; y: number }
         }
@@ -271,7 +282,12 @@ export function usePageSync() {
           userId: data.userId,
           name: data.name,
           color: data.color,
-          avatarUrl: store.entries.find((e) => e.userId === data.userId)?.avatarUrl ?? null,
+          // The picture travels with the pointer, so a cursor is enough to
+          // render a face even if the presence snapshot has not arrived yet.
+          avatarUrl:
+            data.avatarUrl ??
+            store.entries.find((e) => e.userId === data.userId)?.avatarUrl ??
+            null,
           cursor: data.point,
           pageId: data.pageId,
         })
@@ -284,9 +300,24 @@ export function usePageSync() {
           userId: data.user?.id ?? clientId,
           name: meta?.name ?? meta?.full_name ?? data.user?.email ?? 'Someone',
           color: colorFor(data.user?.id ?? clientId),
+          // Google's picture lives in `picture`; Supabase's own convention is
+          // `avatar_url`. Take whichever this provider sent.
           avatarUrl: meta?.avatar_url ?? meta?.picture ?? null,
         }
-        void channel.track({ ...identity.current, cursor: null, page_id: null })
+
+        // Tracked under snake_case on purpose: the `presence` handler above
+        // reads `user_id` / `avatar_url`, and these are two different wire
+        // formats. Spreading the camelCase identity here used to publish rows
+        // the reader then threw away, which is why other people never appeared
+        // in the avatar cluster and had no cursor.
+        void channel.track({
+          user_id: identity.current.userId,
+          name: identity.current.name,
+          color: identity.current.color,
+          avatar_url: identity.current.avatarUrl,
+          cursor: null,
+          page_id: null,
+        })
       })
 
     return () => {

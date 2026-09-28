@@ -28,7 +28,7 @@ function ImportExportBody({ initialTab }: { initialTab: Tab }) {
   const pushToast = useCanvasStore((s) => s.pushToast)
 
   const [tab, setTab] = useState<Tab>(initialTab)
-  const [filename, setFilename] = useState('cardcanvas-page')
+  const [filename, setFilename] = useState('map204-page')
   const [raw, setRaw] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [warnings, setWarnings] = useState<string[]>([])
@@ -95,12 +95,28 @@ function ImportExportBody({ initialTab }: { initialTab: Tab }) {
     if (mode === 'replace' && documentId) {
       // The server must end up holding exactly these pages, so it is rewritten
       // first and the page-list diff is re-primed before the canvas swaps.
-      const written = await replaceDocumentPages(documentId, parsed.pages)
-      if (!written) {
+      const result = await replaceDocumentPages(documentId, parsed.pages)
+      if (!result) {
         // The reason is in the console — handleWriteError already logged it.
         pushToast('The import could not be saved — see the console for the reason.', 'error')
         return
       }
+
+      // A page id that was already in use elsewhere is renumbered on the way
+      // in, so the local copy has to use the ids the server actually stored.
+      // Anything still holding the old id would then be a page that does not
+      // exist, and the next write would fail.
+      const localDoc: CanvasDoc =
+        Object.keys(result.remap).length > 0
+          ? {
+              ...parsed,
+              pages: parsed.pages.map((page) => ({
+                ...page,
+                id: result.remap[page.id] ?? page.id,
+              })),
+            }
+          : parsed
+
       // The page list the server now holds is exactly what was written, so the
       // diff must not treat it as a set of new pages.
       const refreshed = await loadDocument(documentId)
@@ -109,7 +125,7 @@ function ImportExportBody({ initialTab }: { initialTab: Tab }) {
         return
       }
       primePageSync(documentId, refreshed)
-      replaceDoc(parsed)
+      replaceDoc(localDoc)
       pushToast(`Imported ${parsed.pages.length} page(s).`, 'success')
       setDialog(null)
       return

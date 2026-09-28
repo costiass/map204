@@ -23,6 +23,7 @@ import {
   type Viewport,
 } from '@/types'
 import { centerOn, clamp, screenToWorld } from '@/utils/geometry'
+import { DEFAULT_WORKSPACE_ACCENT, DEFAULT_WORKSPACE_ICON } from '@/theme'
 import { clone, uid } from '@/utils/id'
 import { createCard, createConnection, createGroup, normalizeDoc } from '@/utils/serialize'
 
@@ -55,8 +56,12 @@ export interface CanvasStore {
   documentId: string | null
   /** The Supabase document title, kept in step with `documents.title`. */
   documentTitle: string
+  /** The workspace's own colour and icon, shown beside the title. */
+  documentAccent: string
+  documentIcon: string
   setDocumentId: (id: string | null) => void
   setDocumentTitle: (title: string) => void
+  setDocumentLookState: (look: { accent?: string; icon?: string }) => void
   setDarkMode: (enabled: boolean) => void
   setGridSize: (size: number) => void
 
@@ -298,6 +303,8 @@ export const useCanvasStore = create<CanvasStore>()(
       activePageId: initialDoc.pages[0]?.id ?? '',
       documentId: null,
       documentTitle: '',
+      documentAccent: DEFAULT_WORKSPACE_ACCENT,
+      documentIcon: DEFAULT_WORKSPACE_ICON,
 
       selectedCardIds: [],
       selectedConnectionIds: [],
@@ -364,6 +371,12 @@ export const useCanvasStore = create<CanvasStore>()(
       setDocumentId: (id) => set({ documentId: id }),
 
       setDocumentTitle: (title) => set({ documentTitle: title }),
+
+      setDocumentLookState: (look) =>
+        set({
+          ...(look.accent !== undefined ? { documentAccent: look.accent } : null),
+          ...(look.icon !== undefined ? { documentIcon: look.icon } : null),
+        }),
 
       setDarkMode: (enabled) => set({ darkMode: enabled }),
 

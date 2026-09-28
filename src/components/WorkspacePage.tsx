@@ -1,13 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { IconPencil, IconPlus, IconTrash } from '@/components/Icons'
+import { IconCheck, IconPalette, IconPencil, IconPlus, IconTrash } from '@/components/Icons'
+import { LookPicker } from '@/components/LookPicker'
+import { WorkspaceDot, WorkspaceMark } from '@/components/WorkspaceMark'
 import {
   createDocument,
   deleteDocument,
   listDocuments,
   renameDocument,
+  setDocumentLook,
 } from '@/store/supabase-sync'
 import type { SharedDocument } from '@/store/supabase-sync'
+import { useCanvasStore } from '@/store/useCanvasStore'
+import {
+  DEFAULT_WORKSPACE_ACCENT,
+  DEFAULT_WORKSPACE_ICON,
+  getWorkspaceAccent,
+  getWorkspaceIconLabel,
+  type WorkspaceAccentId,
+} from '@/theme'
 
 interface WorkspacePageProps {
   userId: string
@@ -25,7 +36,14 @@ export function WorkspacePage({ userId, onOpenDocument }: WorkspacePageProps) {
   const [newTitle, setNewTitle] = useState('')
   const [creating, setCreating] = useState(false)
   const [renamingId, setRenamingId] = useState<string | null>(null)
+  /** Which workspace is showing its colour and icon picker, if any. */
+  const [stylingId, setStylingId] = useState<string | null>(null)
+  /** What the new workspace should look like, chosen before it exists. */
+  const [newAccent, setNewAccent] = useState<WorkspaceAccentId>(DEFAULT_WORKSPACE_ACCENT)
+  const [newIcon, setNewIcon] = useState(DEFAULT_WORKSPACE_ICON)
   const newTitleRef = useRef<HTMLInputElement>(null)
+  const stylingRef = useRef<HTMLDivElement>(null)
+  const pushToast = useCanvasStore((s) => s.pushToast)
 
   const sharedCount = documents.filter((entry) => entry.role !== 'owner').length
 
@@ -43,7 +61,10 @@ export function WorkspacePage({ userId, onOpenDocument }: WorkspacePageProps) {
   const create = async () => {
     if (!userId || !newTitle.trim()) return
     setCreating(true)
-    const created = await createDocument(userId, newTitle.trim())
+    const created = await createDocument(userId, newTitle.trim(), {
+      accent: newAccent,
+      icon: newIcon,
+    })
     setCreating(false)
     setNewTitle('')
 
@@ -52,6 +73,41 @@ export function WorkspacePage({ userId, onOpenDocument }: WorkspacePageProps) {
       return
     }
     onOpenDocument(created.document.id)
+  }
+
+  /** Close the picker on a click outside it, or on Escape. */
+  useEffect(() => {
+    if (!stylingId) return
+    const onDown = (event: PointerEvent) => {
+      if (!stylingRef.current?.contains(event.target as Node)) setStylingId(null)
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setStylingId(null)
+    }
+    document.addEventListener('pointerdown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('pointerdown', onDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [stylingId])
+
+  /** Apply a colour or icon to a workspace the reader owns. */
+  const restyle = async (docId: string, look: { accent?: string; icon?: string }) => {
+    // Optimistic: the tile is a colour and a glyph, and waiting a round trip to
+    // repaint it makes the picker feel broken.
+    setDocuments((docs) =>
+      docs.map((entry) =>
+        entry.document.id === docId
+          ? { ...entry, document: { ...entry.document, ...look } }
+          : entry,
+      ),
+    )
+    const ok = await setDocumentLook(docId, look)
+    if (!ok) {
+      pushToast('Could not change that.', 'error')
+      setDocuments(await listDocuments(userId))
+    }
   }
 
   const remove = async (docId: string) => {
@@ -99,23 +155,33 @@ export function WorkspacePage({ userId, onOpenDocument }: WorkspacePageProps) {
           </div>
 
           <form
-            className="flex gap-2"
+            className="flex items-start gap-2"
             onSubmit={(event) => {
               event.preventDefault()
               void create()
             }}
           >
-            <input
-              ref={newTitleRef}
-              className="cc-input w-56"
-              placeholder="New workspace name"
-              aria-label="New workspace name"
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-            />
+            <div className="w-64">
+              <input
+                ref={newTitleRef}
+                className="cc-input w-full"
+                placeholder="New workspace name"
+                aria-label="New workspace name"
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+              />
+              <div className="mt-2">
+                <LookPicker
+                  accent={newAccent}
+                  icon={newIcon}
+                  onAccent={(accent) => setNewAccent(accent as WorkspaceAccentId)}
+                  onIcon={setNewIcon}
+                />
+              </div>
+            </div>
             <button
               type="submit"
-              className="cc-btn"
+              className="cc-btn mt-[1px]"
               data-variant="primary"
               disabled={creating || !newTitle.trim()}
             >
@@ -178,20 +244,23 @@ export function WorkspacePage({ userId, onOpenDocument }: WorkspacePageProps) {
                 <article
                   key={doc.id}
                   className="group relative flex flex-col rounded-xl border border-line bg-surface p-4 text-left shadow-sm transition hover:border-line-strong hover:shadow-md hover:border-line-strong"
+                  // A hairline in the workspace's own colour, so a tile is
+                  // recognisable by its edge before the name is read.
+                  style={{ borderTopColor: getWorkspaceAccent(doc.accent).base }}
                 >
                   <div className="mb-2 flex items-start justify-between gap-2">
                     <button
                       type="button"
-                      className="grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-lg bg-surface-sunken text-muted"
+                      className="grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-lg transition"
+                      style={{
+                        background: getWorkspaceAccent(doc.accent).soft,
+                        color: getWorkspaceAccent(doc.accent).ink,
+                      }}
                       aria-label={`Open ${doc.title}`}
+                      title={getWorkspaceIconLabel(doc.icon)}
                       onClick={() => onOpenDocument(doc.id)}
                     >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <rect x="3" y="3" width="7" height="7" rx="1" />
-                        <rect x="14" y="3" width="7" height="7" rx="1" />
-                        <rect x="3" y="14" width="7" height="7" rx="1" />
-                        <rect x="14" y="14" width="7" height="7" rx="1" />
-                      </svg>
+                      <WorkspaceMark icon={doc.icon} accent={doc.accent} size={15} />
                     </button>
 
                     <span className="flex shrink-0 items-center gap-0.5">
@@ -205,6 +274,16 @@ export function WorkspacePage({ userId, onOpenDocument }: WorkspacePageProps) {
                             onClick={() => setRenamingId(doc.id)}
                           >
                             <IconPencil size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            className="cursor-pointer rounded p-1 text-muted opacity-100 transition hover:bg-surface-sunken hover:text-ink focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100 dark:hover:bg-[#252525]"
+                            title="Change colour and icon"
+                            aria-label={`Change the colour and icon of ${doc.title}`}
+                            aria-pressed={stylingId === doc.id}
+                            onClick={() => setStylingId(stylingId === doc.id ? null : doc.id)}
+                          >
+                            <IconPalette size={14} />
                           </button>
                           <button
                             type="button"
@@ -233,13 +312,39 @@ export function WorkspacePage({ userId, onOpenDocument }: WorkspacePageProps) {
                     className="min-w-0 cursor-pointer text-left outline-none"
                     onClick={() => onOpenDocument(doc.id)}
                   >
-                    <span className="block truncate text-sm font-semibold text-ink group-hover:text-brand text-ink">
+                    <span className="block truncate text-sm font-semibold text-ink text-ink">
                       {doc.title}
                     </span>
                   </button>
-                  <p className="mt-1 text-xs text-muted">
+                  <p className="mt-1 flex items-center gap-1.5 text-xs text-muted">
+                    <WorkspaceDot accent={doc.accent} size={7} />
                     Edited {new Date(doc.updated_at).toLocaleDateString()}
                   </p>
+
+                  {/* The picker hangs off the bottom of the tile rather than
+                      replacing it, so the colour you are choosing stays visible
+                      while you choose it. */}
+                  {stylingId === doc.id ? (
+                    <div
+                      ref={stylingRef}
+                      className="absolute left-2 right-2 top-full z-30 mt-1 rounded-xl border border-line bg-surface p-3 shadow-lg"
+                    >
+                      <LookPicker
+                        accent={doc.accent}
+                        icon={doc.icon}
+                        heading={`${getWorkspaceIconLabel(doc.icon)} workspace`}
+                        onAccent={(accent) => void restyle(doc.id, { accent })}
+                        onIcon={(icon) => void restyle(doc.id, { icon })}
+                      />
+                      <button
+                        type="button"
+                        className="cc-btn mt-3 w-full justify-center py-1 text-xs"
+                        onClick={() => setStylingId(null)}
+                      >
+                        <IconCheck size={13} /> Done
+                      </button>
+                    </div>
+                  ) : null}
                 </article>
               ),
             )}

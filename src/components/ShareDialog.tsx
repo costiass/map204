@@ -7,6 +7,7 @@ import {
   findProfileByEmail,
   getProfile,
   listCollaborators,
+  notifyShare,
   removeCollaborator,
   updateCollaboratorRole,
   type CollaboratorRow,
@@ -40,7 +41,10 @@ export function ShareDialog({ document, currentUserId, onClose }: ShareDialogPro
   const [entries, setEntries] = useState<Entry[]>([])
   const [loading, setLoading] = useState(true)
   const [email, setEmail] = useState('')
-  const [role, setRole] = useState<CollaboratorRow['role']>('editor')
+  // Only the two roles that can be *granted*. 'owner' is not a choice here — it
+  // is whatever the document already has — so the type says so, rather than
+  // widening to the stored role and letting a cast smuggle it through later.
+  const [role, setRole] = useState<'editor' | 'viewer'>('editor')
   const [inviteError, setInviteError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const pushToast = useCanvasStore((s) => s.pushToast)
@@ -101,7 +105,7 @@ export function ShareDialog({ document, currentUserId, onClose }: ShareDialogPro
 
     const profile: ProfileRow | null = await findProfileByEmail(address)
     if (!profile) {
-      setInviteError('No ClassCards account uses that email address.')
+      setInviteError('No Map204 account uses that email address.')
       setBusy(false)
       return
     }
@@ -124,8 +128,20 @@ export function ShareDialog({ document, currentUserId, onClose }: ShareDialogPro
       return
     }
     setEmail('')
+
+    // The grant is already stored, so the mail is a follow-up rather than part
+    // of the operation. A failure is reported but never undoes the share, and
+    // the dialog closes either way.
     pushToast(`Shared with ${profile.full_name ?? profile.email}.`, 'success')
     await reload()
+
+    const sent = await notifyShare(document.id, address, role)
+    if (!sent.ok) {
+      pushToast(
+        `${profile.full_name ?? profile.email} has access, but the email did not send: ${sent.error}`,
+        'error',
+      )
+    }
   }
 
   const changeRole = async (userId: string, next: CollaboratorRow['role']) => {
@@ -172,28 +188,42 @@ export function ShareDialog({ document, currentUserId, onClose }: ShareDialogPro
         </header>
 
         {isOwner ? (
-          <div className="border-b border-line px-4 py-3">
-            <label className="mb-1.5 block text-xs font-semibold text-muted">
-              Invite by email
+          <div className="border-b border-line px-5 py-4">
+            <label
+              htmlFor="share-invite-email"
+              className="mb-2 block text-[13px] font-semibold text-ink"
+            >
+              Invite someone
             </label>
-            <div className="flex gap-2">
-              <input
-                className="cc-input min-w-0 flex-1"
-                placeholder="name@example.com"
-                value={email}
-                onChange={(event) => {
-                  setEmail(event.target.value)
-                  setInviteError(null)
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') void invite()
-                }}
-              />
+
+            {/* The email address is the only field a person has to think about,
+                so it gets the size and the prominence. The role is a refinement
+                with a sensible default, so it stays a quiet control underneath
+                rather than competing for attention beside it. */}
+            <input
+              id="share-invite-email"
+              type="email"
+              inputMode="email"
+              autoComplete="off"
+              spellCheck={false}
+              className="cc-input w-full px-3 py-2.5 text-sm"
+              placeholder="name@example.com"
+              value={email}
+              onChange={(event) => {
+                setEmail(event.target.value)
+                setInviteError(null)
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') void invite()
+              }}
+            />
+
+            <div className="mt-2 flex items-center gap-2">
               <select
-                className="cc-input w-auto"
+                className="cc-input w-auto py-1 text-xs"
                 value={role}
-                onChange={(event) => setRole(event.target.value as CollaboratorRow['role'])}
-                aria-label="Role"
+                onChange={(event) => setRole(event.target.value as 'editor' | 'viewer')}
+                aria-label="What they can do"
               >
                 {ROLES.map((value) => (
                   <option key={value} value={value}>
@@ -201,48 +231,54 @@ export function ShareDialog({ document, currentUserId, onClose }: ShareDialogPro
                   </option>
                 ))}
               </select>
+
               <button
                 type="button"
-                className="cc-btn"
+                className="cc-btn ml-auto"
                 data-variant="primary"
                 disabled={busy || !email.trim()}
                 onClick={() => void invite()}
               >
                 <IconUserPlus size={14} />
+                {busy ? 'Inviting…' : 'Invite'}
               </button>
             </div>
+
             {inviteError ? (
-              <p className="mt-1.5 text-xs text-danger">{inviteError}</p>
+              <p className="mt-2 text-xs text-danger">{inviteError}</p>
             ) : (
-              <p className="mt-1.5 text-xs text-muted">
-                The person must already have a ClassCards account.
+              <p className="mt-2 text-xs text-muted">
+                They need an account already. We'll email them a link.
               </p>
             )}
           </div>
         ) : null}
 
-        <ul className="cc-scroll flex-1 space-y-0.5 overflow-y-auto px-2 py-2">
+        <ul className="cc-scroll flex-1 space-y-1 overflow-y-auto px-3 py-2">
           {loading ? (
             <li className="px-2 py-4 text-sm text-muted">Loading…</li>
           ) : (
             entries.map((entry) => (
               <li
                 key={entry.userId}
-                className="flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-surface-alt"
+                className="group flex items-center gap-3 rounded-xl px-2 py-2.5 transition hover:bg-surface-alt"
               >
                 {entry.avatarUrl ? (
                   <img
                     src={entry.avatarUrl}
                     alt=""
-                    className="h-7 w-7 shrink-0 rounded-full object-cover"
+                    className="h-10 w-10 shrink-0 rounded-full object-cover"
                   />
                 ) : (
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand text-xs font-bold text-[var(--cc-on-brand)]">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand text-sm font-bold text-[var(--cc-on-brand)]">
                     {initialOf(entry.name, entry.email)}
                   </div>
                 )}
+
+                {/* Who this is, is the point of the row — so it is set large and
+                    the controls beside it are set small. */}
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm text-ink">
+                  <p className="truncate text-[15px] font-semibold text-ink-strong">
                     {entry.name ?? entry.email ?? 'Unknown user'}
                     {entry.userId === currentUserId ? ' (you)' : ''}
                   </p>
@@ -252,16 +288,16 @@ export function ShareDialog({ document, currentUserId, onClose }: ShareDialogPro
                 </div>
 
                 {entry.locked ? (
-                  <span className="cc-tag">Owner</span>
+                  <span className="cc-tag shrink-0">Owner</span>
                 ) : isOwner ? (
-                  <>
+                  <div className="flex shrink-0 items-center gap-0.5">
                     <select
-                      className="cc-input w-auto py-1 text-xs"
+                      className="cc-input w-auto py-0.5 text-[11px]"
                       value={entry.role}
                       onChange={(event) =>
                         void changeRole(entry.userId, event.target.value as CollaboratorRow['role'])
                       }
-                      aria-label={`Role for ${entry.email ?? entry.userId}`}
+                      aria-label={`What ${entry.name ?? entry.email ?? 'this person'} can do`}
                     >
                       {ROLES.map((value) => (
                         <option key={value} value={value}>
@@ -271,15 +307,16 @@ export function ShareDialog({ document, currentUserId, onClose }: ShareDialogPro
                     </select>
                     <button
                       type="button"
-                      className="cursor-pointer rounded p-1 text-muted hover:bg-danger-soft hover:text-danger dark:hover:bg-danger-soft"
+                      className="cursor-pointer rounded p-1 text-muted transition hover:bg-danger-soft hover:text-danger dark:hover:bg-danger-soft"
                       title="Remove access"
+                      aria-label={`Remove ${entry.name ?? entry.email ?? 'this person'}`}
                       onClick={() => void remove(entry.userId)}
                     >
                       <IconTrash size={14} />
                     </button>
-                  </>
+                  </div>
                 ) : (
-                  <span className="cc-tag">{entry.role}</span>
+                  <span className="cc-tag shrink-0">{entry.role}</span>
                 )}
               </li>
             ))

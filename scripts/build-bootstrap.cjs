@@ -59,7 +59,7 @@ function createdObjects() {
 const created = createdObjects()
 
 const preamble = () => `-- =============================================================================
--- ClassCards — complete schema, generated from supabase/migrations
+-- Map204 — complete schema, generated from supabase/migrations
 -- =============================================================================
 -- DO NOT EDIT. Rebuild it with:  npm run bootstrap
 --

@@ -1,4 +1,4 @@
-# ClassCards
+# Map204
 
 An infinite canvas for turning class notes into connected idea maps. Drop in
 cards, write Markdown, draw arrows between them, and share the result with the
@@ -85,7 +85,7 @@ wheel always zooms.
 connections, and saved viewport. Rename, reorder, and delete them.
 
 **Sharing.** The Share button in the toolbar lists who has access. As the owner
-you can invite somebody by email (they need a ClassCards account), give them
+you can invite somebody by email (they need a Map204 account), give them
 *Can edit* or *Can view*, and remove them. Editors change anything; viewers see
 the canvas but their writes are refused by the database.
 

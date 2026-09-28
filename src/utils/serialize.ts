@@ -255,7 +255,7 @@ export function normalizeDoc(raw: unknown): NormalizeResult {
   const stamp = nowIso()
 
   if (!isRecord(raw)) {
-    throw new Error('File does not contain a CardCanvas document object.')
+    throw new Error('File does not contain a Map204 document object.')
   }
 
   const rawPages = Array.isArray(raw.pages)

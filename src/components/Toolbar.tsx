@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { LoginPage } from '@/components/LoginPage'
+import { WorkspaceMark } from '@/components/WorkspaceMark'
+import { getWorkspaceAccent, getWorkspaceIconLabel } from '@/theme'
 import { supabase } from '@/lib/supabase'
 import type { SupabaseUser } from '@/lib/supabase'
 import {
@@ -99,6 +101,8 @@ export function Toolbar({
   const requestFitView = useCanvasStore((s) => s.requestFitView)
   const darkMode = useCanvasStore((s) => s.darkMode)
   const documentTitle = useCanvasStore((s) => s.documentTitle)
+  const documentAccent = useCanvasStore((s) => s.documentAccent)
+  const documentIcon = useCanvasStore((s) => s.documentIcon)
   const setDocumentTitle = useCanvasStore((s) => s.setDocumentTitle)
   const [showAuth, setShowAuth] = useState(false)
   const [showUserMenu, setShowUserMenu] = useState(false)
@@ -201,26 +205,37 @@ export function Toolbar({
         >
           <img src="/favicon.svg" alt="" width="22" height="22" className="shrink-0" />
           <span className="hidden shrink-0 text-sm font-bold tracking-tight text-ink-strong text-ink-strong sm:inline">
-            ClassCards
+            Map204
           </span>
         </button>
 
         <span className="h-5 w-px shrink-0 bg-line" />
 
         {isCanvas ? (
-          <input
-            key={documentId}
-            defaultValue={documentTitle}
-            aria-label="Workspace name"
-            placeholder="Untitled workspace"
-            className="min-w-0 flex-1 truncate rounded-md border border-transparent bg-transparent px-1.5 py-1 text-sm font-semibold text-ink outline-none hover:border-line focus:border-brand focus:bg-surface text-ink"
-            onChange={(event) => setDocumentTitle(event.target.value)}
-            onBlur={(event) => {
-              const clean = event.target.value.trim()
-              if (clean) setDocumentTitle(clean)
-              else setDocumentTitle('Untitled')
-            }}
-          />
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            {/* The workspace's own icon and colour, so you always know which
+                subject you are in without reading the title. */}
+            <span
+              className="grid h-6 w-6 shrink-0 place-items-center rounded-md"
+              style={{ background: getWorkspaceAccent(documentAccent).soft }}
+              title={getWorkspaceIconLabel(documentIcon)}
+            >
+              <WorkspaceMark icon={documentIcon} accent={documentAccent} size={13} />
+            </span>
+            <input
+              key={documentId}
+              defaultValue={documentTitle}
+              aria-label="Workspace name"
+              placeholder="Untitled workspace"
+              className="min-w-0 flex-1 truncate rounded-md border border-transparent bg-transparent px-1.5 py-1 text-sm font-semibold text-ink outline-none hover:border-line focus:border-brand focus:bg-surface text-ink"
+              onChange={(event) => setDocumentTitle(event.target.value)}
+              onBlur={(event) => {
+                const clean = event.target.value.trim()
+                if (clean) setDocumentTitle(clean)
+                else setDocumentTitle('Untitled')
+              }}
+            />
+          </div>
         ) : (
           <h1 className="min-w-0 flex-1 truncate px-1.5 text-sm font-semibold text-ink">
             All workspaces

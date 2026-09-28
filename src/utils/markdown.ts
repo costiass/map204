@@ -1,7 +1,7 @@
 /**
  * A small, dependency-free Markdown renderer.
  *
- * CardCanvas stores card bodies as Markdown, which is also the document
+ * Map204 stores card bodies as Markdown, which is also the document
  * format, so an image is just a Markdown image wherever you like:
  *
  *     ![diagram](https://example.com/x.png)

@@ -1,6 +1,6 @@
 # API Reference
 
-Every request ClassCards makes. There is no custom server: REST goes through
+Every request Map204 makes. There is no custom server: REST goes through
 PostgREST (`/rest/v1`) and collaboration goes through Supabase Realtime
 (`/realtime/v1`). All of it is in the schema under `supabase/migrations/`.
 
@@ -42,8 +42,10 @@ email/password table and no session endpoint in this app.
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `text` PK | client- or server-generated, e.g. `doc_…` |
-| `owner_id` | `text` → `auth.users.id` | the person who created it |
+| `owner_id` | `uuid` → `auth.users.id` | the person who created it. A `uuid` so a real foreign key exists and PostgREST can infer joins — never cast from `text`. |
 | `title` | `text` | shown in the workspace list and share dialog |
+| `accent` | `text` | the workspace's colour, as a token name (`indigo`…`slate`). Constrained by `documents_accent_check`. |
+| `icon` | `text` | the workspace's lucide icon name. Constrained by `documents_icon_check`. |
 | `settings` | `jsonb` | document-wide defaults (`DocSettings`), `{}` until changed |
 | `created_at` / `updated_at` | `timestamptz` | `updated_at` is kept fresh by `trg_documents_touch` |
 
@@ -100,11 +102,12 @@ A safe mirror of `auth.users` (id, email, name, avatar), written by
 
 | Operation | Request | Called from | When |
 |-----------|---------|-------------|------|
-| List my workspaces | `GET /documents?owner_id=eq.<uid>&select=id,owner_id,title,created_at,updated_at&order=updated_at.desc` | `listDocuments` | workspace page |
+| List my workspaces | `GET /documents?owner_id=eq.<uid>&select=id,owner_id,title,accent,icon,created_at,updated_at&order=updated_at.desc` | `listDocuments` | workspace page |
 | List shared with me | `GET /document_collaborators?user_id=eq.<uid>&select=role,document:documents(...)` | `listDocuments` | workspace page |
-| Create workspace | `POST /documents` body `{ owner_id, title }` | `createDocument` | "Create" |
+| Create workspace | `POST /documents` body `{ owner_id, title, accent?, icon? }` | `createDocument` | "Create" |
 | Get one | `GET /documents?id=eq.<docId>&select=*` | `getDocument` | opening a workspace |
 | Rename | `PATCH /documents?id=eq.<docId>` body `{ title }` | `renameDocument` | pencil in the workspace list |
+| Change colour / icon | `PATCH /documents?id=eq.<docId>` body `{ accent?, icon? }` | `setDocumentLook` | palette button on a tile |
 | Save doc defaults | `PATCH /documents?id=eq.<docId>` body `{ settings }` | `saveDocumentSettings` | a default style changed |
 | Delete | `DELETE /documents?id=eq.<docId>` | `deleteDocument` | trash in the workspace list |
 
@@ -151,9 +154,25 @@ the trigger repairs itself on first sign-in.
 | Change role | `PATCH /document_collaborators?document_id=eq.<docId>&user_id=eq.<uid>` body `{ role }` | `ShareDialog` |
 | Remove | `DELETE /document_collaborators?document_id=eq.<docId>&user_id=eq.<uid>` | `ShareDialog` |
 | Profile of one user | `GET /profiles?id=eq.<uid>` | `ShareDialog` (owner row) |
+| Notify by email | `POST /functions/v1/send-share-email` body `{ documentId, to, role }` | `ShareDialog`, after a successful invite |
 
 `find_profile_by_email` is `SECURITY DEFINER` and matches exactly, so nobody can
 enumerate accounts by probing for near-misses.
+
+### The share email
+
+`send-share-email` is an Edge Function, not a table. It exists because the Resend
+key cannot sit in a browser and the anon key is public by design.
+
+It is also the authorisation boundary: with the service role key it re-checks
+that the caller is signed in and is the owner or an editor of that workspace
+before it will name the workspace in an email. Without that check the endpoint
+would be an open relay, and a viewer could mail the contents of a workspace they
+had only been lent.
+
+The invite is written to `document_collaborators` first and the mail is a
+follow-up, so a failure never undoes the grant. See
+`supabase/functions/README.md`.
 
 ---
 

@@ -53,9 +53,80 @@ Work to do, in the order it makes sense. Each item is checked off as it lands.
       existed; a duplicate page id now overwrites the row instead of failing. The
       error toast points at the console, where the reason is logged.
 
+## Import, again
+
+- [x] **Importing a file whose page ids belong to another workspace.** The first
+      fix overwrote the colliding row, which tried to move a page between
+      workspaces; RLS correctly answered `42501`, and the import still failed. A
+      colliding page id is now renumbered on the way in, and the import applies
+      the same renumbering to its local copy so both sides agree on the ids.
+
+## Sharing and identity
+
+- [x] **Other people appear at all.** Presence was published under camelCase keys
+      and read under snake_case, so every remote row was discarded: no avatars, no
+      cursors. Both formats are now explicit at each end.
+- [x] **Google pictures show up.** The profile sync is a callable function, the
+      trigger uses it, and a migration re-derives every existing profile. A blank
+      profile used to be permanent, because the backfill ended in
+      `on conflict do nothing` and could only ever create a row, never fix one.
+
+## Naming
+
+- [x] **The app is Map204.** Title, description, package name, login, 404, share
+      dialog, toolbar wordmark and the exported filename. Migration `…90700`
+      corrects the tutorial card title forward rather than editing `…90500`,
+      which may already be applied.
+
+## Sharing panel
+
+- [x] **The invite box is the primary action.** The email field is full width and
+      large; the role selector and button drop to a quiet row underneath. A
+      person's name in the list is set large; the role control beside it is small.
+      The `role` state is typed `'editor' | 'viewer'` rather than the stored
+      union, so `'owner'` cannot be smuggled in through a cast.
+
+## Workspace looks
+
+- [x] **Every workspace has a colour and an icon**, chosen by its owner and shown
+      consistently: the tile in the list, the dot on the tile, the badge beside
+      the title in the chrome, and the email.
+  - [x] Stored as a *token name*, never a hex, so it recolours with the theme.
+  - [x] Constrained by check constraints in the database, so an unknown value
+        cannot reach the browser and render as an empty box.
+  - [x] Existing workspaces are assigned colours by position, so the list does
+        not open as a wall of identical tiles.
+  - [x] `npm run test:workspace-look` keeps the theme, the database constraints
+        and the email's copy of both lists in agreement, hex values included.
+
+## Sharing by email
+
+- [x] **Inviting someone emails them a link**, in the site's own design, naming
+      who shared, the workspace and the role.
+  - [x] Sent by a Supabase Edge Function, because the Resend key cannot live in
+        a browser and the anon key is public by design.
+  - [x] The function re-checks the caller owns or edits the workspace before it
+        will name it — without that it would be an open mail relay.
+  - [x] A failed email never undoes the invite; the grant is written first and
+        the dialog says so if the mail does not go out.
+  - [x] `supabase/functions/README.md` has the setup.
+
+## Tutorial
+
+- [x] **The tutorial shows the full potential of the app** across two pages
+      rather than five cards in a row: groups, a card-in-a-group, links between
+      groups and cards, every relationship, all three strokes, all three
+      routings, several arrowheads, checklists, and a worked argument on page 2.
+  - [x] Cards are laid out with real breathing room and a working viewport.
+  - [x] `npm run test:tutorial` checks the migration's hand-written JSONB for
+        balance and for the features it is meant to demonstrate — a dropped comma
+        in that file would otherwise only surface against a live database.
+
 ## Notes
 
 - Migrations are idempotent and `supabase/bootstrap.sql` is generated from them;
   run `npm run bootstrap` after adding one, or CI fails. The generator derives
   its drop list from the migrations, so a new table or function cannot be missed.
+- Never edit an applied migration. Add a new one — `…90700` exists for exactly
+  this reason.
 - `npm test` covers the drift detection and the generated bootstrap.

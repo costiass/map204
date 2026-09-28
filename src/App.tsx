@@ -22,6 +22,7 @@ import type { DocumentRow } from '@/store/supabase-sync'
 import { useCanvasStore } from '@/store/useCanvasStore'
 import { useUserSettings } from '@/store/userSettings'
 import type { SupabaseUser } from '@/lib/supabase'
+import { DEFAULT_WORKSPACE_ACCENT, DEFAULT_WORKSPACE_ICON } from '@/theme'
 
 export default function App() {
   useKeyboardShortcuts()
@@ -102,6 +103,10 @@ export default function App() {
 
         setDocument(loaded.document)
         store.setDocumentTitle(loaded.document.title)
+        store.setDocumentLookState({
+          accent: loaded.document.accent ?? DEFAULT_WORKSPACE_ACCENT,
+          icon: loaded.document.icon ?? DEFAULT_WORKSPACE_ICON,
+        })
         primePageSync(currentDocId, loaded)
 
         store.hydrateDocument({

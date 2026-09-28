@@ -1,8 +1,8 @@
-# ClassCards Architecture Documentation
+# Map204 Architecture Documentation
 
 ## Overview
 
-ClassCards is a real-time collaborative card-based canvas application built with React, TypeScript, and Supabase. It features a Google Docs-style workspace with real-time collaboration via WebSocket.
+Map204 is a real-time collaborative card-based canvas application built with React, TypeScript, and Supabase. It features a Google Docs-style workspace with real-time collaboration via WebSocket.
 
 ## System Architecture
 

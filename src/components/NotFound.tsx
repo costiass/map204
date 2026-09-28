@@ -14,7 +14,7 @@ export function NotFound({ path }: { path: string }) {
         </div>
         <h1 className="text-lg font-semibold text-ink-strong">Nothing at this address</h1>
         <p className="mt-1 text-sm text-muted">
-          <code className="cc-inline-code">{path}</code> is not a page in ClassCards. It may have
+          <code className="cc-inline-code">{path}</code> is not a page in Map204. It may have
           been renamed, or the link may be incomplete.
         </p>
         <div className="mt-5 flex justify-center gap-2">

@@ -2,7 +2,7 @@
 # Run `supabase init` locally to set up, then `supabase db push` to deploy schema
 
 [project]
-id = "classcards"
+id = "map204"
 
 [api]
 enabled = true

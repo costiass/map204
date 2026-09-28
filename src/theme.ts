@@ -51,6 +51,79 @@ export function getAccent(id: string | null | undefined): Accent {
   return ACCENTS.find((accent) => accent.id === id) ?? ACCENTS[0]
 }
 
+/* ------------------------------------------------------------------ */
+/* Workspace looks                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A workspace can be tinted with any accent, which is why this is separate from
+ * `AccentId`: the theme accent is a *reader* preference, while a workspace
+ * colour is a property of the subject that must look the same to everybody it is
+ * shared with. 'slate' has no entry in `ACCENTS` and is defined here, because a
+ * deliberately neutral workspace is a reasonable thing to want and has no
+ * equivalent in the reader's own accent list.
+ */
+export type WorkspaceAccentId = AccentId | 'slate'
+
+const SLATE: Accent = {
+  id: 'slate' as AccentId,
+  label: 'Slate',
+  base: '#64748b',
+  hover: '#475569',
+  soft: '#f1f5f9',
+  onBase: '#ffffff',
+  ink: '#334155',
+}
+
+export const WORKSPACE_ACCENTS: Accent[] = [...ACCENTS, SLATE]
+
+export const DEFAULT_WORKSPACE_ACCENT: WorkspaceAccentId = 'indigo'
+
+export function getWorkspaceAccent(id: string | null | undefined): Accent {
+  return WORKSPACE_ACCENTS.find((accent) => accent.id === id) ?? WORKSPACE_ACCENTS[0]
+}
+
+/**
+ * The icons a workspace may carry, and the label each is offered under.
+ *
+ * The `id` values are stored in the database and constrained there by a check
+ * constraint (`documents_icon_check`), so this list and that constraint have to
+ * agree. `scripts/test-workspace-look.cjs` fails the build if they drift.
+ */
+export interface WorkspaceIcon {
+  id: string
+  label: string
+}
+
+export const WORKSPACE_ICONS: WorkspaceIcon[] = [
+  { id: 'layout-grid', label: 'General' },
+  { id: 'book-open', label: 'Reading' },
+  { id: 'graduation-cap', label: 'Course' },
+  { id: 'flask-conical', label: 'Science' },
+  { id: 'globe', label: 'Geography' },
+  { id: 'calculator', label: 'Maths' },
+  { id: 'microscope', label: 'Biology' },
+  { id: 'languages', label: 'Languages' },
+  { id: 'palette', label: 'Art' },
+  { id: 'music', label: 'Music' },
+  { id: 'code', label: 'Computing' },
+  { id: 'map', label: 'Maps' },
+  { id: 'lightbulb', label: 'Ideas' },
+  { id: 'presentation', label: 'Seminar' },
+  { id: 'brain', label: 'Theory' },
+  { id: 'library', label: 'Research' },
+]
+
+export const DEFAULT_WORKSPACE_ICON = 'layout-grid'
+
+export function isWorkspaceIcon(id: string | null | undefined): boolean {
+  return WORKSPACE_ICONS.some((icon) => icon.id === id)
+}
+
+export function getWorkspaceIconLabel(id: string | null | undefined): string {
+  return WORKSPACE_ICONS.find((icon) => icon.id === id)?.label ?? 'General'
+}
+
 export interface ThemeTokens {
   /** Page background behind the canvas. */
   canvas: string

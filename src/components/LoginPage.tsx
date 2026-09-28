@@ -50,7 +50,7 @@ export function LoginPage({ onAuth }: LoginPageProps) {
     <div className="cc-modal-backdrop">
       <div className="cc-panel w-80 p-6 text-center">
         <img src="/favicon.svg" alt="Logo" width="40" height="40" className="mx-auto mb-3" />
-        <h2 className="mb-1 text-lg font-bold text-ink">Sign in to ClassCards</h2>
+        <h2 className="mb-1 text-lg font-bold text-ink">Sign in to Map204</h2>
         <p className="mb-4 text-xs text-muted">
           Sync your workspace across devices. Collaborate in real time.
         </p>

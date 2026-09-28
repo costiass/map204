@@ -1,5 +1,5 @@
 /**
- * CardCanvas data model.
+ * Map204 data model.
  *
  * Coordinate contract (important):
  *  - `position.x` / `position.y` are CANVAS / WORLD coordinates.
