@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 
 import { DocTypeBadge } from '@/components/DocTypeBadge'
+import { Map204Logo } from '@/components/Map204Logo'
 import { LookPicker } from '@/components/LookPicker'
 import { WorkspaceDot, WorkspaceMark } from '@/components/WorkspaceMark'
 import {
@@ -161,6 +162,18 @@ export function WorkspacePage({ userId, onOpenDocument }: WorkspacePageProps) {
 
   return (
     <div className="cc-scroll h-full w-full overflow-y-auto">
+      {/*
+        The mark, centred above everything, in the place a browser puts its own.
+
+        This is the screen a person arrives at before they have a map open, so it
+        is the one place the product's name belongs. Above the search and above
+        the heading, because neither of those is the first thing they are looking
+        at — they are looking for the thing they left.
+      */}
+      <div className="flex justify-center px-6 pt-8">
+        <Map204Logo className="h-9 w-auto" />
+      </div>
+
       <div className="mx-auto w-full max-w-4xl px-6 py-8">
         <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
           <div>
