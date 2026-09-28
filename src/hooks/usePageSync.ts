@@ -391,18 +391,24 @@ export function usePageSync() {
           if (row) {
             setKnownPageVersion(page.id, row.version)
           } else {
-            // The insert was refused. Say so in terms of the user, and stop
-            // retrying: leaving the page out of `knownPages` would make every
-            // subsequent pass try the same doomed insert, which is how one
-            // refused write turns into a console full of them.
+            // The insert was refused. Report it and stop retrying: leaving the
+            // page out of `knownPages` would make every subsequent pass attempt
+            // the same doomed insert, which is how one refused write becomes a
+            // console full of them.
             //
-            // A 42501 here means the signed-in account cannot edit *this*
-            // workspace — most often a viewer, who can open a shared workspace
-            // and then cannot add a page to it.
+            // The wording depends on what is actually *known*. The role is read
+            // from the database, so a viewer is told so, while an editor is told
+            // this is a bug — which is the honest answer, and the one that stops
+            // a permissions guess from being mistaken for a diagnosis. The
+            // previous wording asserted view-only access and was simply wrong for
+            // an editor whose write was being refused.
+            const role = useCanvasStore.getState().documentRole
             useCanvasStore
               .getState()
               .pushToast(
-                `Could not add the page “${page.title}” to this workspace. You may have view-only access.`,
+                role === 'viewer'
+                  ? `Cannot add a page — you have view-only access to this workspace.`
+                  : `Could not save the new page “${page.title}”. If you have edit access, this is a bug — the details are in the console.`,
                 'error',
               )
             return

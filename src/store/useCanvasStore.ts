@@ -59,9 +59,16 @@ export interface CanvasStore {
   /** The workspace's own colour and icon, shown beside the title. */
   documentAccent: string
   documentIcon: string
+  /**
+   * What the signed-in account may do here, read from the database rather than
+   * guessed from a failed write. `null` until it is known, and `null` for an
+   * account with no access at all.
+   */
+  documentRole: 'owner' | 'editor' | 'viewer' | null
   setDocumentId: (id: string | null) => void
   setDocumentTitle: (title: string) => void
   setDocumentLookState: (look: { accent?: string; icon?: string }) => void
+  setDocumentRole: (role: 'owner' | 'editor' | 'viewer' | null) => void
   setDarkMode: (enabled: boolean) => void
   setGridSize: (size: number) => void
 
@@ -305,6 +312,7 @@ export const useCanvasStore = create<CanvasStore>()(
       documentTitle: '',
       documentAccent: DEFAULT_WORKSPACE_ACCENT,
       documentIcon: DEFAULT_WORKSPACE_ICON,
+      documentRole: null,
 
       selectedCardIds: [],
       selectedConnectionIds: [],
@@ -377,6 +385,8 @@ export const useCanvasStore = create<CanvasStore>()(
           ...(look.accent !== undefined ? { documentAccent: look.accent } : null),
           ...(look.icon !== undefined ? { documentIcon: look.icon } : null),
         }),
+
+      setDocumentRole: (documentRole) => set({ documentRole }),
 
       setDarkMode: (enabled) => set({ darkMode: enabled }),
 

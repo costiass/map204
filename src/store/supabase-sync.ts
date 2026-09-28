@@ -660,6 +660,46 @@ export async function listCollaborators(documentId: string): Promise<Collaborato
   }))
 }
 
+/**
+ * What the signed-in account may do in this workspace: `owner`, `editor`,
+ * `viewer`, or `null` when it is not a collaborator at all.
+ *
+ * This exists because the app was guessing. A refused write was being reported
+ * as "you may have view-only access", which is wrong whenever the real cause is
+ * something else — and it was wrong, for an account that genuinely was an
+ * editor. Guessing at a cause is how a schema bug gets reported to the user as a
+ * permissions problem, so the role is read from the same table the share dialog
+ * uses, and the question is answered rather than assumed.
+ *
+ * Note the owner check: `add_document_owner` is never called, so the owner has
+ * no `document_collaborators` row and must be identified by `documents.owner_id`.
+ */
+export async function fetchMyRole(
+  documentId: string,
+  userId: string,
+): Promise<'owner' | 'editor' | 'viewer' | null> {
+  const db = authRequired()
+  if (!db) return null
+
+  const document = await getDocument(documentId)
+  if (!document) return null
+  if (document.owner_id === userId) return 'owner'
+
+  const { data, error } = await db
+    .from('document_collaborators')
+    .select('role')
+    .eq('document_id', documentId)
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (error) {
+    await handleWriteError(error, 'sync:fetchMyRole')
+    return null
+  }
+  const role = (data as { role?: string } | null)?.role
+  return role === 'owner' || role === 'editor' || role === 'viewer' ? role : null
+}
+
 /** `POST /rpc/find_profile_by_email` — exact match only. */
 export async function findProfileByEmail(email: string): Promise<ProfileRow | null> {
   const db = authRequired()

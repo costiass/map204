@@ -43,7 +43,7 @@ export function CursorLayer() {
   }, [followingId])
 
   useEffect(() => {
-    if (!cursor || cursorPageId !== activePageId) return
+    if (!cursor) return
     if (spacePressed) return // the user is panning; do not fight them
 
     // Act only when the pointer has really moved. Without this, the viewport
@@ -51,6 +51,16 @@ export function CursorLayer() {
     const previous = lastFollowed.current
     if (previous && previous.x === cursor.x && previous.y === cursor.y) return
     lastFollowed.current = cursor
+
+    // Following somebody who is on another page means going to that page, not
+    // centring on coordinates that mean nothing here. Every page is its own
+    // coordinate space, so the same numbers describe different cards.
+    if (cursorPageId !== activePageId) {
+      if (cursorPageId && useCanvasStore.getState().doc.pages.some((p) => p.id === cursorPageId)) {
+        useCanvasStore.getState().setActivePage(cursorPageId)
+      }
+      return
+    }
 
     const store = useCanvasStore.getState()
     const page = store.doc.pages.find((p) => p.id === activePageId)

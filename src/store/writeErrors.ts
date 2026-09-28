@@ -33,11 +33,17 @@ export async function handleWriteError(
     return
   }
 
-  // 42501 with "row-level security policy" is Postgres naming the rule that
-  // refused the write, which tells a developer everything and a person using the
-  // app nothing. Every row in this schema is behind RLS, so it is the expected
-  // answer for "you do not have permission to do that" — worth saying in words,
-  // once, rather than leaving the raw string in the console to be decoded.
+  // 42501 is Postgres naming the rule that refused the write. It tells a
+  // developer exactly what happened and a person using the app nothing, so it is
+  // worth translating — but only into what the error *establishes*.
+  //
+  // It does not establish why. RLS refuses for at least three unrelated reasons
+  // here: the account genuinely lacks access, the page belongs to a workspace
+  // it does not own, or — as happened — the account is a legitimate editor and
+  // the policy is still refusing, which means the cause is a bug. Naming any one
+  // of those as *the* cause sends the reader hunting for a problem they do not
+  // have, so the message states the refusal and points at the console, which has
+  // the code and the statement.
   if (error?.code === '42501' && /row-level security/i.test(error.message ?? '')) {
     const key = `rls:${context}`
     if (!explained.has(key)) {
@@ -45,13 +51,13 @@ export async function handleWriteError(
       useCanvasStore
         .getState()
         .pushToast(
-          'You do not have permission to change this workspace. Ask the owner for edit access.',
+          'The server refused that change. If you have edit access, this is a bug — the details are in the console.',
           'error',
         )
     }
   }
 
-  console.error(`[${context}]`, error?.message ?? error)
+  console.error(`[${context}]`, error?.code ?? '', error?.message ?? error)
 }
 
 /** Lets a later sign-in report the problem again. */

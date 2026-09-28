@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { ColorPicker } from '@/components/ColorPicker'
 import { IconPencil, IconPlus, IconTrash, IconX } from '@/components/Icons'
 import { useCanvasStore } from '@/store/useCanvasStore'
+import { usePresence } from '@/store/presence'
 import { collectColors, collectTags, isFiltering, normalizeColor } from '@/utils/filters'
 
 interface PageSidebarProps {
@@ -23,6 +24,17 @@ export function PageSidebar({ onClose }: PageSidebarProps) {
   const clearFilters = useCanvasStore((s) => s.clearFilters)
 
   const [renamingId, setRenamingId] = useState<string | null>(null)
+
+  // Who is looking at which page. A pointer is only drawn for people on the page
+  // you are on, so without this the sidebar would be the only place you could
+  // tell that somebody had moved to another page — which is exactly the moment
+  // you would want to know, and the moment following needs to handle.
+  const presence = usePresence((s) => s.entries)
+  const viewersByPage = presence.reduce<Record<string, typeof presence>>((map, entry) => {
+    if (!entry.pageId) return map
+    ;(map[entry.pageId] ??= []).push(entry)
+    return map
+  }, {})
 
   const activePage = pages.find((page) => page.id === activePageId)
   const tags = activePage ? collectTags(activePage.cards) : []
@@ -63,6 +75,35 @@ export function PageSidebar({ onClose }: PageSidebarProps) {
                   {page.title || 'Untitled page'}
                   <span className="ml-1.5 text-[11px] font-normal text-muted">{page.cards.length}</span>
                 </button>
+
+                {/* Who is on this page. On your own page it is redundant with
+                    the pointers, but on any other page it is the only sign
+                    somebody is working over there. */}
+                {viewersByPage[page.id]?.length ? (
+                  <span className="flex shrink-0 items-center -space-x-1.5">
+                    {viewersByPage[page.id].slice(0, 3).map((entry) => (
+                      <span
+                        key={entry.userId}
+                        className="block h-5 w-5 overflow-hidden rounded-full border-2 border-[var(--cc-surface)]"
+                        style={{ background: entry.color }}
+                        title={`${entry.name} is on this page`}
+                      >
+                        {entry.avatarUrl ? (
+                          <img src={entry.avatarUrl} alt="" className="h-full w-full object-cover" />
+                        ) : (
+                          <span className="grid h-full w-full place-items-center text-[9px] font-bold text-white">
+                            {entry.name.trim().charAt(0).toUpperCase()}
+                          </span>
+                        )}
+                      </span>
+                    ))}
+                    {viewersByPage[page.id].length > 3 ? (
+                      <span className="grid h-5 w-5 place-items-center rounded-full border-2 border-[var(--cc-surface)] bg-[var(--cc-muted)] text-[9px] font-bold text-white">
+                        +{viewersByPage[page.id].length - 3}
+                      </span>
+                    ) : null}
+                  </span>
+                ) : null}
                 {renamingId === page.id ? (
                   <input
                     autoFocus

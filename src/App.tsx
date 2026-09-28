@@ -17,7 +17,7 @@ import { WorkspacePage } from '@/components/WorkspacePage'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 import { primePageSync, resetPageSync, usePageSync } from '@/hooks/usePageSync'
 import { navigate, migrateLegacyHash, useRoute } from '@/router'
-import { loadDocument } from '@/store/supabase-sync'
+import { loadDocument, fetchMyRole } from '@/store/supabase-sync'
 import type { DocumentRow } from '@/store/supabase-sync'
 import { useCanvasStore } from '@/store/useCanvasStore'
 import { useUserSettings } from '@/store/userSettings'
@@ -107,6 +107,13 @@ export default function App() {
           accent: loaded.document.accent ?? DEFAULT_WORKSPACE_ACCENT,
           icon: loaded.document.icon ?? DEFAULT_WORKSPACE_ICON,
         })
+
+        // Read the role rather than inferring it from a refused write later. The
+        // two requests are independent, so this does not delay the canvas.
+        void fetchMyRole(currentDocId, user.id).then((role) => {
+          if (!cancelled) store.setDocumentRole(role)
+        })
+
         primePageSync(currentDocId, loaded)
 
         store.hydrateDocument({
