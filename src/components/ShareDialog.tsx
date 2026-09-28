@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { IconTrash, IconUserPlus } from '@/components/Icons'
+import { initialOf } from '@/store/presence'
 import {
   addCollaborator,
   findProfileByEmail,
@@ -237,7 +238,7 @@ export function ShareDialog({ document, currentUserId, onClose }: ShareDialogPro
                   />
                 ) : (
                   <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand text-xs font-bold text-[var(--cc-on-brand)]">
-                    {(entry.name ?? entry.email ?? '?').charAt(0).toUpperCase()}
+                    {initialOf(entry.name, entry.email)}
                   </div>
                 )}
                 <div className="min-w-0 flex-1">

@@ -37,6 +37,31 @@ export async function getAccessToken(): Promise<string | null> {
   return data.session?.access_token ?? null
 }
 
+/**
+ * PostgREST error 23503 — the request referenced an `auth.users` row that is not
+ * there.
+ *
+ * In this app that almost always means one thing: the session's user was
+ * deleted (a database rebuilt, an account removed) while the browser still held
+ * its JWT. The token keeps verifying, because the project's signing secret did
+ * not change, so the app believes it is signed in and every write fails on a
+ * foreign key.
+ */
+export function isMissingAuthUser(error: { code?: string } | null | undefined): boolean {
+  return error?.code === '23503'
+}
+
+/**
+ * Confirms the session still names a real account. GoTrue answers 403 for a
+ * token whose `sub` no longer exists, which is the only way to notice this
+ * before the first write fails.
+ */
+export async function sessionUserExists(): Promise<boolean> {
+  if (!supabase) return false
+  const { data, error } = await supabase.auth.getUser()
+  return !error && Boolean(data.user)
+}
+
 export type SupabaseUser = {
   id: string
   email: string

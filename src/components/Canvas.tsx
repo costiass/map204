@@ -3,6 +3,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react'
 
 import { CardNode } from '@/components/CardNode'
 import { ConnectionLayer } from '@/components/ConnectionLayer'
+import { CursorLayer } from '@/components/CursorLayer'
 import type { DraftConnection } from '@/components/ConnectionLayer'
 import { EmptyState } from '@/components/EmptyState'
 import { GroupNode } from '@/components/GroupNode'
@@ -945,7 +946,10 @@ export function Canvas() {
     const store = useCanvasStore.getState()
     store.addCard({
       title: 'New card',
-      content: '<p></p>',
+      // An empty body. This used to be seeded with '<p></p>', which is HTML
+      // rather than Markdown: the card showed a stray empty paragraph, and the
+      // renderer escaped the tags into visible text.
+      content: '',
       position: {
         x: Math.round(point.x - 140),
         y: Math.round(point.y - 90),
@@ -1075,6 +1079,10 @@ export function Canvas() {
             style={{ left: marqueeRect.x, top: marqueeRect.y, width: marqueeRect.width, height: marqueeRect.height }}
           />
         ) : null}
+
+        {/* Other people's pointers, above the cards. Ephemeral: broadcast only,
+            never part of the document or anybody's undo history. */}
+        <CursorLayer />
       </div>
 
       {cards.length === 0 ? <EmptyState onFit={fitView} /> : null}

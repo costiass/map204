@@ -42,6 +42,7 @@ export default function App() {
   const [user, setUser] = useState<SupabaseUser | null>(null)
   const [document_, setDocument] = useState<DocumentRow | null>(null)
   const [showShare, setShowShare] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
   const [loadingDoc, setLoadingDoc] = useState(false)
   const settings = useUserSettings((s) => s.settings)
   const loadSettings = useUserSettings((s) => s.loadSettings)
@@ -127,6 +128,14 @@ export default function App() {
     }
   }, [currentDocId, user])
 
+  // A saved /settings link opens the overlay and cleans the address bar, since
+  // settings is no longer a page of its own.
+  useEffect(() => {
+    if (route.name !== 'settings') return
+    setShowSettings(true)
+    navigate.replace('/')
+  }, [route])
+
   const openDocument = useCallback((docId: string) => {
     navigate.workspace(docId)
   }, [])
@@ -136,7 +145,7 @@ export default function App() {
   }, [])
 
   const openSettings = useCallback(() => {
-    navigate.settings()
+    setShowSettings(true)
   }, [])
 
   const shell = (children: React.ReactNode) => (
@@ -152,6 +161,19 @@ export default function App() {
           onUserChange={setUser}
         />
         {children}
+
+        {/* Both panels are overlays, so they work the same on every screen. */}
+        {showShare && user && document_ ? (
+          <ShareDialog
+            document={document_}
+            currentUserId={user.id}
+            onClose={() => setShowShare(false)}
+          />
+        ) : null}
+        {showSettings && user ? (
+          <UserSettingsPage user={user} onClose={() => setShowSettings(false)} />
+        ) : null}
+
         <ContextMenu />
         <ImportExportDialog />
         <Toasts />
@@ -164,22 +186,6 @@ export default function App() {
     return shell(
       <div className="min-h-0 flex-1 overflow-hidden">
         <NotFound path={route.path} />
-      </div>,
-    )
-  }
-
-  // Settings (its own address). The panel is a fixed overlay, so this branch
-  // only needs a mount point that does not scroll.
-  if (route.name === 'settings') {
-    return shell(
-      <div className="min-h-0 flex-1 overflow-hidden">
-        {user ? (
-          <UserSettingsPage user={user} onClose={openWorkspace} />
-        ) : (
-          <div className="flex h-full items-center justify-center text-sm text-muted">
-            Please sign in to access settings.
-          </div>
-        )}
       </div>,
     )
   }
@@ -223,13 +229,6 @@ export default function App() {
         <Inspector />
       </div>
 
-      {showShare && user && document_ ? (
-        <ShareDialog
-          document={document_}
-          currentUserId={user.id}
-          onClose={() => setShowShare(false)}
-        />
-      ) : null}
     </>,
   )
 }

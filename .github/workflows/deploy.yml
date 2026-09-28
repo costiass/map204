@@ -11,6 +11,8 @@ on:
       - 'vercel.json'
       - 'index.html'
       - 'public/**'
+      - 'supabase/**'
+      - 'scripts/**'
   pull_request:
     branches: [main]
     paths:
@@ -21,13 +23,15 @@ on:
       - 'vercel.json'
       - 'index.html'
       - 'public/**'
+      - 'supabase/**'
+      - 'scripts/**'
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -40,6 +44,18 @@ jobs:
 
       - name: Type check
         run: npx tsc -b --noEmit
+
+      # The generated bootstrap must contain every migration, drop what it
+      # recreates, and record what it applied. A failure here means a migration
+      # was added without regenerating it.
+      - name: Check the generated bootstrap
+        run: |
+          node scripts/build-bootstrap.cjs
+          git diff --exit-code -- supabase/bootstrap.sql || {
+            echo "::error::supabase/bootstrap.sql is out of date. Run: npm run bootstrap"
+            exit 1
+          }
+          node scripts/test-bootstrap.cjs
 
       - name: Build
         run: npm run build

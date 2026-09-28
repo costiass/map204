@@ -9,7 +9,10 @@
     "typecheck": "tsc -b",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test:drift": "node scripts/test-drift-detection.cjs"
+    "test:drift": "node scripts/test-drift-detection.cjs",
+    "bootstrap": "node scripts/build-bootstrap.cjs",
+    "test:bootstrap": "node scripts/build-bootstrap.cjs --check",
+    "test": "npm run typecheck && npm run test:drift && node scripts/test-bootstrap.cjs && npm run test:bootstrap"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",

@@ -23,7 +23,7 @@ import {
   IconZoomOut,
 } from '@/components/Icons'
 import { flushPageNow } from '@/hooks/usePageSync'
-import { usePresence } from '@/store/presence'
+import { firstNameOf, initialOf, usePresence } from '@/store/presence'
 import { useCanvasStore } from '@/store/useCanvasStore'
 import { useUserSettings } from '@/store/userSettings'
 import { zoomAtPoint } from '@/utils/geometry'
@@ -111,6 +111,8 @@ export function Toolbar({
   // store writes the change to `user_settings`.
   const setTheme = useUserSettings((s) => s.setTheme)
   const presence = usePresence((s) => s.entries)
+  const followingId = usePresence((s) => s.followingId)
+  const setFollowing = usePresence((s) => s.setFollowing)
 
   const others = presence.filter((entry) => entry.userId !== user?.id)
 
@@ -225,32 +227,6 @@ export function Toolbar({
           </h1>
         )}
 
-        {isCanvas && others.length > 0 ? (
-          <div
-            className="hidden shrink-0 items-center sm:flex"
-            title={`Also here: ${others.map((entry) => entry.name).join(', ')}`}
-          >
-            {others.slice(0, 3).map((entry) => (
-              <span
-                key={entry.userId}
-                className="-ml-1.5 flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border-2 border-surface text-[10px] font-bold text-[var(--cc-on-brand)] first:ml-0"
-                style={{ background: entry.color }}
-              >
-                {entry.avatarUrl ? (
-                  <img src={entry.avatarUrl} alt={entry.name} className="h-full w-full object-cover" />
-                ) : (
-                  entry.name.charAt(0).toUpperCase()
-                )}
-              </span>
-            ))}
-            {others.length > 3 ? (
-              <span className="-ml-1.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-surface bg-muted text-[10px] font-bold text-[var(--cc-on-brand)]">
-                +{others.length - 3}
-              </span>
-            ) : null}
-          </div>
-        ) : null}
-
         {isCanvas ? (
           <button
             type="button"
@@ -261,6 +237,51 @@ export function Toolbar({
             <IconShare size={14} />
             <span className="hidden sm:inline">Share</span>
           </button>
+        ) : null}
+
+        {/* Who else is here, stacked the way Google Docs stacks them.
+            Clicking one follows that person's pointer around the canvas. */}
+        {isCanvas && others.length > 0 ? (
+          <div className="flex shrink-0 items-center pl-1">
+            {others.slice(0, 4).map((entry) => {
+              const on = followingId === entry.userId
+              return (
+                <button
+                  key={entry.userId}
+                  type="button"
+                  className="-ml-1.5 flex h-7 w-7 items-center justify-center overflow-hidden rounded-full border-2 text-[11px] font-bold text-white transition first:ml-0 hover:z-10 hover:-translate-y-0.5"
+                  style={{
+                    background: entry.color,
+                    borderColor: on ? entry.color : 'var(--cc-surface)',
+                    boxShadow: on ? `0 0 0 2px ${entry.color}` : undefined,
+                  }}
+                  title={on ? `Stop following ${firstNameOf(entry.name)}` : `Follow ${entry.name}`}
+                  aria-label={on ? `Stop following ${entry.name}` : `Follow ${entry.name}`}
+                  aria-pressed={on}
+                  onClick={() => {
+                    setFollowing(on ? null : entry.userId)
+                    pushToast(
+                      on
+                        ? `Stopped following ${firstNameOf(entry.name)}.`
+                        : `Following ${firstNameOf(entry.name)}. Click again to stop.`,
+                      'info',
+                    )
+                  }}
+                >
+                  {entry.avatarUrl ? (
+                    <img src={entry.avatarUrl} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    initialOf(entry.name, user?.email)
+                  )}
+                </button>
+              )
+            })}
+            {others.length > 4 ? (
+              <span className="-ml-1.5 flex h-7 w-7 items-center justify-center rounded-full border-2 border-[var(--cc-surface)] bg-[var(--cc-muted)] text-[11px] font-bold text-white">
+                +{others.length - 4}
+              </span>
+            ) : null}
+          </div>
         ) : null}
 
         <button
@@ -365,7 +386,7 @@ export function Toolbar({
                   className="h-full w-full object-cover"
                 />
               ) : (
-                user.email.charAt(0).toUpperCase()
+                initialOf(user.user_metadata?.name, user.email)
               )}
             </button>
             {showUserMenu ? (

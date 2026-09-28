@@ -15,6 +15,7 @@ import {
   updatePageMeta,
 } from '@/store/supabase-sync'
 import type { Page } from '@/types'
+import { screenToWorld } from '@/utils/geometry'
 import { applySnapshot, unionContent, type RemoteSnapshot } from '@/utils/merge'
 
 /**
@@ -144,15 +145,6 @@ function pageSignature(page: Page): string {
   })
 }
 
-/** Presence can hold several rows per person (one per tab). */
-function dedupePresence(entries: PresenceEntry[]): PresenceEntry[] {
-  const seen = new Map<string, PresenceEntry>()
-  for (const entry of entries) {
-    if (!seen.has(entry.userId)) seen.set(entry.userId, entry)
-  }
-  return [...seen.values()]
-}
-
 /* ------------------------------------------------------------------ */
 /* The hook                                                            */
 /* ------------------------------------------------------------------ */
@@ -165,6 +157,15 @@ export function usePageSync() {
 
   const channelRef = useRef<RealtimeChannel | null>(null)
   const pagesRef = useRef<Page[]>(doc.pages)
+
+  /** Who we are on the presence channel, once the subscription confirms. */
+  const identity = useRef<{
+    userId: string
+    name: string
+    color: string
+    avatarUrl: string | null
+  } | null>(null)
+  const lastCursorAt = useRef(0)
 
   pagesRef.current = doc.pages
 
@@ -207,7 +208,7 @@ export function usePageSync() {
     }
   }, [activePageId, documentId])
 
-  /* --- document presence ------------------------------------------ */
+  /* --- document presence and live cursors -------------------------- */
   useEffect(() => {
     const db = supabase
     if (!db || !documentId) return
@@ -218,32 +219,74 @@ export function usePageSync() {
       })
       .on('presence', { event: 'sync' }, () => {
         const state = channel.presenceState<Record<string, unknown>>()
-        const entries = Object.values(state)
-          .flat()
-          .map((row) => {
-            const meta = (row as { user_id?: string; name?: string; color?: string; avatar_url?: string | null })
-            return {
-              userId: meta.user_id ?? '',
-              name: meta.name ?? 'Someone',
-              color: meta.color ?? colorFor(clientId),
-              avatarUrl: meta.avatar_url ?? null,
-            }
+        const seen = new Map<string, PresenceEntry>()
+
+        for (const row of Object.values(state).flat()) {
+          const meta = row as {
+            user_id?: string
+            name?: string
+            color?: string
+            avatar_url?: string | null
+            cursor?: { x: number; y: number } | null
+            page_id?: string | null
+          }
+          if (!meta.user_id || seen.has(meta.user_id)) continue
+          seen.set(meta.user_id, {
+            userId: meta.user_id,
+            name: meta.name ?? 'Someone',
+            color: meta.color ?? colorFor(meta.user_id),
+            avatarUrl: meta.avatar_url ?? null,
+            cursor: meta.cursor ?? null,
+            pageId: meta.page_id ?? null,
           })
-          .filter((entry) => entry.userId !== '')
-        usePresence.getState().setEntries(dedupePresence(entries))
+        }
+
+        // A cursor is a live value, not tracked state: carry over what we
+        // already know so a pointer does not jump when someone reconnects.
+        const previous = new Map(
+          usePresence.getState().entries.map((entry) => [entry.userId, entry]),
+        )
+        usePresence.getState().setEntries(
+          [...seen.values()].map((entry) => ({
+            ...entry,
+            cursor: entry.cursor ?? previous.get(entry.userId)?.cursor ?? null,
+            pageId: entry.pageId ?? previous.get(entry.userId)?.pageId ?? null,
+          })),
+        )
+      })
+      // Somebody else's pointer. Broadcast only — it is never stored anywhere.
+      .on('broadcast', { event: 'cursor' }, ({ payload }) => {
+        const data = payload as {
+          origin: string
+          userId: string
+          name: string
+          color: string
+          pageId: string
+          point: { x: number; y: number }
+        }
+        if (data.origin === clientId) return
+
+        const store = usePresence.getState()
+        store.upsert({
+          userId: data.userId,
+          name: data.name,
+          color: data.color,
+          avatarUrl: store.entries.find((e) => e.userId === data.userId)?.avatarUrl ?? null,
+          cursor: data.point,
+          pageId: data.pageId,
+        })
       })
       .subscribe(async (status) => {
         if (status !== 'SUBSCRIBED') return
-        void db.auth.getUser().then(({ data }) => {
-          const meta = data.user?.user_metadata
-          void channel.track({
-            user_id: data.user?.id ?? clientId,
-            name: meta?.name ?? meta?.full_name ?? data.user?.email ?? 'Someone',
-            color: colorFor(data.user?.id ?? clientId),
-            avatar_url: meta?.avatar_url ?? meta?.picture ?? null,
-            online_at: new Date().toISOString(),
-          })
-        })
+        const { data } = await db.auth.getUser()
+        const meta = data.user?.user_metadata
+        identity.current = {
+          userId: data.user?.id ?? clientId,
+          name: meta?.name ?? meta?.full_name ?? data.user?.email ?? 'Someone',
+          color: colorFor(data.user?.id ?? clientId),
+          avatarUrl: meta?.avatar_url ?? meta?.picture ?? null,
+        }
+        void channel.track({ ...identity.current, cursor: null, page_id: null })
       })
 
     return () => {
@@ -251,6 +294,53 @@ export function usePageSync() {
       void db.removeChannel(channel)
     }
   }, [documentId])
+
+  /* --- the pointer, going out -------------------------------------- */
+  useEffect(() => {
+    if (!supabase || !documentId || !activePageId) return
+
+    const onMove = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null
+      const surface = target?.closest('.cc-canvas')
+      if (!surface) return
+
+      const now = Date.now()
+      // ~25 messages a second: smooth to watch, and a mouse sweep across the
+      // canvas cannot flood the channel.
+      if (now - lastCursorAt.current < 40) return
+      lastCursorAt.current = now
+
+      const me = identity.current
+      if (!me) return
+
+      const rect = surface.getBoundingClientRect()
+      const page = useCanvasStore.getState().activePage()
+      if (!page) return
+
+      void channelRef.current?.send({
+        type: 'broadcast',
+        event: 'cursor',
+        payload: {
+          origin: clientId,
+          userId: me.userId,
+          name: me.name,
+          color: me.color,
+          avatarUrl: me.avatarUrl,
+          pageId: activePageId,
+          // World coordinates, so the same point lands in the same place for
+          // everyone whatever they have panned or zoomed to.
+          point: screenToWorld(
+            { x: event.clientX - rect.left, y: event.clientY - rect.top },
+            page.viewport,
+          ),
+          sentAt: now,
+        },
+      })
+    }
+
+    window.addEventListener('pointermove', onMove, { passive: true })
+    return () => window.removeEventListener('pointermove', onMove)
+  }, [activePageId, documentId])
 
   /* --- page list: create / rename / reorder / delete -------------- */
   useEffect(() => {
@@ -274,12 +364,13 @@ export function usePageSync() {
 
         if (previous.title === page.title && previous.ordinal === ordinal) continue
 
-        // The open page's title travels with its snapshot write, so only the
-        // list position is sent here.
-        if (page.id === useCanvasStore.getState().activePageId) {
-          if (previous.ordinal !== ordinal) await updatePageMeta(page.id, { ordinal })
-        } else {
-          await updatePageMeta(page.id, { title: page.title, ordinal })
+        // Renaming used to be skipped for the open page, on the assumption that
+        // its debounced content write would carry the title along. That made a
+        // rename depend on an unrelated write succeeding, so it could silently
+        // vanish. It is one small request; always send it.
+        const ok = await updatePageMeta(page.id, { title: page.title, ordinal })
+        if (!ok) {
+          useCanvasStore.getState().pushToast(`Could not rename "${page.title}".`, 'error')
         }
         knownPages.set(page.id, { title: page.title, ordinal })
       }

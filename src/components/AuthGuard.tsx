@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 
 import { LoginPage } from '@/components/LoginPage'
-import { supabase, isSupabaseConfigured } from '@/lib/supabase'
+import { resetAuthErrorReport } from '@/store/writeErrors'
+import { supabase, isSupabaseConfigured, sessionUserExists } from '@/lib/supabase'
 import type { SupabaseUser } from '@/lib/supabase'
 
 interface AuthGuardProps {
@@ -20,8 +21,19 @@ export function AuthGuard({ children, onUserChange }: AuthGuardProps) {
       return
     }
 
-    supabase!.auth.getSession().then(({ data }) => {
+    supabase!.auth.getSession().then(async ({ data }) => {
       if (data.session?.user) {
+        // A JWT stays valid even after its account is deleted, so the session
+        // alone cannot be trusted: ask GoTrue whether the user is still there.
+        // Without this, a stale session looks signed in and every write fails
+        // on a foreign key with nothing to explain why.
+        if (!(await sessionUserExists())) {
+          console.warn('[auth] the signed-in user no longer exists; signing out')
+          resetAuthErrorReport()
+          await supabase!.auth.signOut()
+          return
+        }
+
         const u = {
           id: data.session.user.id,
           email: data.session.user.email ?? '',

@@ -97,13 +97,18 @@ function ImportExportBody({ initialTab }: { initialTab: Tab }) {
       // first and the page-list diff is re-primed before the canvas swaps.
       const written = await replaceDocumentPages(documentId, parsed.pages)
       if (!written) {
-        pushToast('The import could not be saved.', 'error')
+        // The reason is in the console — handleWriteError already logged it.
+        pushToast('The import could not be saved — see the console for the reason.', 'error')
         return
       }
       // The page list the server now holds is exactly what was written, so the
       // diff must not treat it as a set of new pages.
       const refreshed = await loadDocument(documentId)
-      if (refreshed) primePageSync(documentId, refreshed)
+      if (!refreshed) {
+        pushToast('The pages were written but could not be read back.', 'error')
+        return
+      }
+      primePageSync(documentId, refreshed)
       replaceDoc(parsed)
       pushToast(`Imported ${parsed.pages.length} page(s).`, 'success')
       setDialog(null)

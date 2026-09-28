@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 
 import { useUserSettings } from '@/store/userSettings'
 import { ACCENTS, PALETTES, getAccent, getPalette } from '@/theme'
+import { initialOf } from '@/store/presence'
 import type { SupabaseUser } from '@/lib/supabase'
 
 interface UserSettingsPageProps {
@@ -49,7 +50,7 @@ export function UserSettingsPage({ user, onClose }: UserSettingsPageProps) {
             <img src={avatar} alt="" className="h-8 w-8 rounded-full object-cover" />
           ) : (
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand text-sm font-bold text-[var(--cc-on-brand)]">
-              {user.email.charAt(0).toUpperCase()}
+              {initialOf(user.user_metadata?.name, user.email)}
             </div>
           )}
           <div className="min-w-0 flex-1">

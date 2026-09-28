@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
 import { ColorPicker } from '@/components/ColorPicker'
-import { IconPlus, IconTrash, IconX } from '@/components/Icons'
+import { IconPencil, IconPlus, IconTrash, IconX } from '@/components/Icons'
 import { useCanvasStore } from '@/store/useCanvasStore'
 import { collectColors, collectTags, isFiltering, normalizeColor } from '@/utils/filters'
 
@@ -67,9 +67,14 @@ export function PageSidebar({ onClose }: PageSidebarProps) {
                   <input
                     autoFocus
                     defaultValue={page.title}
+                    aria-label="Page name"
                     className="cc-input py-0.5 text-xs"
+                    onFocus={(event) => event.currentTarget.select()}
                     onBlur={(event) => {
-                      renamePage(page.id, event.target.value)
+                      const next = event.target.value.trim()
+                      // Commit on blur, Enter or Escape alike — an uncommitted
+                      // rename was how "renaming does nothing" happened.
+                      if (next && next !== page.title) renamePage(page.id, next)
                       setRenamingId(null)
                     }}
                     onKeyDown={(event) => {
@@ -77,14 +82,28 @@ export function PageSidebar({ onClose }: PageSidebarProps) {
                     }}
                   />
                 ) : (
-                  <button
-                    type="button"
-                    className="cursor-pointer rounded p-1 text-muted opacity-0 hover:bg-surface-sunken hover:text-ink group-hover:opacity-100"
-                    title="Delete page"
-                    onClick={() => deletePage(page.id)}
-                  >
-                    <IconTrash size={13} />
-                  </button>
+                  <span className="flex shrink-0 items-center gap-0.5">
+                    {/* Rename was double-click only, which is invisible and
+                        unreachable by keyboard. */}
+                    <button
+                      type="button"
+                      className="cursor-pointer rounded p-1 text-muted opacity-100 transition hover:bg-surface-sunken hover:text-ink focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+                      title="Rename page"
+                      aria-label={`Rename ${page.title || 'page'}`}
+                      onClick={() => setRenamingId(page.id)}
+                    >
+                      <IconPencil size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      className="cursor-pointer rounded p-1 text-muted opacity-100 transition hover:bg-danger-soft hover:text-danger focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+                      title="Delete page"
+                      aria-label={`Delete ${page.title || 'page'}`}
+                      onClick={() => deletePage(page.id)}
+                    >
+                      <IconTrash size={13} />
+                    </button>
+                  </span>
                 )}
               </div>
             </li>

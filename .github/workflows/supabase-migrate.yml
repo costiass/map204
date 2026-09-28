@@ -91,7 +91,22 @@ jobs:
           raw="$(supabase db query --linked \
             "select coalesce(string_agg(version, ' '), '') as v
              from supabase_migrations.schema_migrations" 2>/dev/null || true)"
+
           remote_versions="$(printf '%s' "$raw" | grep -oE '[0-9]{14,}' | sort -u || true)"
+
+          # Empty could mean "no history" or "we could not read it". Those are
+          # very different, so fall back to the CLI's own listing and, failing
+          # that, stop rather than assume the database is in step.
+          if [ -z "$remote_versions" ]; then
+            raw="$(supabase migration list 2>/dev/null || true)"
+            remote_versions="$(printf '%s' "$raw" | grep -oE '[0-9]{14,}' | sort -u || true)"
+          fi
+
+          if ! supabase db query --linked "select 1" >/dev/null 2>&1; then
+            echo "::error::Cannot read the database, so the migration history cannot be"
+            echo "::error::verified. Fix SUPABASE_PROJECT_REF / SUPABASE_ACCESS_TOKEN and retry."
+            exit 1
+          fi
 
           # Recorded remotely but absent from git: the drift the CLI refuses to
           # resolve on its own.
@@ -147,8 +162,10 @@ jobs:
             exit 1
           fi
 
-          supabase db push --dry-run
-          supabase db push
+          # --yes answers the CLI's "Do you want to push these migrations?"
+          # prompt. In CI there is nobody to answer it.
+          supabase db push --dry-run --yes
+          supabase db push --yes
 
       # ------------------------------------------------------------------
       # reconcile — forget stale versions, keep the data
@@ -170,7 +187,7 @@ jobs:
 
       - name: Apply migrations
         if: ${{ inputs.mode == 'reconcile' }}
-        run: supabase db push
+        run: supabase db push --yes
 
       # ------------------------------------------------------------------
       # rebuild — empty database, migrations replayed from the start
@@ -189,7 +206,7 @@ jobs:
           # db reset --linked removes what this project created (auth.users and
           # the other managed schemas are left alone) and replays every local
           # migration, so the schema is guaranteed to match the files.
-          supabase db reset --linked
+          supabase db reset --linked --yes
 
       - name: Migration history
         if: always()

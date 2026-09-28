@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 
 import { supabase } from '@/lib/supabase'
+import { handleWriteError } from '@/store/writeErrors'
 import type { SupabaseUser } from '@/lib/supabase'
 import {
   DEFAULT_APPEARANCE,
@@ -116,7 +117,7 @@ export const useUserSettings = create<UserSettingsStore>()((set, get) => {
         .maybeSingle()
 
       if (error) {
-        console.error('[settings] load:', error.message)
+        await handleWriteError(error, 'settings:load')
         set({ loading: false, loaded: false })
         return
       }
@@ -179,7 +180,7 @@ export const useUserSettings = create<UserSettingsStore>()((set, get) => {
         )
 
       if (error) {
-        console.error('[settings] save:', error.message)
+        await handleWriteError(error, 'settings:save')
       }
     },
   }
