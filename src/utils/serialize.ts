@@ -15,9 +15,11 @@ import {
   type Anchor,
   type ArrowStyle,
   type Card,
+  type CardEmbed,
   type CardImage,
   type CardPosition,
   type CardStyle,
+  type CardType,
   type CanvasDoc,
   type ChecklistItem,
   type Connection,
@@ -33,6 +35,7 @@ import {
   type Viewport,
 } from '@/types'
 import { clamp, clampZoom } from '@/utils/geometry'
+import { isCardType } from '@/utils/embeds'
 import { clone, nowIso, uid } from '@/utils/id'
 import { htmlToMarkdown, looksLikeHtml } from '@/utils/markdown'
 
@@ -160,14 +163,46 @@ function normalizeChecklist(raw: unknown): ChecklistItem[] {
   return out
 }
 
+/**
+ * A card's kind, defaulting to a note.
+ *
+ * A document written before card kinds existed has no `type` at all, so the
+ * default is what makes those files open unchanged rather than as a card of an
+ * unknown kind.
+ */
+function normalizeCardType(raw: unknown): CardType {
+  return isCardType(raw) ? raw : 'note'
+}
+
+function normalizeCardEmbed(raw: unknown, type: CardType): CardEmbed | null {
+  if (type === 'note') return null
+  if (!isRecord(raw)) return null
+
+  const url = str(raw.url)
+  if (!url) return null
+
+  const meta: Record<string, string | number | boolean> = {}
+  if (isRecord(raw.meta)) {
+    for (const [key, value] of Object.entries(raw.meta)) {
+      if (typeof value === 'string' || typeof value === 'boolean') meta[key] = value
+      else if (typeof value === 'number' && Number.isFinite(value)) meta[key] = value
+    }
+  }
+
+  return { url, ...(Object.keys(meta).length > 0 ? { meta } : {}) }
+}
+
 function normalizeCard(raw: unknown, index: number, stamp: string): Card {
   const value = isRecord(raw) ? raw : {}
   // Card bodies are Markdown now; documents saved as HTML are converted once.
   const stored = str(value.content, '')
+  const type = normalizeCardType(value.type)
   return {
     id: str(value.id) || uid('card'),
+    type,
     title: str(value.title, 'Untitled card'),
     content: looksLikeHtml(stored) ? htmlToMarkdown(stored) : stored,
+    embed: normalizeCardEmbed(value.embed, type),
     image: normalizeImage(value.image),
     position: normalizePosition(value.position, index + 1),
     style: normalizeCardStyle(value.style),
@@ -411,10 +446,15 @@ export function normalizeDoc(raw: unknown): NormalizeResult {
 
 export function createCard(input: Partial<Card> & { position: Partial<CardPosition> }): Card {
   const stamp = nowIso()
+  const type = isCardType(input.type) ? input.type : 'note'
   return {
     id: uid('card'),
+    type,
     title: input.title ?? 'New card',
     content: input.content ?? '',
+    // A note has nothing to point at, and an embed without a kind to give it
+    // purpose would be read as a note with stray data attached.
+    embed: type === 'note' ? null : (input.embed ?? null),
     image: input.image ?? { src: null, alt: '' },
     position: {
       x: num(input.position.x, 0),

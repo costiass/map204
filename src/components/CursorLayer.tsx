@@ -79,6 +79,20 @@ export function CursorLayer() {
 
   if (visible.length === 0) return null
 
+  // A gentle size cue, and no more than that.
+  //
+  // This layer sits *outside* the transformed `.cc-world`, so a pointer is not
+  // scaled by the zoom at all and stays a constant size — which is right, and is
+  // what most collaborative editors do. An earlier version compensated with
+  // `scale(1 / zoom)`, which was a leftover from when the layer was inside the
+  // transform; at 10% zoom that made a pointer ten times *larger*.
+  //
+  // A small reduction when zoomed out is still worth having: it reads as depth
+  // rather than as a bug, and keeps a pointer from looking heavier than the card
+  // it is pointing at. The exponent is low on purpose, so the range is narrow —
+  // this is a hint, not a second zoom control.
+  const pointerScale = Math.min(1, Math.max(0.78, viewport.zoom ** 0.2))
+
   return (
     <div
       className="pointer-events-none absolute inset-0 z-[9997] overflow-hidden"
@@ -89,11 +103,9 @@ export function CursorLayer() {
         return (
           <div
             key={entry.userId}
-            // The pointer must keep its size at every zoom, so the scale is
-            // undone here rather than letting the viewport shrink the glyph.
             className="absolute left-0 top-0 origin-top-left transition-transform duration-75 ease-out"
             style={{
-              transform: `translate3d(${point.x}px, ${point.y}px, 0) scale(${1 / viewport.zoom})`,
+              transform: `translate3d(${point.x}px, ${point.y}px, 0) scale(${pointerScale})`,
             }}
           >
             {/* The lucide pointer, filled in that person's colour and outlined

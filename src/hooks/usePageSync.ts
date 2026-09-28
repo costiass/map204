@@ -580,8 +580,23 @@ export function usePageSync() {
   }, [doc, activePageId, documentId])
 
   /* --- document: title and document-wide defaults ------------------ */
+  // The name is only written when the reader typed it.
+  //
+  // This used to fire on any change to `documentTitle`, including the one the
+  // loader makes. Switching workspaces is the case that bites: `documentId`
+  // changes immediately, while `documentTitle` still holds the *previous*
+  // workspace's name until the load finishes. The effect therefore renamed the
+  // workspace you had just opened to whatever the last one was called, and every
+  // visit made the names drift further apart.
+  //
+  // Two guards, and both are needed:
+  //   * only for a document whose real title is known — `syncedDocumentId` is set
+  //     by primePageSync once the server has answered
+  //   * only when the title differs from what the server holds, which is the
+  //     difference between "the reader typed" and "the loader filled it in"
   useEffect(() => {
     if (!documentId || !documentTitle) return
+    if (syncedDocumentId !== documentId) return
     if (lastDocumentTitle.get(documentId) === documentTitle) return
     lastDocumentTitle.set(documentId, documentTitle)
     void renameDocument(documentId, documentTitle)

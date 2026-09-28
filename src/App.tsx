@@ -6,6 +6,7 @@ import { ConnectionTree } from '@/components/ConnectionTree'
 import { ContextMenu } from '@/components/ContextMenu'
 import { DevOverlay } from '@/components/DevOverlay'
 import { ImportExportDialog } from '@/components/ImportExportDialog'
+import { InsertCardDialog } from '@/components/InsertCardDialog'
 import { Inspector } from '@/components/Inspector'
 import { NotFound } from '@/components/NotFound'
 import { PageSidebar } from '@/components/PageSidebar'
@@ -103,6 +104,13 @@ export default function App() {
           return
         }
 
+        // Primed *before* the title reaches the store. primePageSync records what
+        // the server holds for this document, and the rename effect compares
+        // against it to tell a reader's typing from the loader filling the field
+        // in — so the record has to exist first, or the first value seen looks
+        // like an edit and is written straight back.
+        primePageSync(currentDocId, loaded)
+
         setDocument(loaded.document)
         store.setDocumentTitle(loaded.document.title)
         store.setDocumentLookState({
@@ -115,8 +123,6 @@ export default function App() {
         void fetchMyRole(currentDocId, user.id).then((role) => {
           if (!cancelled) store.setDocumentRole(role)
         })
-
-        primePageSync(currentDocId, loaded)
 
         store.hydrateDocument({
           version: 1,
@@ -193,6 +199,7 @@ export default function App() {
         <StatusBar />
         {/* TEMPORARY debug overlay. See src/components/DevOverlay.tsx. */}
         <DevOverlay />
+        <InsertCardDialog />
         <Toasts />
       </div>
     </AuthGuard>

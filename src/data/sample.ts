@@ -39,6 +39,8 @@ const T = '2026-09-26T00:00:00.000Z'
 const cards: Card[] = [
   {
     id: 'card_01',
+    type: 'note',
+    embed: null,
     title: 'Photosynthesis',
     content:
       'The process plants use to convert **light energy** into chemical energy stored in glucose.\n\n' +
@@ -67,11 +69,13 @@ const cards: Card[] = [
   },
   {
     id: 'card_02',
+    type: 'note',
+    embed: null,
     title: 'Chloroplast Structure',
     content:
       'Double-membrane organelle, only in plants & algae.\n\n' +
-      '- **Grana** — stacked thylakoids\n' +
-      '- **Stroma** — enzyme-rich fluid\n\n' +
+      '- **Grana** â€” stacked thylakoids\n' +
+      '- **Stroma** â€” enzyme-rich fluid\n\n' +
       '![Simplified chloroplast diagram](' +
       chloroplastImage +
       ')',
@@ -95,6 +99,8 @@ const cards: Card[] = [
   },
   {
     id: 'card_03',
+    type: 'note',
+    embed: null,
     title: 'Light Reactions',
     content:
       'Happen in the **thylakoid membrane**. Light energy is converted to ATP and NADPH.\n\n' +
@@ -124,8 +130,10 @@ const cards: Card[] = [
   },
   {
     id: 'card_04',
+    type: 'note',
+    embed: null,
     title: 'Calvin Cycle',
-    content: 'Happens in the **stroma**. Fixes CO₂ into sugar using the ATP and NADPH from light reactions.',
+    content: 'Happens in the **stroma**. Fixes COâ‚‚ into sugar using the ATP and NADPH from light reactions.',
     image: { src: null, alt: '' },
     position: { x: 820, y: 400, width: 290, height: 270, zIndex: 4 },
     style: {
@@ -141,7 +149,7 @@ const cards: Card[] = [
     collapsed: false,
     parentId: 'card_01',
     checklist: [
-      { id: 'item_05', text: 'CO₂ fixation by RuBisCO', done: false },
+      { id: 'item_05', text: 'COâ‚‚ fixation by RuBisCO', done: false },
       { id: 'item_06', text: 'G3P sugar generated', done: false },
       { id: 'item_07', text: 'RuBP regenerated', done: false },
     ],
@@ -150,6 +158,8 @@ const cards: Card[] = [
   },
   {
     id: 'card_05',
+    type: 'note',
+    embed: null,
     title: 'Limiting Factors',
     content: 'Rate is capped by whichever resource runs out first. Watch for the classic plateau graph.',
     image: { src: null, alt: '' },
@@ -168,7 +178,7 @@ const cards: Card[] = [
     parentId: null,
     checklist: [
       { id: 'item_08', text: 'Light intensity', done: false },
-      { id: 'item_09', text: 'CO₂ concentration', done: false },
+      { id: 'item_09', text: 'COâ‚‚ concentration', done: false },
       { id: 'item_10', text: 'Temperature', done: false },
     ],
     createdAt: T,
@@ -255,7 +265,7 @@ const connections: Connection[] = [
     target: { kind: 'card', id: 'card_04' },
     sourceAnchor: 'bottom',
     targetAnchor: 'top',
-    label: 'CO₂ supply',
+    label: 'COâ‚‚ supply',
     relationshipType: 'example of',
     style: {
       color: '#8B5CF6',
@@ -290,8 +300,10 @@ const connections: Connection[] = [
 const respirationCards: Card[] = [
   {
     id: 'card_10',
+    type: 'note',
+    embed: null,
     title: 'Cell Respiration',
-    content: 'Breaks down glucose to release ATP. Aerobic = 30–32 ATP per glucose.',
+    content: 'Breaks down glucose to release ATP. Aerobic = 30â€“32 ATP per glucose.',
     image: { src: null, alt: '' },
     position: { x: 120, y: 120, width: 300, height: 220, zIndex: 1 },
     style: {
@@ -312,6 +324,8 @@ const respirationCards: Card[] = [
   },
   {
     id: 'card_11',
+    type: 'note',
+    embed: null,
     title: 'Mitochondrion',
     content: 'Site of the Krebs cycle and the electron transport chain.',
     image: { src: null, alt: '' },

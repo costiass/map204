@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { StickyNote } from 'lucide-react'
 
 import {
   IconBringFront,
@@ -11,6 +12,7 @@ import {
 } from '@/components/Icons'
 import { useCanvasStore } from '@/store/useCanvasStore'
 import { CARD_ACCENTS, CARD_BACKGROUNDS } from '@/types'
+import { openInsertCard } from '@/components/InsertCardDialog'
 
 export function ContextMenu() {
   const menu = useCanvasStore((s) => s.contextMenu)
@@ -97,10 +99,10 @@ export function ContextMenu() {
                 close()
               }}
             >
-              <IconLink size={14} /> Connect to…
+              <IconLink size={14} /> Connect toÃ¢â‚¬Â¦
             </button>
             <button type="button" onClick={() => setShowColors((v) => !v)}>
-              <IconPalette size={14} /> Colour…
+              <IconPalette size={14} /> ColourÃ¢â‚¬Â¦
             </button>            {showColors ? (
               <div className="px-1 pb-1">
                 <span className="cc-label">Background</span>
@@ -162,7 +164,7 @@ export function ContextMenu() {
         {group ? (
           <>
             <div className="px-2 py-1 text-[11px] text-slate-500">
-              {group.memberCardIds.length} card{group.memberCardIds.length === 1 ? '' : 's'} · {group.memberGroupIds.length} group{group.memberGroupIds.length === 1 ? '' : 's'}
+              {group.memberCardIds.length} card{group.memberCardIds.length === 1 ? '' : 's'} Ã‚Â· {group.memberGroupIds.length} group{group.memberGroupIds.length === 1 ? '' : 's'}
             </div>
             <button
               type="button"
@@ -181,7 +183,7 @@ export function ContextMenu() {
           <>
             <div className="px-2 py-1 text-[11px] text-slate-500">
               {connection.relationshipType}
-              {connection.label ? ` · ${connection.label}` : ''}
+              {connection.label ? ` Ã‚Â· ${connection.label}` : ''}
             </div>
             <div className="cc-swatches px-1 pb-1">
               {['#6366F1', '#0EA5E9', '#22C55E', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#64748B', '#111827'].map(
@@ -242,18 +244,28 @@ export function ContextMenu() {
             <button type="button" onClick={() => { addCard(); close() }}>
               <span className="cc-kbd">C</span> New card here
             </button>
+            <hr />
+            <button
+              type="button"
+              onClick={() => {
+                close()
+                openInsertCard(menu.x, menu.y)
+              }}
+            >
+              <StickyNote size={14} className="opacity-70" /> Insert a cardÃ¢â‚¬Â¦
+            </button>
             <button type="button" onClick={() => { selectAllCards(); close() }}>
-              <span className="cc-kbd">⌘A</span> Select all cards
+              <span className="cc-kbd">Ã¢Å’ËœA</span> Select all cards
             </button>
             <button type="button" onClick={() => { requestFitView(); close() }}>
               <span className="cc-kbd">F</span> Fit view
             </button>
             <hr />
             <button type="button" onClick={() => { setDialog('import'); close() }}>
-              Import JSON…
+              Import JSONÃ¢â‚¬Â¦
             </button>
             <button type="button" onClick={() => { setDialog('export'); close() }}>
-              Export JSON…
+              Export JSONÃ¢â‚¬Â¦
             </button>
           </>
         ) : null}

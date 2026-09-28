@@ -2,6 +2,7 @@ import { memo, useCallback, useMemo } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 
 import { IconChevron, IconMore } from '@/components/Icons'
+import { CardEmbedView } from '@/components/CardEmbedView'
 import { useCanvasStore } from '@/store/useCanvasStore'
 import { ANCHORS, COLLAPSED_HEADER_HEIGHT, type Anchor, type Card, type Point } from '@/types'
 import { renderMarkdown } from '@/utils/markdown'
@@ -144,16 +145,27 @@ function CardNodeImpl({
             <img className="cc-card__image" src={card.image.src} alt={card.image.alt} draggable={false} />
           ) : null}
 
-          <div
-            className="cc-card__body cc-markdown"
-            data-empty={card.content.trim().length === 0 ? 'true' : undefined}
-            onDoubleClick={(event) => {
-              // Double-click anywhere on the body jumps to the Markdown editor.
-              event.stopPropagation()
-              setInspectorTab('content')
-            }}
-            dangerouslySetInnerHTML={{ __html: bodyHtml }}
-          />
+          {/* A video or PDF card leads with what it points at. The Markdown body
+              still renders below it, but only when there is one — an empty
+              "Nothing here yet" placeholder under a playing video is noise. */}
+          {card.type !== 'note' ? (
+            <div className="mb-2">
+              <CardEmbedView card={card} />
+            </div>
+          ) : null}
+
+          {card.content.trim().length > 0 || card.type === 'note' ? (
+            <div
+              className="cc-card__body cc-markdown"
+              data-empty={card.content.trim().length === 0 ? 'true' : undefined}
+              onDoubleClick={(event) => {
+                // Double-click anywhere on the body jumps to the Markdown editor.
+                event.stopPropagation()
+                setInspectorTab('content')
+              }}
+              dangerouslySetInnerHTML={{ __html: bodyHtml }}
+            />
+          ) : null}
 
           {card.checklist.length > 0 ? (
             <div className="mt-2">

@@ -2,6 +2,7 @@ import { NumberField, Section, SliderField } from '@/components/EditorParts'
 import { ColorPicker } from '@/components/ColorPicker'
 import { IconCollapse, IconCopy, IconTrash } from '@/components/Icons'
 import { useCanvasStore } from '@/store/useCanvasStore'
+import { CardLinkSection } from '@/components/CardLinkSection'
 import {
   CARD_ACCENTS,
   CARD_BACKGROUNDS,
@@ -50,6 +51,8 @@ export function CardSettingsTab({ card }: { card: Card }) {
 
   return (
     <div className="cc-scroll flex-1 overflow-y-auto">
+      <CardLinkSection card={card} />
+
       <Section title="Colours">
         <div className="space-y-2.5">
           <ColorPicker

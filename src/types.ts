@@ -67,15 +67,50 @@ export interface CardStyle {
   shadow: boolean
 }
 
+/**
+ * What a card *is*.
+ *
+ * Each kind does one job, rather than being a Markdown body with an optional
+ * embed field bolted on — one unreadable card that tries to be three things is
+ * worse than three cards that are each one thing.
+ *
+ *   note      the original: a title and a Markdown body
+ *   youtube   a video, rendered from a YouTube id
+ *   pdf       a document, referenced by URL
+ *
+ * `note` is the default everywhere, so a document written before this existed
+ * needs no migration: a card with no `type` is a note.
+ */
+export type CardType = 'note' | 'youtube' | 'pdf'
+
+/**
+ * The thing a non-note card refers to.
+ *
+ * Only `url` is stored. For YouTube the video id is *derived* from it rather
+ * than kept alongside, so the two cannot drift apart — a card whose id and URL
+ * disagree is a card that shows the wrong video.
+ */
+export interface CardEmbed {
+  url: string
+  /** Per-kind extras: `{ start }` for a timestamp, `{ pages }` for a PDF. */
+  meta?: Record<string, string | number | boolean>
+}
+
 export interface Card {
   id: string
+  /** Which of the kinds above this card is. Absent means `note`. */
+  type: CardType
   title: string
   /**
    * The card body, stored as Markdown — the same format the document itself
    * uses. Images are ordinary Markdown and may appear anywhere:
    * `![alt](url)` or a pasted `data:image/...` URL.
+   *
+   * For a non-note card this is a caption, and may be empty.
    */
   content: string
+  /** What a `youtube` or `pdf` card points at. `null` for a note. */
+  embed: CardEmbed | null
   image: CardImage
   position: CardPosition
   style: CardStyle
