@@ -101,9 +101,14 @@ did.
 
 ### 4. A card with a `parentId` loses it silently
 
-Still open, and the only one of the four not yet fixed. The migration drops
-`parentId` without a warning, while warning about everything else. It belongs in
-Phase I next to the rest of the migration work.
+**Fixed.** The migration now reports it, and the report is specific about what
+happened and what to do: the card is still there, put it in a group.
+
+The check has to be two-sided, and the second half is the interesting one. A
+`parentId` that a group *also* claims is not lost — the containment survives by
+the other mechanism — and warning about it would be noise about a document that
+is fine. So `test:migrate-v2` asserts both: the warning fires for an orphan, and
+stays silent when a group accounts for it.
 
 ## The rule these four make worth keeping
 
@@ -436,7 +441,27 @@ elements in it, a link between two, move a group, resize a group, resize a video
 
 ---
 
-# Phase I — the database
+# Phase I — the database *(not started; two things to know first)*
+
+## The upload quota is declared and not enforced
+
+`MAX_UPLOAD_BYTES` is 50Mb in the schema and is re-exported from two modules.
+**Nothing imports it.** The limit exists as a constant, which is documentation
+rather than a limit, and `test:bundle` asserts its *absence* so that the day it
+is enforced the suite fails and says why.
+
+The check is the upload function *and* the bucket policy. One enforced only in a
+browser is one that can be skipped — and a quota in the schema protects nobody.
+
+## The by-hand check could not be done here
+
+No browser is attached to this session, so the app was verified as far as a shell
+can: every module transforms and serves, the dev server returns 200, and
+`test:bundle` parses the built output and asserts the v2 model is in it.
+
+That cannot see whether a video resizes to the right shape, or whether a group's
+members follow it. `test:bundle`'s own header says so. **Phase I should not start
+until someone has actually clicked through it.**
 
 Last, and only after Phase H.
 

@@ -25,9 +25,10 @@
     "test:elements": "node scripts/test-elements.cjs",
     "test:element-ops": "node scripts/test-element-ops.cjs",
     "test:sample": "node scripts/test-sample.cjs",
+    "test:bundle": "node scripts/test-bundle.cjs",
     "test:encoding": "node scripts/test-encoding.cjs",
     "fix:encoding": "node scripts/test-encoding.cjs --fix",
-    "test": "npm run typecheck && npm run test:drift && node scripts/test-bootstrap.cjs && npm run test:bootstrap && npm run test:migrations && npm run test:policies && npm run test:realtime && npm run test:embeds && npm run test:card-types && npm run test:read-only && npm run test:routes && npm run test:migrate-v2 && npm run test:elements && npm run test:element-ops && npm run test:sample && npm run test:encoding && npm run test:workspace-look && npm run test:tutorial"
+    "test": "npm run typecheck && npm run test:drift && node scripts/test-bootstrap.cjs && npm run test:bootstrap && npm run test:migrations && npm run test:policies && npm run test:realtime && npm run test:embeds && npm run test:card-types && npm run test:read-only && npm run test:routes && npm run test:migrate-v2 && npm run test:elements && npm run test:element-ops && npm run test:sample && npm run test:bundle && npm run test:encoding && npm run test:workspace-look && npm run test:tutorial"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",

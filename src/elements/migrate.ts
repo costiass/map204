@@ -351,6 +351,31 @@ export function migrateToV2(input: unknown): MigrationResult {
       ]
     })
 
+    // Version 1 had two ways to say "this is inside that": a card's `parentId`,
+    // and a group's `memberCardIds`. Version 2 has one — groups — so a
+    // `parentId` that a group does not also claim is a relationship with nowhere
+    // to go.
+    //
+    // This is said rather than swallowed, because every other lossy case in this
+    // file is said. A person whose file had parented cards, who was told nothing,
+    // would open the document and find the structure gone with no idea whether
+    // they had done something wrong.
+    const claimedBySomeGroup = new Set(groups.flatMap((group) => group.memberIds))
+    const wasParented = (element: Element): boolean => {
+      const raw = rawCards.find((candidate) => isRecord(candidate) && str(candidate.id) === element.id)
+      return isRecord(raw) && typeof raw.parentId === 'string' && raw.parentId.length > 0
+    }
+    const orphaned = elements.filter(
+      (element) => wasParented(element) && !claimedBySomeGroup.has(element.id),
+    )
+    if (orphaned.length > 0) {
+      warnings.push(
+        `${orphaned.length} card(s) on "${str(rawPage.title, 'a page')}" were inside another ` +
+          'card, and version 2 has no way to say that. They are all still here — put them ' +
+          'in a group to group them again.',
+      )
+    }
+
     const rawConnections = Array.isArray(rawPage.connections) ? rawPage.connections : []
     // Annotated, not inferred: without it TypeScript widens every narrowed
     // literal back to `string`, and the whole point of these unions is that a

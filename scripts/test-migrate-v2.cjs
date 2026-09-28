@@ -244,6 +244,72 @@ if (styled[1].style.arrowStart !== 'circle') {
   fail(\`a circle arrowhead became "\${styled[1].style.arrowStart}"\`)
 }
 
+/* --- a card's parentId is reported, not swallowed --------------------- */
+//
+// Version 1 had two ways to say "this is inside that": a card's parentId, and a
+// group's memberCardIds. Version 2 has one. A parentId with no group behind it is
+// a relationship that cannot survive, and every other lossy case in the
+// migration says so — this one was silent, which meant a person could open their
+// document and find the structure gone with no idea whether they had done
+// something wrong.
+const v1Card = (over) => ({
+  id: 'x',
+  type: 'note',
+  title: 'T',
+  content: '',
+  style: {},
+  tags: [],
+  checklist: [],
+  position: { x: 0, y: 0, width: 200, height: 100, zIndex: 1 },
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+  ...over,
+})
+
+const parented = run({
+  version: 1,
+  pages: [{
+    id: 'p1',
+    title: 'P',
+    cards: [v1Card({ id: 'a' }), v1Card({ id: 'b', parentId: 'a' })],
+    groups: [],
+  }],
+})
+if (parented.doc.pages[0].elements.length !== 2) {
+  fail(\`a parented card was dropped: \${parented.doc.pages[0].elements.length} elements\`)
+}
+if (!parented.warnings.some((w) => w.includes('inside another'))) {
+  fail(\`a lost parentId produced no warning: \${JSON.stringify(parented.warnings)}\`)
+}
+
+// The same shape, but a group claims the child too — so the containment
+// survives and there is nothing to report. A warning here would be noise about a
+// document that is fine.
+const alsoGrouped = run({
+  version: 1,
+  pages: [{
+    id: 'p1',
+    title: 'P',
+    cards: [v1Card({ id: 'a' }), v1Card({ id: 'b', parentId: 'a' })],
+    groups: [{
+      id: 'g1',
+      title: 'G',
+      position: { x: 0, y: 0, width: 400, height: 300, zIndex: 0 },
+      color: '#123456',
+      memberCardIds: ['a', 'b'],
+      memberGroupIds: [],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    }],
+  }],
+})
+if (alsoGrouped.warnings.some((w) => w.includes('inside another'))) {
+  fail('a parentId that a group also claims was reported as lost')
+}
+if (alsoGrouped.doc.pages[0].groups[0].memberIds.length !== 2) {
+  fail('the group lost its members')
+}
+
 /* --- things that cannot be translated are dropped, loudly ------------ */
 const broken = run({
   version: 1,
