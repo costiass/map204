@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { useUserSettings } from '@/store/userSettings'
-import { ACCENTS, getAccent } from '@/theme'
+import { ACCENTS, PALETTES, getAccent, getPalette } from '@/theme'
 import type { SupabaseUser } from '@/lib/supabase'
 
 interface UserSettingsPageProps {
@@ -24,6 +24,7 @@ export function UserSettingsPage({ user, onClose }: UserSettingsPageProps) {
   const settings = useUserSettings((s) => s.settings)
   const loaded = useUserSettings((s) => s.loaded)
   const setTheme = useUserSettings((s) => s.setTheme)
+  const setPalette = useUserSettings((s) => s.setPalette)
   const setAccent = useUserSettings((s) => s.setAccent)
   const setCardRadius = useUserSettings((s) => s.setCardRadius)
   const setReduceMotion = useUserSettings((s) => s.setReduceMotion)
@@ -77,6 +78,40 @@ export function UserSettingsPage({ user, onClose }: UserSettingsPageProps) {
                     Dark
                   </button>
                 </div>
+              </Row>
+
+              <Row label="Palette" hint="The neutrals. Works in both light and dark.">
+                <div className="grid grid-cols-2 gap-1.5">
+                  {PALETTES.map((option) => {
+                    const swatches = [option.light.surface, option.light.canvas, option.light.ink]
+                    return (
+                      <button
+                        key={option.id}
+                        type="button"
+                        className="rounded-lg border p-2 text-left transition"
+                        data-active={settings.palette === option.id}
+                        aria-pressed={settings.palette === option.id}
+                        onClick={() => setPalette(option.id)}
+                      >
+                        <span className="mb-1.5 flex overflow-hidden rounded">
+                          {swatches.map((colour, index) => (
+                            <span
+                              key={index}
+                              className="h-4 flex-1"
+                              style={{ background: colour ?? 'var(--cc-surface)' }}
+                            />
+                          ))}
+                        </span>
+                        <span className="block text-[12px] font-semibold text-ink">
+                          {option.label}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+                <p className="mt-1.5 text-xs text-muted">
+                  {getPalette(settings.palette).hint}
+                </p>
               </Row>
 
               <Row label="Accent" hint="Buttons, focus rings, links and selection">
@@ -199,7 +234,7 @@ export function UserSettingsPage({ user, onClose }: UserSettingsPageProps) {
                     background: `color-mix(in srgb, ${accent.base} 14%, var(--cc-surface))`,
                   }}
                 >
-                  {settings.theme === 'dark' ? 'Dark' : 'Light'} · {accent.label}
+                  {getPalette(settings.palette).label} · {settings.theme} · {accent.label}
                 </div>
                 <p className="text-[13px] text-muted">
                   Cards and links use the colours you pick for them. Everything else follows the

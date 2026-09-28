@@ -57,20 +57,20 @@ alter table document_collaborators enable row level security;
 -- user_settings: strictly your own row
 drop policy if exists "Users can view own settings" on user_settings;
 create policy "Users can view own settings"
-  on user_settings for select using (user_id = auth.uid());
+  on user_settings for select using (user_id = auth.uid()::text);
 
 drop policy if exists "Users can update own settings" on user_settings;
 create policy "Users can update own settings"
-  on user_settings for update using (user_id = auth.uid());
+  on user_settings for update using (user_id = auth.uid()::text);
 
 drop policy if exists "Users can insert own settings" on user_settings;
 create policy "Users can insert own settings"
-  on user_settings for insert with check (user_id = auth.uid());
+  on user_settings for insert with check (user_id = auth.uid()::text);
 
 -- documents: the owner, plus anyone who is a collaborator
 drop policy if exists "Users can view own documents" on documents;
 create policy "Users can view own documents"
-  on documents for select using (owner_id = auth.uid());
+  on documents for select using (owner_id = auth.uid()::text);
 
 drop policy if exists "Collaborators can view shared documents" on documents;
 create policy "Collaborators can view shared documents"
@@ -78,21 +78,21 @@ create policy "Collaborators can view shared documents"
     exists (
       select 1 from document_collaborators
       where document_id = documents.id
-      and user_id = auth.uid()
+      and user_id = auth.uid()::text
     )
   );
 
 drop policy if exists "Users can create documents" on documents;
 create policy "Users can create documents"
-  on documents for insert with check (owner_id = auth.uid());
+  on documents for insert with check (owner_id = auth.uid()::text);
 
 drop policy if exists "Owners can update documents" on documents;
 create policy "Owners can update documents"
-  on documents for update using (owner_id = auth.uid());
+  on documents for update using (owner_id = auth.uid()::text);
 
 drop policy if exists "Owners can delete documents" on documents;
 create policy "Owners can delete documents"
-  on documents for delete using (owner_id = auth.uid());
+  on documents for delete using (owner_id = auth.uid()::text);
 
 -- pages: reach the document through the page
 drop policy if exists "Users can view pages in own documents" on pages;
@@ -101,7 +101,7 @@ create policy "Users can view pages in own documents"
     exists (
       select 1 from documents
       where documents.id = pages.document_id
-      and documents.owner_id = auth.uid()
+      and documents.owner_id = auth.uid()::text
     )
   );
 
@@ -111,7 +111,7 @@ create policy "Collaborators can view pages in shared documents"
     exists (
       select 1 from document_collaborators dc
       where dc.document_id = pages.document_id
-      and dc.user_id = auth.uid()
+      and dc.user_id = auth.uid()::text
     )
   );
 
@@ -121,7 +121,7 @@ create policy "Users can create pages in own documents"
     exists (
       select 1 from documents
       where documents.id = pages.document_id
-      and documents.owner_id = auth.uid()
+      and documents.owner_id = auth.uid()::text
     )
   );
 
@@ -131,7 +131,7 @@ create policy "Users can update pages in own documents"
     exists (
       select 1 from documents
       where documents.id = pages.document_id
-      and documents.owner_id = auth.uid()
+      and documents.owner_id = auth.uid()::text
     )
   );
 
@@ -141,7 +141,7 @@ create policy "Users can delete pages in own documents"
     exists (
       select 1 from documents
       where documents.id = pages.document_id
-      and documents.owner_id = auth.uid()
+      and documents.owner_id = auth.uid()::text
     )
   );
 

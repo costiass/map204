@@ -17,16 +17,41 @@
 -- which executes with the table owner's rights, so RLS does not re-enter.
 
 -- ============================================================
+-- 0. Id types
+-- ============================================================
+-- `auth.uid()` returns uuid, but the app generates its own ids as text
+-- (`page_…`, `doc_…`) and the user columns hold the same kind of value. Every
+-- policy below compares a column with `auth.uid()::text`, so the columns must
+-- be text or Postgres rejects the operator with
+-- "operator does not exist: uuid = text" (SQLSTATE 42883) and the whole
+-- migration rolls back. Enforcing the type here makes this file self-sufficient
+-- even on a database that never ran 004.
+alter table documents
+  alter column id type text using id::text,
+  alter column owner_id type text using owner_id::text;
+
+alter table pages
+  alter column id type text using id::text,
+  alter column document_id type text using document_id::text;
+
+alter table document_collaborators
+  alter column document_id type text using document_id::text,
+  alter column user_id type text using user_id::text;
+
+alter table user_settings
+  alter column user_id type text using user_id::text;
+
+-- ============================================================
 -- Helpers (already defined by 003; re-asserted so this file stands alone)
 -- ============================================================
 create or replace function can_view_document(p_document_id text)
 returns boolean language sql stable security definer set search_path = public as $$
   select exists (
     select 1 from documents d
-    where d.id = p_document_id and d.owner_id = auth.uid()
+    where d.id = p_document_id and d.owner_id = auth.uid()::text
   ) or exists (
     select 1 from document_collaborators dc
-    where dc.document_id = p_document_id and dc.user_id = auth.uid()
+    where dc.document_id = p_document_id and dc.user_id = auth.uid()::text
   );
 $$;
 
@@ -34,11 +59,11 @@ create or replace function can_edit_document(p_document_id text)
 returns boolean language sql stable security definer set search_path = public as $$
   select exists (
     select 1 from documents d
-    where d.id = p_document_id and d.owner_id = auth.uid()
+    where d.id = p_document_id and d.owner_id = auth.uid()::text
   ) or exists (
     select 1 from document_collaborators dc
     where dc.document_id = p_document_id
-      and dc.user_id = auth.uid()
+      and dc.user_id = auth.uid()::text
       and dc.role in ('owner', 'editor')
   );
 $$;
@@ -48,11 +73,11 @@ returns boolean language sql stable security definer set search_path = public as
   select exists (
     select 1 from pages pg
     join documents d on d.id = pg.document_id
-    where pg.id = p_page_id and d.owner_id = auth.uid()
+    where pg.id = p_page_id and d.owner_id = auth.uid()::text
   ) or exists (
     select 1 from pages pg
     join document_collaborators dc on dc.document_id = pg.document_id
-    where pg.id = p_page_id and dc.user_id = auth.uid()
+    where pg.id = p_page_id and dc.user_id = auth.uid()::text
   );
 $$;
 
@@ -61,12 +86,12 @@ returns boolean language sql stable security definer set search_path = public as
   select exists (
     select 1 from pages pg
     join documents d on d.id = pg.document_id
-    where pg.id = p_page_id and d.owner_id = auth.uid()
+    where pg.id = p_page_id and d.owner_id = auth.uid()::text
   ) or exists (
     select 1 from pages pg
     join document_collaborators dc on dc.document_id = pg.document_id
     where pg.id = p_page_id
-      and dc.user_id = auth.uid()
+      and dc.user_id = auth.uid()::text
       and dc.role in ('owner', 'editor')
   );
 $$;
@@ -101,16 +126,16 @@ $$;
 -- documents
 -- ------------------------------------------------------------
 create policy "Users can view own documents" on documents
-  for select using (owner_id = auth.uid());
+  for select using (owner_id = auth.uid()::text);
 
 create policy "Users can create documents" on documents
-  for insert with check (owner_id = auth.uid());
+  for insert with check (owner_id = auth.uid()::text);
 
 create policy "Owners can update documents" on documents
-  for update using (owner_id = auth.uid());
+  for update using (owner_id = auth.uid()::text);
 
 create policy "Owners can delete documents" on documents
-  for delete using (owner_id = auth.uid());
+  for delete using (owner_id = auth.uid()::text);
 
 create policy "Collaborators can view shared documents" on documents
   for select using (can_view_document(documents.id));
@@ -126,7 +151,7 @@ create policy "Users can view pages in own documents" on pages
     exists (
       select 1 from documents
       where documents.id = pages.document_id
-        and documents.owner_id = auth.uid()
+        and documents.owner_id = auth.uid()::text
     )
   );
 
@@ -135,7 +160,7 @@ create policy "Users can insert pages in own documents" on pages
     exists (
       select 1 from documents
       where documents.id = pages.document_id
-        and documents.owner_id = auth.uid()
+        and documents.owner_id = auth.uid()::text
     )
   );
 
@@ -144,7 +169,7 @@ create policy "Users can update pages in own documents" on pages
     exists (
       select 1 from documents
       where documents.id = pages.document_id
-        and documents.owner_id = auth.uid()
+        and documents.owner_id = auth.uid()::text
     )
   );
 
@@ -153,7 +178,7 @@ create policy "Users can delete pages in own documents" on pages
     exists (
       select 1 from documents
       where documents.id = pages.document_id
-        and documents.owner_id = auth.uid()
+        and documents.owner_id = auth.uid()::text
     )
   );
 
@@ -174,7 +199,7 @@ create policy "Collaborators can delete pages in shared documents" on pages
 -- document_collaborators
 -- ------------------------------------------------------------
 create policy "Users can view own collaborator rows" on document_collaborators
-  for select using (user_id = auth.uid());
+  for select using (user_id = auth.uid()::text);
 
 create policy "Collaborators can view collaborator lists" on document_collaborators
   for select using (can_view_document(document_collaborators.document_id));
@@ -190,13 +215,13 @@ create policy "Owners can manage collaborators" on document_collaborators
 -- user_settings
 -- ------------------------------------------------------------
 create policy "Users can view own settings" on user_settings
-  for select using (user_id = auth.uid());
+  for select using (user_id = auth.uid()::text);
 
 create policy "Users can insert own settings" on user_settings
-  for insert with check (user_id = auth.uid());
+  for insert with check (user_id = auth.uid()::text);
 
 create policy "Users can update own settings" on user_settings
-  for update using (user_id = auth.uid());
+  for update using (user_id = auth.uid()::text);
 
 -- ============================================================
 -- Realtime: private channels are access-checked
@@ -247,5 +272,6 @@ create policy "Publish document presence" on realtime.messages
 -- ============================================================
 alter table user_settings
   add column if not exists accent text not null default 'indigo',
+  add column if not exists palette text not null default 'default',
   add column if not exists card_radius integer not null default 12,
   add column if not exists reduce_motion boolean not null default false;

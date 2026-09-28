@@ -7,14 +7,16 @@ import {
   applyAppearance,
   type AccentId,
   type ThemeMode,
+  type ThemePalette,
 } from '@/theme'
 
-export type { AccentId, ThemeMode }
+export type { AccentId, ThemeMode, ThemePalette }
 
 /** What the account stores. Appearance and the grid defaults live together. */
 export interface UserSettings {
   // Appearance
   theme: ThemeMode
+  palette: ThemePalette
   accent: AccentId
   cardRadius: number
   reduceMotion: boolean
@@ -31,6 +33,7 @@ interface UserSettingsStore {
   /** The signed-in user, remembered so a change can be written out on its own. */
   userId: string | null
   setTheme: (theme: ThemeMode) => void
+  setPalette: (palette: ThemePalette) => void
   setAccent: (accent: AccentId) => void
   setCardRadius: (radius: number) => void
   setReduceMotion: (reduce: boolean) => void
@@ -45,6 +48,7 @@ interface UserSettingsStore {
 
 const DEFAULT_SETTINGS: UserSettings = {
   theme: DEFAULT_APPEARANCE.mode,
+  palette: DEFAULT_APPEARANCE.palette,
   accent: DEFAULT_APPEARANCE.accent,
   cardRadius: DEFAULT_APPEARANCE.cardRadius,
   reduceMotion: DEFAULT_APPEARANCE.reduceMotion,
@@ -69,6 +73,7 @@ export const useUserSettings = create<UserSettingsStore>()((set, get) => {
       const settings = { ...state.settings, ...patch }
       applyAppearance({
         mode: settings.theme,
+        palette: settings.palette,
         accent: settings.accent,
         cardRadius: settings.cardRadius,
         reduceMotion: settings.reduceMotion,
@@ -90,6 +95,7 @@ export const useUserSettings = create<UserSettingsStore>()((set, get) => {
     userId: null,
 
     setTheme: (theme) => update({ theme }),
+    setPalette: (palette) => update({ palette }),
     setAccent: (accent) => update({ accent }),
     setCardRadius: (cardRadius) => update({ cardRadius }),
     setReduceMotion: (reduceMotion) => update({ reduceMotion }),
@@ -104,7 +110,7 @@ export const useUserSettings = create<UserSettingsStore>()((set, get) => {
       const { data, error } = await supabase
         .from('user_settings')
         .select(
-          'theme, accent, card_radius, reduce_motion, default_snap_to_grid, default_grid_pattern, default_grid_size',
+          'theme, palette, accent, card_radius, reduce_motion, default_snap_to_grid, default_grid_pattern, default_grid_size',
         )
         .eq('user_id', user.id)
         .maybeSingle()
@@ -118,6 +124,7 @@ export const useUserSettings = create<UserSettingsStore>()((set, get) => {
       const next: UserSettings = data
         ? {
             theme: (data.theme as ThemeMode) ?? 'light',
+            palette: (data.palette as ThemePalette) ?? DEFAULT_APPEARANCE.palette,
             accent: (data.accent as AccentId) ?? DEFAULT_APPEARANCE.accent,
             cardRadius: data.card_radius ?? DEFAULT_APPEARANCE.cardRadius,
             reduceMotion: data.reduce_motion ?? false,
@@ -131,6 +138,7 @@ export const useUserSettings = create<UserSettingsStore>()((set, get) => {
       // Repaint before flipping `loaded`, so the panel never renders light.
       applyAppearance({
         mode: next.theme,
+        palette: next.palette,
         accent: next.accent,
         cardRadius: next.cardRadius,
         reduceMotion: next.reduceMotion,
@@ -158,6 +166,7 @@ export const useUserSettings = create<UserSettingsStore>()((set, get) => {
           {
             user_id: userId,
             theme: settings.theme,
+            palette: settings.palette,
             accent: settings.accent,
             card_radius: settings.cardRadius,
             reduce_motion: settings.reduceMotion,

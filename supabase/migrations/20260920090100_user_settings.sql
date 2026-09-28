@@ -17,14 +17,14 @@ alter table user_settings enable row level security;
 drop policy if exists "Users can view own settings" on user_settings;
 create policy "Users can view own settings"
   on user_settings for select
-  using (user_id = auth.uid());
+  using (user_id = auth.uid()::text);
 
 drop policy if exists "Users can update own settings" on user_settings;
 create policy "Users can update own settings"
   on user_settings for update
-  using (user_id = auth.uid());
+  using (user_id = auth.uid()::text);
 
 drop policy if exists "Users can insert own settings" on user_settings;
 create policy "Users can insert own settings"
   on user_settings for insert
-  with check (user_id = auth.uid());
+  with check (user_id = auth.uid()::text);

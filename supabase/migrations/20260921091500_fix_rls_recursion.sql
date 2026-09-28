@@ -26,10 +26,10 @@ set search_path = public
 as $$
   select exists (
     select 1 from documents d
-    where d.id = p_document_id and d.owner_id = auth.uid()
+    where d.id = p_document_id and d.owner_id = auth.uid()::text
   ) or exists (
     select 1 from document_collaborators dc
-    where dc.document_id = p_document_id and dc.user_id = auth.uid()
+    where dc.document_id = p_document_id and dc.user_id = auth.uid()::text
   );
 $$;
 
@@ -42,11 +42,11 @@ set search_path = public
 as $$
   select exists (
     select 1 from documents d
-    where d.id = p_document_id and d.owner_id = auth.uid()
+    where d.id = p_document_id and d.owner_id = auth.uid()::text
   ) or exists (
     select 1 from document_collaborators dc
     where dc.document_id = p_document_id
-      and dc.user_id = auth.uid()
+      and dc.user_id = auth.uid()::text
       and dc.role in ('owner', 'editor')
   );
 $$;
@@ -62,12 +62,12 @@ as $$
     select 1
     from pages pg
     join documents d on d.id = pg.document_id
-    where pg.id = p_page_id and d.owner_id = auth.uid()
+    where pg.id = p_page_id and d.owner_id = auth.uid()::text
   ) or exists (
     select 1
     from pages pg
     join document_collaborators dc on dc.document_id = pg.document_id
-    where pg.id = p_page_id and dc.user_id = auth.uid()
+    where pg.id = p_page_id and dc.user_id = auth.uid()::text
   );
 $$;
 
@@ -82,13 +82,13 @@ as $$
     select 1
     from pages pg
     join documents d on d.id = pg.document_id
-    where pg.id = p_page_id and d.owner_id = auth.uid()
+    where pg.id = p_page_id and d.owner_id = auth.uid()::text
   ) or exists (
     select 1
     from pages pg
     join document_collaborators dc on dc.document_id = pg.document_id
     where pg.id = p_page_id
-      and dc.user_id = auth.uid()
+      and dc.user_id = auth.uid()::text
       and dc.role in ('owner', 'editor')
   );
 $$;
@@ -109,7 +109,7 @@ create policy "Collaborators can view shared documents"
 drop policy if exists "Users can view own collaborator rows" on document_collaborators;
 create policy "Users can view own collaborator rows"
   on document_collaborators for select
-  using (user_id = auth.uid());
+  using (user_id = auth.uid()::text);
 
 -- WITH CHECK is included so a collaborator cannot add themselves, or add
 -- themselves as a second owner.

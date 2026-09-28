@@ -13,6 +13,7 @@
 
 export type ThemeMode = 'light' | 'dark'
 export type AccentId = 'indigo' | 'violet' | 'blue' | 'teal' | 'green' | 'amber' | 'rose'
+export type ThemePalette = 'default' | 'metallic' | 'fluffy' | 'contrast'
 
 export interface Accent {
   id: AccentId
@@ -86,6 +87,131 @@ export interface ThemeTokens {
 }
 
 /**
+ * The neutrals a palette replaces. Every palette keeps the same *relationships*
+ * (surface above canvas, ink above muted above line), so the component tree
+ * never has to know which one is active.
+ */
+type NeutralKey =
+  | 'canvas'
+  | 'surface'
+  | 'surfaceAlt'
+  | 'surfaceSunken'
+  | 'ink'
+  | 'inkStrong'
+  | 'muted'
+  | 'line'
+  | 'lineStrong'
+
+type Neutrals = Record<NeutralKey, string>
+
+/** How a palette changes the neutrals, per mode. */
+export interface Palette {
+  id: ThemePalette
+  label: string
+  /** One line, shown under the swatch. */
+  hint: string
+  light: Partial<Neutrals>
+  dark: Partial<Neutrals>
+}
+
+export const PALETTES: Palette[] = [
+  {
+    id: 'default',
+    label: 'Classic',
+    hint: 'Neutral greys, the everyday look',
+    light: {},
+    dark: {},
+  },
+  {
+    id: 'metallic',
+    label: 'Metallic',
+    hint: 'Cool steel with a tight specular edge',
+    light: {
+      canvas: '#dfe4ea',
+      surface: '#f7f9fb',
+      surfaceAlt: '#eef2f6',
+      surfaceSunken: '#e4e9ef',
+      ink: '#243040',
+      inkStrong: '#0b1522',
+      muted: '#5c6b7d',
+      line: '#cbd5e1',
+      lineStrong: '#a8b6c6',
+    },
+    dark: {
+      canvas: '#0b0e13',
+      surface: '#161a21',
+      surfaceAlt: '#1d222b',
+      surfaceSunken: '#07090d',
+      ink: '#c3ccd8',
+      inkStrong: '#eef3f9',
+      muted: '#7d8a9a',
+      line: '#262d38',
+      lineStrong: '#3b4553',
+    },
+  },
+  {
+    id: 'fluffy',
+    label: 'Fluffy',
+    hint: 'Warm paper, soft corners, gentle contrast',
+    light: {
+      canvas: '#fdf3e7',
+      surface: '#fffdfa',
+      surfaceAlt: '#fdf6ec',
+      surfaceSunken: '#f7ebdb',
+      ink: '#5a4636',
+      inkStrong: '#3d2f23',
+      muted: '#96795f',
+      line: '#f0e2d0',
+      lineStrong: '#e0cbb2',
+    },
+    dark: {
+      canvas: '#171310',
+      surface: '#241d18',
+      surfaceAlt: '#2c231c',
+      surfaceSunken: '#0f0c0a',
+      ink: '#e3d5c6',
+      inkStrong: '#fbf5ee',
+      muted: '#a8917c',
+      line: '#332a22',
+      lineStrong: '#4a3d31',
+    },
+  },
+  {
+    id: 'contrast',
+    label: 'Contrast',
+    hint: 'Near-black on white, for bright rooms',
+    light: {
+      canvas: '#ffffff',
+      surface: '#ffffff',
+      surfaceAlt: '#f4f4f5',
+      surfaceSunken: '#ebebed',
+      ink: '#111111',
+      inkStrong: '#000000',
+      muted: '#4a4a4a',
+      line: '#c9c9cc',
+      lineStrong: '#111111',
+    },
+    dark: {
+      canvas: '#000000',
+      surface: '#0b0b0b',
+      surfaceAlt: '#151515',
+      surfaceSunken: '#000000',
+      ink: '#f2f2f2',
+      inkStrong: '#ffffff',
+      muted: '#b4b4b4',
+      line: '#3d3d3d',
+      lineStrong: '#8a8a8a',
+    },
+  },
+]
+
+export const DEFAULT_PALETTE: ThemePalette = 'default'
+
+export function getPalette(id: string | null | undefined): Palette {
+  return PALETTES.find((palette) => palette.id === id) ?? PALETTES[0]
+}
+
+/**
  * Light values. Dark is not a copy with inverted numbers: it keeps the same
  * relationships (surface above canvas, ink above muted) with the greys moved to
  * true neutrals, so a card still reads as a card in both modes.
@@ -132,12 +258,15 @@ const DARK: ThemeTokens = {
   codeInk: '#e2e8f0',
 }
 
-export function tokensFor(mode: ThemeMode): ThemeTokens {
-  return mode === 'dark' ? DARK : LIGHT
+export function tokensFor(mode: ThemeMode, palette: ThemePalette = 'default'): ThemeTokens {
+  const base = mode === 'dark' ? DARK : LIGHT
+  const override = getPalette(palette)[mode]
+  return { ...base, ...override }
 }
 
 export interface Appearance {
   mode: ThemeMode
+  palette: ThemePalette
   accent: AccentId
   cardRadius: number
   reduceMotion: boolean
@@ -145,6 +274,7 @@ export interface Appearance {
 
 export const DEFAULT_APPEARANCE: Appearance = {
   mode: 'light',
+  palette: DEFAULT_PALETTE,
   accent: DEFAULT_ACCENT,
   cardRadius: 12,
   reduceMotion: false,
@@ -152,8 +282,9 @@ export const DEFAULT_APPEARANCE: Appearance = {
 
 /** `--cc-*` name → value, written to the document root. */
 export function cssVariables(appearance: Appearance): Record<string, string> {
-  const tokens = tokensFor(appearance.mode)
+  const tokens = tokensFor(appearance.mode, appearance.palette)
   const accent = getAccent(appearance.accent)
+  const palette = getPalette(appearance.palette)
   const dark = appearance.mode === 'dark'
 
   return {
@@ -188,6 +319,10 @@ export function cssVariables(appearance: Appearance): Record<string, string> {
 
     '--cc-radius-card': `${appearance.cardRadius}px`,
     '--cc-motion': appearance.reduceMotion ? '0ms' : '190ms',
+
+    // A palette can ask for a different default corner, but the user's slider
+    // always wins once they touch it.
+    '--cc-radius-ui': palette.id === 'fluffy' ? '12px' : '8px',
   }
 }
 

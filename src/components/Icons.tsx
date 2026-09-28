@@ -39,6 +39,8 @@ import {
   UserPlus,
   Share2,
   Pencil,
+  Compass,
+  Home,
 } from 'lucide-react'
 
 export const IconPlus = Plus
@@ -81,3 +83,5 @@ export const IconSun = Sun
 export const IconUserPlus = UserPlus
 export const IconShare = Share2
 export const IconPencil = Pencil
+export const IconCompass = Compass
+export const IconHome = Home

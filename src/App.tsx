@@ -6,6 +6,7 @@ import { ConnectionTree } from '@/components/ConnectionTree'
 import { ContextMenu } from '@/components/ContextMenu'
 import { ImportExportDialog } from '@/components/ImportExportDialog'
 import { Inspector } from '@/components/Inspector'
+import { NotFound } from '@/components/NotFound'
 import { PageSidebar } from '@/components/PageSidebar'
 import { SearchPanel } from '@/components/SearchPanel'
 import { ShareDialog } from '@/components/ShareDialog'
@@ -15,6 +16,7 @@ import { UserSettingsPage } from '@/components/UserSettingsPage'
 import { WorkspacePage } from '@/components/WorkspacePage'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 import { primePageSync, resetPageSync, usePageSync } from '@/hooks/usePageSync'
+import { navigate, migrateLegacyHash, useRoute } from '@/router'
 import { loadDocument } from '@/store/supabase-sync'
 import type { DocumentRow } from '@/store/supabase-sync'
 import { useCanvasStore } from '@/store/useCanvasStore'
@@ -28,7 +30,15 @@ export default function App() {
   const sidebarOpen = useCanvasStore((s) => s.sidebarOpen)
   const setSidebarOpen = useCanvasStore((s) => s.setSidebarOpen)
 
-  const [currentDocId, setCurrentDocId] = useState<string | null>(null)
+  // Real paths: `/`, `/w/<docId>`, `/settings`. Anything else is a 404.
+  // Runs once, before the first route is read, so a saved `#workspace/…` link
+  // lands on its real address instead of the home page.
+  useEffect(() => {
+    migrateLegacyHash()
+  }, [])
+  const route = useRoute()
+  const currentDocId = route.name === 'workspace' ? route.docId : null
+
   const [user, setUser] = useState<SupabaseUser | null>(null)
   const [document_, setDocument] = useState<DocumentRow | null>(null)
   const [showShare, setShowShare] = useState(false)
@@ -60,24 +70,7 @@ export default function App() {
     store.setDarkMode(settings.theme === 'dark')
   }, [settings])
 
-  // Hash routing: #workspace/<docId> opens a document, anything else is the list.
-  useEffect(() => {
-    const handleHashChange = () => {
-      const hash = window.location.hash.slice(1)
-      if (hash.startsWith('workspace/')) {
-        const docId = decodeURIComponent(hash.slice('workspace/'.length))
-        setCurrentDocId(docId || null)
-      } else {
-        setCurrentDocId(null)
-      }
-    }
-
-    handleHashChange()
-    window.addEventListener('hashchange', handleHashChange)
-    return () => window.removeEventListener('hashchange', handleHashChange)
-  }, [])
-
-  // `GET /documents` + `GET /pages` for the document in the URL.
+  // `GET /documents` + `GET /pages` for the workspace in the URL.
   useEffect(() => {
     const store = useCanvasStore.getState()
     store.setDocumentId(currentDocId)
@@ -101,7 +94,8 @@ export default function App() {
 
         if (!loaded) {
           store.pushToast('That workspace could not be opened.', 'error')
-          window.location.hash = ''
+          // Replace, so Back does not walk straight into the dead address.
+          navigate.replace('/')
           return
         }
 
@@ -134,11 +128,15 @@ export default function App() {
   }, [currentDocId, user])
 
   const openDocument = useCallback((docId: string) => {
-    window.location.hash = `workspace/${encodeURIComponent(docId)}`
+    navigate.workspace(docId)
   }, [])
 
   const openWorkspace = useCallback(() => {
-    window.location.hash = ''
+    navigate.home()
+  }, [])
+
+  const openSettings = useCallback(() => {
+    navigate.settings()
   }, [])
 
   const shell = (children: React.ReactNode) => (
@@ -148,9 +146,7 @@ export default function App() {
         <Toolbar
           user={user}
           documentId={currentDocId}
-          onOpenSettings={() => {
-            window.location.hash = 'settings'
-          }}
+          onOpenSettings={openSettings}
           onOpenWorkspace={openWorkspace}
           onOpenShare={() => setShowShare(true)}
           onUserChange={setUser}
@@ -163,15 +159,24 @@ export default function App() {
     </AuthGuard>
   )
 
-  // Settings (full page, hash route). The panel is a fixed overlay, so this
-  // branch only needs a mount point that does not scroll.
-  if (window.location.hash === '#settings') {
+  // A path we do not serve. Still inside the chrome, so Back and the logo work.
+  if (route.name === 'not-found') {
+    return shell(
+      <div className="min-h-0 flex-1 overflow-hidden">
+        <NotFound path={route.path} />
+      </div>,
+    )
+  }
+
+  // Settings (its own address). The panel is a fixed overlay, so this branch
+  // only needs a mount point that does not scroll.
+  if (route.name === 'settings') {
     return shell(
       <div className="min-h-0 flex-1 overflow-hidden">
         {user ? (
           <UserSettingsPage user={user} onClose={openWorkspace} />
         ) : (
-          <div className="flex h-full items-center justify-center text-sm text-slate-400">
+          <div className="flex h-full items-center justify-center text-sm text-muted">
             Please sign in to access settings.
           </div>
         )}

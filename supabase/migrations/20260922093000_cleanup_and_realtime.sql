@@ -43,26 +43,26 @@ DROP POLICY IF EXISTS "Owners can manage collaborators" ON document_collaborator
 DROP POLICY IF EXISTS "Users can view collaborators on shared documents" ON document_collaborators;
 
 -- documents: the owner of a document can do anything with it
-CREATE POLICY "Owners can view own documents" ON documents FOR SELECT USING (owner_id = auth.uid());
-CREATE POLICY "Owners can insert documents" ON documents FOR INSERT WITH CHECK (owner_id = auth.uid());
-CREATE POLICY "Owners can update documents" ON documents FOR UPDATE USING (owner_id = auth.uid());
-CREATE POLICY "Owners can delete documents" ON documents FOR DELETE USING (owner_id = auth.uid());
+CREATE POLICY "Owners can view own documents" ON documents FOR SELECT USING (owner_id = auth.uid()::text);
+CREATE POLICY "Owners can insert documents" ON documents FOR INSERT WITH CHECK (owner_id = auth.uid()::text);
+CREATE POLICY "Owners can update documents" ON documents FOR UPDATE USING (owner_id = auth.uid()::text);
+CREATE POLICY "Owners can delete documents" ON documents FOR DELETE USING (owner_id = auth.uid()::text);
 
 -- pages: reach the document through it, never the other way round
 CREATE POLICY "Owners can view pages in own documents" ON pages FOR SELECT USING (
-  EXISTS (SELECT 1 FROM documents WHERE documents.id = pages.document_id AND documents.owner_id = auth.uid())
+  EXISTS (SELECT 1 FROM documents WHERE documents.id = pages.document_id AND documents.owner_id = auth.uid()::text)
 );
 CREATE POLICY "Owners can insert pages in own documents" ON pages FOR INSERT WITH CHECK (
-  EXISTS (SELECT 1 FROM documents WHERE documents.id = pages.document_id AND documents.owner_id = auth.uid())
+  EXISTS (SELECT 1 FROM documents WHERE documents.id = pages.document_id AND documents.owner_id = auth.uid()::text)
 );
 CREATE POLICY "Owners can update pages in own documents" ON pages FOR UPDATE USING (
-  EXISTS (SELECT 1 FROM documents WHERE documents.id = pages.document_id AND documents.owner_id = auth.uid())
+  EXISTS (SELECT 1 FROM documents WHERE documents.id = pages.document_id AND documents.owner_id = auth.uid()::text)
 );
 CREATE POLICY "Owners can delete pages in own documents" ON pages FOR DELETE USING (
-  EXISTS (SELECT 1 FROM documents WHERE documents.id = pages.document_id AND documents.owner_id = auth.uid())
+  EXISTS (SELECT 1 FROM documents WHERE documents.id = pages.document_id AND documents.owner_id = auth.uid()::text)
 );
 
 -- user_settings
-CREATE POLICY "Users can view own settings" ON user_settings FOR SELECT USING (user_id = auth.uid());
-CREATE POLICY "Users can insert own settings" ON user_settings FOR INSERT WITH CHECK (user_id = auth.uid());
-CREATE POLICY "Users can update own settings" ON user_settings FOR UPDATE USING (user_id = auth.uid());
+CREATE POLICY "Users can view own settings" ON user_settings FOR SELECT USING (user_id = auth.uid()::text);
+CREATE POLICY "Users can insert own settings" ON user_settings FOR INSERT WITH CHECK (user_id = auth.uid()::text);
+CREATE POLICY "Users can update own settings" ON user_settings FOR UPDATE USING (user_id = auth.uid()::text);

@@ -271,15 +271,21 @@ useCanvasStore
 }
 ```
 
-### Routing (hash-based)
+### Routing (path-based)
 
-Hash routing, so no server rewrite is needed on Vercel.
+Real paths. `vercel.json` rewrites every unknown path to `index.html`, and the
+Vite dev server does the same, so the client owns the route.
 
 | Route | Component | Description |
 |-------|-----------|-------------|
-| `#` | `WorkspacePage` | Document list — owned and shared |
-| `#workspace/<docId>` | `Canvas` | The editor for one workspace |
-| `#settings` | `UserSettingsPage` | User preferences |
+| `/` | `WorkspacePage` | Document list — owned and shared |
+| `/w/<docId>` | `Canvas` | The editor for one workspace |
+| `/settings` | `UserSettingsPage` | User preferences |
+| anything else | `NotFound` | 404, inside the normal chrome |
+
+`/w/<id>` for a workspace that will not load replaces the entry with `/`, so Back
+does not walk straight into the dead address. The old `#workspace/…` bookmarks are
+migrated to their real path on first load.
 
 ### Component Hierarchy
 
@@ -295,8 +301,8 @@ App
 │   │   ├── Dark Mode Toggle
 │   │   ├── Shortcuts
 │   │   └── User Avatar Menu (Settings, Workspaces, Sign Out)
-│   ├── WorkspacePage (route: #)
-│   ├── Canvas (route: #workspace/:docId)
+│   ├── WorkspacePage (route: /)
+│   ├── Canvas (route: /w/:docId)
 │   │   ├── ConnectionLayer (SVG edges)
 │   │   ├── Card Nodes (draggable, resizable)
 │   │   ├── Group Nodes (containers)

@@ -36,8 +36,12 @@ Then open http://localhost:5173 and sign in with Google.
 | Route | What it is |
 | --- | --- |
 | `#` | Workspace list — everything you own plus everything shared with you |
-| `#workspace/<docId>` | The canvas for one workspace |
-| `#settings` | Theme and grid preferences, stored on your account |
+| `/w/<docId>` | The canvas for one workspace |
+| `/settings` | Theme, palette, accent and grid preferences, stored on your account |
+
+Each screen has a real address you can bookmark, share and hit Back on. Anything
+else is a genuine 404, and a workspace that cannot be opened sends you home
+rather than leaving a dead screen.
 
 A workspace always has at least one page: the database creates it, and the last
 page cannot be deleted.

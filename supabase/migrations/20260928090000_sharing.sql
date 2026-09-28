@@ -15,27 +15,27 @@ CREATE TABLE IF NOT EXISTS profiles (
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Users can view own profile"
-  ON profiles FOR SELECT USING (id = auth.uid());
+  ON profiles FOR SELECT USING (id = auth.uid()::text);
 
 CREATE POLICY "Users can view profiles of people they share a document with"
   ON profiles FOR SELECT USING (
-    id = auth.uid()
+    id = auth.uid()::text
     OR EXISTS (
       SELECT 1
       FROM document_collaborators mine
       JOIN document_collaborators theirs
         ON theirs.document_id = mine.document_id
-      WHERE mine.user_id = auth.uid() AND theirs.user_id = profiles.id
+      WHERE mine.user_id = auth.uid()::text AND theirs.user_id = profiles.id
     )
   );
 
 DROP POLICY IF EXISTS "Users can update own profile" ON profiles;
 CREATE POLICY "Users can update own profile"
-  ON profiles FOR UPDATE USING (id = auth.uid()) WITH CHECK (id = auth.uid());
+  ON profiles FOR UPDATE USING (id = auth.uid()::text) WITH CHECK (id = auth.uid()::text);
 
 DROP POLICY IF EXISTS "Users can insert own profile" ON profiles;
 CREATE POLICY "Users can insert own profile"
-  ON profiles FOR INSERT WITH CHECK (id = auth.uid());
+  ON profiles FOR INSERT WITH CHECK (id = auth.uid()::text);
 
 CREATE OR REPLACE FUNCTION sync_profile_from_auth()
 RETURNS TRIGGER AS $$
