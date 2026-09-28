@@ -2202,14 +2202,14 @@ begin
         g.value || jsonb_build_object(
           'id', coalesce(group_map ->> (g.value ->> 'id'), g.value ->> 'id'),
           'memberCardIds', coalesce((
-            select jsonb_agg(coalesce(card_map ->> m, m) order by m.ord)
+            select jsonb_agg(coalesce(card_map ->> m.id, m.id) order by m.ord)
             from jsonb_array_elements_text(
               coalesce(g.value -> 'memberCardIds', '[]'::jsonb)
             ) with ordinality as m(id, ord)
             where card_map ? m.id
           ), '[]'::jsonb),
           'memberGroupIds', coalesce((
-            select jsonb_agg(coalesce(group_map ->> m, m) order by m.ord)
+            select jsonb_agg(coalesce(group_map ->> m.id, m.id) order by m.ord)
             from jsonb_array_elements_text(
               coalesce(g.value -> 'memberGroupIds', '[]'::jsonb)
             ) with ordinality as m(id, ord)

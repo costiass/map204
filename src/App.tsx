@@ -4,6 +4,7 @@ import { AuthGuard } from '@/components/AuthGuard'
 import { Canvas } from '@/components/Canvas'
 import { ConnectionTree } from '@/components/ConnectionTree'
 import { ContextMenu } from '@/components/ContextMenu'
+import { DevOverlay } from '@/components/DevOverlay'
 import { ImportExportDialog } from '@/components/ImportExportDialog'
 import { Inspector } from '@/components/Inspector'
 import { NotFound } from '@/components/NotFound'
@@ -190,6 +191,8 @@ export default function App() {
         <ContextMenu />
         <ImportExportDialog />
         <StatusBar />
+        {/* TEMPORARY debug overlay. See src/components/DevOverlay.tsx. */}
+        <DevOverlay />
         <Toasts />
       </div>
     </AuthGuard>

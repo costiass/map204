@@ -97,8 +97,36 @@ const PLPGSQL_ONLY = [
   { word: /\b\d+\s*;[\s\S]*?\binto\b/i, why: 'SELECT ... INTO' },
 ]
 
+/**
+ * A `->` / `->>` key must be a string, an expression, or a column — never a bare
+ * table alias.
+ *
+ * `with ordinality as m(id, ord)` makes `m` a *row* and `m.id` its value, so
+ * `card_map ->> m` is a `->>` with a record on the right and Postgres answers
+ *
+ *   42883  operator does not exist: jsonb ->> record
+ *
+ * which points at the operator rather than at the missing `.id`, and is only
+ * visible by running the function. In this schema every key is a quoted literal
+ * or a parenthesised expression, so a bare lowercase identifier after `->` /
+ * `->>` is always a mistake.
+ */
+const SUSPECT_KEY = /->>?\s*([a-z_][a-z0-9_]*)(?![\w.])/gi
+
 for (const file of files) {
   const sql = blank(fs.readFileSync(path.join(dir, file), 'utf8'))
+
+  for (const m of sql.matchAll(SUSPECT_KEY)) {
+    const key = m[1].toLowerCase()
+    // Real identifiers that legitimately follow an operator: the `?`/`?|`/`?&`
+    // containment operators take a column, and `-` is subtraction.
+    if (['x', 'y', 'z', 'w'].includes(key)) continue
+    fail(
+      `${file}: \`->> ${key}\` uses a bare identifier as a JSON key. ` +
+        `If "${key}" is a table alias use ${key}.column — a bare alias is a row, ` +
+        `which Postgres reports as "jsonb ->> record".`,
+    )
+  }
 
   // Each `create [or replace] function … as $tag$ … $tag$;` block.
   const blocks = [
