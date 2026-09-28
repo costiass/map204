@@ -88,11 +88,15 @@ export function FlashCard({
       style={{ height: '100%' }}
     >
       <div
+        /* Marks this as a control rather than card body, which is what stops the
+           canvas calling `preventDefault` under a click. The card still drags
+           from here — the marker only suppresses the default, it does not opt
+           out of dragging — and suppressing it is what makes the click that
+           turns the card over reliable. */
         data-no-drag=""
         role={canFlip ? 'button' : undefined}
         tabIndex={canFlip ? 0 : undefined}
         aria-label={canFlip ? 'Turn this card over' : undefined}
-        onPointerDown={(event) => event.stopPropagation()}
         onDoubleClick={(event) => {
           // Two clicks in one spot is not a request to turn the card over. It is
           // somebody trying to edit it, so the pending flip is called off.
@@ -112,9 +116,13 @@ export function FlashCard({
           canFlip ? 'cursor-pointer' : 'cursor-default'
         } ${flipped ? '[transform:rotateY(180deg)]' : ''}`}
       >
-        {/* Front: the title. The back is pre-rotated so it is face-on once the
-            card has turned, which is what makes a single element enough. */}
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-3 py-4 text-center [backface-visibility:hidden]">
+        {/* Each face carries an *explicit* rotation, including the front one at
+            0°. `backface-visibility: hidden` on a face with no transform of its
+            own is not reliably culled: the face is only reliably recognised as
+            having turned when it is unambiguously part of a rotated 3D subtree.
+            Spelling out 0deg is the standard form, and it is what makes the
+            front actually disappear instead of ghosting through the back. */}
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-3 py-4 text-center [backface-visibility:hidden] [transform:rotateY(0deg)]">
           <p className="text-[15px] font-semibold leading-snug">{card.title || 'Untitled'}</p>
           {hasBack ? (
             <span className="mt-1 inline-flex items-center gap-1 text-[10.5px] opacity-45">
@@ -125,11 +133,21 @@ export function FlashCard({
           )}
         </div>
 
-        <div className="absolute inset-0 overflow-hidden px-2 py-2 [backface-visibility:hidden] [transform:rotateY(180deg)]">
-          <div
-            className="cc-markdown h-full overflow-y-auto cc-scroll text-left"
-            dangerouslySetInnerHTML={{ __html: backHtml }}
-          />
+        {/* Pre-rotated, so it is face-on once the card has turned — which is what
+            lets one rotating element carry both sides. */}
+        <div className="absolute inset-0 overflow-hidden [backface-visibility:hidden] [transform:rotateY(180deg)]">
+          {/* Centred, like the front. A flash card's back is a short answer
+              displayed to somebody at a distance, so left-aligned ragged text is
+              the wrong shape for it.
+
+              The Markdown sits inside one wrapper rather than being the flex
+              container's own children: a flex row would put two paragraphs side
+              by side, and a list's items along a line. Centring the block that
+              *contains* the answer centres the answer without deciding anything
+              about how the answer is laid out. */}
+          <div className="flex h-full w-full items-center justify-center overflow-y-auto px-3 py-4 text-center cc-scroll">
+            <div className="cc-markdown w-full" dangerouslySetInnerHTML={{ __html: backHtml }} />
+          </div>
         </div>
       </div>
     </div>

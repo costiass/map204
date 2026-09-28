@@ -134,7 +134,7 @@ export function Canvas() {
     return map
   }, [cards])
 
-  const dimmedCardIds = useMemo(() => {
+  const filterDimmedCardIds = useMemo(() => {
     const filters = { query: searchQuery, tags: filterTags, color: filterColor }
     if (!isFiltering(filters)) return EMPTY_SET
     const set = new Set<string>()
@@ -143,6 +143,29 @@ export function Canvas() {
     }
     return set
   }, [cards, searchQuery, filterTags, filterColor])
+
+  // A running step can dim everything it is not pointing at, which is a
+  // different thing from a search filter and lives somewhere else entirely: the
+  // filter is a thing the reader asked for, this is a thing the presentation
+  // decided, and they must not cancel each other out.
+  const focusTargetId = useCanvasStore((s) => s.focusTargetId)
+  const focusMode = useCanvasStore((s) => s.focusMode)
+  const presenting = useCanvasStore((s) => s.presenting)
+  // `spotlight` dims the rest *and* rings the target; `dim` only dims. Ringed
+  // only when the step asked for it, because a ring the step did not ask for
+  // is a second thing competing for the eye it is meant to direct.
+  const spotlightId = presenting && focusMode === 'spotlight' ? focusTargetId : null
+
+  const dimmedCardIds = useMemo(() => {
+    if (presenting && focusTargetId) {
+      const set = new Set<string>()
+      for (const card of cards) {
+        if (card.id !== focusTargetId) set.add(card.id)
+      }
+      return set
+    }
+    return filterDimmedCardIds
+  }, [cards, presenting, focusTargetId, filterDimmedCardIds])
 
   /* ---------------------------------------------------------------- */
   /* viewport                                                         */
@@ -230,11 +253,14 @@ export function Canvas() {
     }
 
     const started = performance.now()
+    const linear = cameraRequest.transition === 'linear'
     const tick = (now: number) => {
       const t = Math.min(1, (now - started) / duration)
       // Ease in and out. A linear camera move reads as a mechanical jump between
       // two stills, which is exactly what a presentation is trying not to be.
-      const eased = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2
+      // It stays available for a step that is chosen as `linear`, where the
+      // timing of the arrival is the point and easing would misplace it.
+      const eased = linear ? t : t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2
 
       viewportRef.current = {
         x: from.x + (to.x - from.x) * eased,
@@ -1145,6 +1171,7 @@ export function Canvas() {
               card={card}
               selected={selectedCardIds.includes(card.id)}
               dimmed={dimmedCardIds.has(card.id)}
+              spotlight={spotlightId === card.id}
               dragTarget={draft?.targetCardId === card.id}
               offset={dragOffsetFor(card.id)}
               size={

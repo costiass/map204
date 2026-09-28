@@ -245,6 +245,83 @@ Promise.all([import(pathToFileURL(serializePath).href), import(pathToFileURL(geo
     }
 
     /* ================================================================ */
+    /* a step's transition, trigger and focus                          */
+    /* ================================================================ */
+
+    const stepOf = (entry) => docOf({ steps: [entry] }).settings.steps[0]
+
+    // Absent means the defaults, which is what every step made before these
+    // fields existed has to keep working as.
+    const bare = stepOf({ id: 's', targetKind: 'card', targetId: 'c' })
+    if (bare.transition !== 'ease') fail(\`a step with no transition became "\${bare.transition}"\`)
+    if (bare.trigger !== 'manual') fail(\`a step with no trigger became "\${bare.trigger}"\`)
+    if (bare.focus !== 'none') fail(\`a step with no focus became "\${bare.focus}"\`)
+
+    // An unknown value in an enumerated field falls back rather than dropping
+    // the step: an unfamiliar transition is still a step somebody meant.
+    for (const field of ['transition', 'trigger', 'focus']) {
+      const got = stepOf({ id: 's', targetKind: 'card', [field]: 'teleport' })[field]
+      const fallback = field === 'transition' ? 'ease' : field === 'trigger' ? 'manual' : 'none'
+      if (got !== fallback) fail(\`an unknown \${field} became "\${got}", expected "\${fallback}"\`)
+    }
+
+    // The three combinations that must agree with each other.
+    //
+    // An instant step has no arrival to animate, so a duration on one is a lie.
+    const instant = stepOf({ id: 's', targetKind: 'card', transition: 'instant', durationMs: 900 })
+    if (instant.durationMs !== 0) fail(\`an instant step kept a duration: \${instant.durationMs}\`)
+
+    // A step that only moves on a key has no countdown, so a delay on one is
+    // a number that is stored and never read.
+    for (const trigger of ['manual', 'hold']) {
+      const got = stepOf({ id: 's', targetKind: 'card', trigger, autoAdvanceMs: 5000 })
+      if (got.autoAdvanceMs !== 0) {
+        fail(\`a \${trigger} step kept a countdown: \${got.autoAdvanceMs}\`)
+      }
+    }
+    const timed = stepOf({ id: 's', targetKind: 'card', trigger: 'timed', autoAdvanceMs: 5000 })
+    if (timed.autoAdvanceMs !== 5000) fail(\`a timed step lost its delay: \${timed.autoAdvanceMs}\`)
+
+    // A countdown is floored at a second. A step that flashes past in 200ms is
+    // not a step, and the floor is also what stops a hand-edited file setting
+    // the run to advance faster than a person can read it.
+    const tooFast = stepOf({ id: 's', targetKind: 'card', trigger: 'timed', autoAdvanceMs: 50 })
+    if (tooFast.autoAdvanceMs < 1000) {
+      fail(\`a 50ms countdown was allowed: \${tooFast.autoAdvanceMs}\`)
+    }
+    const tooSlow = stepOf({ id: 's', targetKind: 'card', trigger: 'timed', autoAdvanceMs: 9e9 })
+    if (tooSlow.autoAdvanceMs > 120000) {
+      fail(\`an endless countdown was allowed: \${tooSlow.autoAdvanceMs}\`)
+    }
+
+    // Every round trip: these four fields have to survive an export, or a
+    // presentation somebody built on another machine arrives with every step
+    // set to the defaults.
+    const full = docOf({
+      steps: [{
+        id: 's',
+        targetId: 'c',
+        targetKind: 'card',
+        zoom: 1.5,
+        transition: 'linear',
+        trigger: 'timed',
+        autoAdvanceMs: 8000,
+        durationMs: 1200,
+        focus: 'spotlight',
+      }],
+    }).settings.steps[0]
+    for (const [key, want] of Object.entries({
+      transition: 'linear',
+      trigger: 'timed',
+      autoAdvanceMs: 8000,
+      durationMs: 1200,
+      focus: 'spotlight',
+      zoom: 1.5,
+    })) {
+      if (full[key] !== want) fail(\`\${key} did not survive: \${full[key]} instead of \${want}\`)
+    }
+
+    /* ================================================================ */
     /* where the camera goes for a step                               */
     /* ================================================================ */
 

@@ -207,6 +207,99 @@ import(pathToFileURL(process.argv[2]).href)
       if (!Number.isFinite(value)) fail(\`a dead target gave \${JSON.stringify(dead)}\`)
     }
 
+    /* --- a held step does not move on its own ------------------------- */
+    // The presenter left this step up while somebody asked a question. An
+    // accidental spacebar yanking the screen away is worse than a key that
+    // does nothing, so both directions are refused.
+    s().hydrateDocument({
+      version: 1,
+      pages: s().doc.pages.map((p) => ({ ...p, cards: [], groups: [], connections: [] })),
+      settings: { ...s().doc.settings, steps: [] },
+    })
+    const heldA = s().addStep({ targetKind: 'page', trigger: 'hold' })
+    const heldB = s().addStep({ targetKind: 'page', trigger: 'hold' })
+    const normal = s().addStep({ targetKind: 'page', trigger: 'manual' })
+
+    s().startPresenting(heldA)
+    if (s().stepIndex !== 0) fail('the run did not start on the held step')
+    s().nextStep()
+    if (s().stepIndex !== 0) fail(\`a held step advanced to \${s().stepIndex}\`)
+
+    // Both directions, from a held step in the middle of the run. Only the
+    // step you are *on* can refuse to move, so this has to be checked with a
+    // held step as the current one — a manual neighbour would move and prove
+    // nothing about the held one.
+    s().goToStep(1)
+    s().prevStep()
+    if (s().stepIndex !== 1) fail(\`a held step was left backwards, to \${s().stepIndex}\`)
+    s().nextStep()
+    if (s().stepIndex !== 1) fail(\`a held step advanced to \${s().stepIndex}\`)
+
+    // …and a manual step still moves, so the hold is per-step and not a
+    // presentation-wide accident.
+    s().goToStep(2)
+    s().prevStep()
+    if (s().stepIndex !== 1) fail(\`a manual step did not go back, to \${s().stepIndex}\`)
+
+    // A number key jumps to a held step deliberately, because the presenter
+    // asked for that step by name. Holding is about accidental keys, not about
+    // refusing to be taken somewhere.
+    s().goToStep(s().steps().findIndex((step) => step.id === normal))
+    if (s().stepIndex !== 2) fail(\`a jump to a manual step landed on \${s().stepIndex}\`)
+    s().stopPresenting()
+
+    /* --- a timed step is the only one that carries a delay ------------ */
+    const timedStep = s().addStep({ targetKind: 'page', trigger: 'timed' })
+    s().updateStep(timedStep, { trigger: 'timed' })
+    if (s().steps().at(-1).autoAdvanceMs <= 0) {
+      fail('turning a step on auto did not give it a delay to count')
+    }
+    s().updateStep(timedStep, { trigger: 'manual' })
+    if (s().steps().at(-1).autoAdvanceMs !== 0) {
+      fail(\`turning auto off kept a countdown: \${s().steps().at(-1).autoAdvanceMs}\`)
+    }
+
+    /* --- an instant step has no arrival to animate -------------------- */
+    const snap = s().addStep({ targetKind: 'page', durationMs: 1200 })
+    s().updateStep(snap, { transition: 'instant' })
+    if (s().steps().at(-1).durationMs !== 0) {
+      fail(\`an instant step kept a duration: \${s().steps().at(-1).durationMs}\`)
+    }
+    s().goToStep(s().steps().length - 1)
+    if (s().cameraRequest.durationMs !== 0) {
+      fail(\`an instant step asked the camera to animate: \${s().cameraRequest.durationMs}ms\`)
+    }
+    if (s().cameraRequest.transition !== 'instant') {
+      fail(\`the camera was not told the step was instant\`)
+    }
+
+    /* --- dimming does not outlive the step that asked for it ---------- */
+    // A step with focus 'dim' dims the map. The next step says nothing, and
+    // must therefore un-dim it — a dim left behind is the map going dark in
+    // the middle of a talk, with nothing on screen saying why.
+    const dimmed = s().addStep({ targetKind: 'page', focus: 'dim' })
+    s().startPresenting(dimmed)
+    if (s().focusTargetId !== null) {
+      // A page step has no target, so there is nothing to point at; the focus
+      // must be off rather than aimed at the world origin.
+      fail(\`a page step dimmed everything: \${s().focusTargetId}\`)
+    }
+    const cardId = s().addCard({ title: 'A card' })
+    s().updateStep(dimmed, { targetId: cardId, targetKind: 'card', focus: 'dim' })
+    s().goToStep(s().steps().findIndex((step) => step.id === dimmed))
+    if (s().focusTargetId !== cardId) fail(\`a dim step did not aim at its card: \${s().focusTargetId}\`)
+    if (s().focusMode !== 'dim') fail(\`the focus mode was "\${s().focusMode}"\`)
+
+    const plain = s().addStep({ targetId: cardId, targetKind: 'card', focus: 'none' })
+    s().goToStep(s().steps().findIndex((step) => step.id === plain))
+    if (s().focusTargetId !== null) {
+      fail(\`a step with no focus left the previous step's dim behind: \${s().focusTargetId}\`)
+    }
+    s().stopPresenting()
+    if (s().focusTargetId !== null) {
+      fail(\`stopping left the map dimmed: \${s().focusTargetId}\`)
+    }
+
     process.stdout.write(JSON.stringify(failures))
   })
   .catch((e) => { console.error(String(e && e.stack || e)); process.exit(3) })

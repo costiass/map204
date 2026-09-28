@@ -140,16 +140,20 @@ Work to do, in the order it makes sense. Each item is checked off as it lands.
 
 ## Other kinds of card
 
-- [x] **A card can be more than text.** An **Insert** button in the toolbar,
-      beside Share, offering card types beyond a Markdown body. Each type is a
-      separate thing that does one job — not one embed field with a dropdown
-      bolted on, which is how a single unreadable card type happens.
+- [x] **A card can be more than text.** An **Insert** button in the toolbar's
+      tool row, beside Card and Group, offering card types beyond a Markdown
+      body. Each type is a separate thing that does one job — not one embed field
+      with a dropdown bolted on, which is how a single unreadable card type
+      happens.
   - [x] **The toolbar, not the right-click menu.** A context menu is a place you
         have to already know to go, and the first thing a new card kind can do is
         *be noticed*. A button in the toolbar is on screen the whole time.
   - [x] Choosing a kind is one click, not a dialog. A note and a flash card need
         nothing else and appear at once; the two kinds that point at something
         open the link dialog already set to that kind.
+  - [x] It sits beside the other two things you make, and is **not** the primary
+        button — Share is the only primary action on the canvas, and a screen
+        with three equally-weighted blue buttons has none.
 
   ### The types
 
@@ -175,6 +179,17 @@ Work to do, in the order it makes sense. Each item is checked off as it lands.
           card that opens an editor slightly late.
     - [x] A card with nothing on the back says so, and does not pretend a second
           side exists.
+    - [x] The back is centred like the front. A flash card's back is a short
+          answer shown to somebody at a distance; left-aligned ragged text is the
+          wrong shape for that.
+    - [x] **Both faces carry an explicit rotation**, the front one at 0°.
+          `backface-visibility: hidden` on a face with no transform of its own is
+          not reliably culled, and the symptom is the front ghosting faintly
+          through the back. Spelling out 0deg is the standard form.
+    - [x] It drags and resizes like any other card. The face is marked
+          `data-no-drag`, which only suppresses the canvas's `preventDefault` —
+          dragging still starts from it, and suppressing the default is what makes
+          the click that turns the card over reliable.
   - [ ] **Google event.** A card that refers to an event on a connected person's
         Google Calendar, and can create one.
 
@@ -249,6 +264,46 @@ Work to do, in the order it makes sense. Each item is checked off as it lands.
         that quietly do not work is worse than no panel, because it looks like it
         does.
 
+- [x] **A presentation inspector.** Present menu → "Edit the steps…". The run is
+      listed on the left and the chosen step's settings on the right, because the
+      thing being configured *is* a step and hiding which one is selected is how
+      settings get applied to the wrong thing.
+  - [x] **No Save button**, because there is nothing to save: a step is part of
+        the document and the document is written continuously. A separate save is
+        a second place for a change to be forgotten.
+  - [x] Sliders commit on release, not on every frame — one write per drag
+        rather than one per pixel of travel.
+
+  ### What a step can do
+
+  - [x] **Transition.** `ease` in and out (the default — a linear camera move
+        reads as a mechanical jump between two stills), `linear` at constant speed
+        for when the *timing* of the arrival is the point, and `instant` for a
+        step about something already on screen.
+  - [x] **Trigger.** `manual` — you move on, the default for a talk somebody
+        else is also speaking over. `timed` — it moves on by itself, with a
+        one-second floor, because a step that flashes past is not a step.
+        `hold` — nothing moves it, not even the arrow keys, for a step a
+        discussion happens over.
+  - [x] **Auto change.** The delay, shown as a bar emptying in the overlay's
+        chrome. Re-armed when the delay changes, so a presenter tuning it mid-step
+        sees the effect on the step they are looking at.
+  - [x] **Everything else.** `none`, `dim` (the rest of the map goes dim) and
+        `spotlight` (dimmed *and* the target ringed). A camera move says "look
+        here"; dimming says "and nowhere else", which on a dense map is the
+        stronger statement. The ring is outside the card's box on purpose — a
+        shadow or a scale would change the very rectangle the camera aimed at.
+  - [x] **A held step refuses the keys but not a deliberate jump.** Holding is
+        about accidental keys, not about refusing to be taken somewhere the
+        presenter asked for by name.
+  - [x] **A dim never outlives its step.** A step that says nothing about focus
+        clears it, and so does stopping. A dim left behind is the map going dark
+        mid-sentence with nothing on screen saying why.
+  - [x] Two fields depend on their neighbours and cannot be set independently: an
+        instant step has no arrival to animate, and a manual step has nothing to
+        count down. Storing those numbers anyway would keep a duration and a
+        delay that the step ignores — which is worse than storing none.
+
   ### Still to decide
 
   - [ ] **What a presenter's notes are.** A step that reminds you what to say is
@@ -260,6 +315,11 @@ Work to do, in the order it makes sense. Each item is checked off as it lands.
         being able to start one.** Right now a viewer can start one, which is
         probably right — it changes no data — but it is a decision rather than an
         obvious one.
+  - [ ] **Whether steps belong to the page rather than the document.** They live
+        in `settings`, which is per document, so a two-page map shares one run
+        and a step can point at a card that is not on the page it is presented
+        from. That is a defect as much as a design: a step aimed at a card on
+        page two, presented from page one, silently falls back to a wide shot.
 
 ## Notes
 

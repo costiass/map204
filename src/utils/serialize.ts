@@ -33,6 +33,9 @@ import {
   type Position,
   type PresentationStep,
   type Routing,
+  type StepFocus,
+  type StepTransition,
+  type StepTrigger,
   type Viewport,
 } from '@/types'
 import { clamp, clampZoom } from '@/utils/geometry'
@@ -263,10 +266,19 @@ function normalizeConnection(raw: unknown): Connection {
  *
  * An imported file is untrusted, and this is the part a stranger is most likely
  * to get wrong: a step pointing at a card that is not on the page, a zoom of
- * `NaN`, a duration in the millions. All of it is dropped or clamped rather than
- * trusted, because a bad step would otherwise take the camera somewhere absurd
- * when the presenter pressed the key.
+ * `NaN`, a duration in the millions, a trigger that is not one of the three. All
+ * of it is dropped or clamped rather than trusted, because a bad step would
+ * otherwise take the camera somewhere absurd when the presenter pressed the key.
+ *
+ * The *enumerated* fields fall back rather than throwing the step away. An
+ * unfamiliar transition is a step with an unknown flavour of arrival, which is
+ * still a step somebody meant; an unusable number is not, because there is no
+ * sensible way to guess which number was meant.
  */
+const STEP_TRANSITIONS: StepTransition[] = ['ease', 'linear', 'instant']
+const STEP_TRIGGERS: StepTrigger[] = ['manual', 'timed', 'hold']
+const STEP_FOCUSES: StepFocus[] = ['none', 'dim', 'spotlight']
+
 function normalizeSteps(raw: unknown): PresentationStep[] {
   if (!Array.isArray(raw)) return []
   const seen = new Set<string>()
@@ -281,6 +293,13 @@ function normalizeSteps(raw: unknown): PresentationStep[] {
     const kind =
       entry.targetKind === 'card' || entry.targetKind === 'group' ? entry.targetKind : 'page'
     const targetId = strOrNull(entry.targetId)
+    const trigger = oneOf(entry.trigger, STEP_TRIGGERS, 'manual')
+    const focus = oneOf(entry.focus, STEP_FOCUSES, 'none')
+    // An instant transition has no time to spend arriving, so whatever duration
+    // the file asks for would be a lie. One second is long enough to read the
+    // step you are on, and is the floor for auto-advance: a timed step that
+    // flashes past in 200ms is not a step.
+    const instant = entry.transition === 'instant'
 
     return [
       {
@@ -289,7 +308,11 @@ function normalizeSteps(raw: unknown): PresentationStep[] {
         targetId: kind === 'page' ? null : targetId,
         targetKind: kind,
         zoom: clamp(num(entry.zoom, 1), MIN_ZOOM * 4, 2),
-        durationMs: clamp(Math.round(num(entry.durationMs, 450)), 0, 4000),
+        transition: oneOf(entry.transition, STEP_TRANSITIONS, 'ease'),
+        trigger,
+        autoAdvanceMs: trigger === 'timed' ? clamp(Math.round(num(entry.autoAdvanceMs, 4000)), 1000, 120000) : 0,
+        durationMs: instant ? 0 : clamp(Math.round(num(entry.durationMs, 450)), 0, 4000),
+        focus,
       },
     ]
   })

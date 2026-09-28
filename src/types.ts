@@ -183,7 +183,43 @@ export interface Page {
 }
 
 /**
- * One step of a presentation: what to show, and how closely.
+ * How the camera gets from one step to the next.
+ *
+ *   ease     in and out, the default. Reads as a deliberate move.
+ *   linear   constant speed. Useful when a step's *timing* matters more than
+ *            how it arrives — an animation whose timing you are reading against
+ *            a voice-over, where easing would put the reveal in the wrong place.
+ *   instant  no camera move at all. The right choice when the step is about
+ *            something already on screen and moving the camera would be a
+ *            distraction from the thing being pointed at.
+ */
+export type StepTransition = 'ease' | 'linear' | 'instant'
+
+/**
+ * What makes a step give way to the next one.
+ *
+ *   manual  the presenter says so. The default, because a presentation somebody
+ *           else is also talking over should not move on its own.
+ *   timed   it moves on after `autoAdvanceMs`. For a card that is read aloud at
+ *           a known pace, or an animation that is meant to run unattended.
+ *   hold    it never gives way on its own, and neither do the arrow keys. For
+ *           a step the presenter leaves up while a discussion happens, where an
+ *           accidental keypress yanking the screen away would be worse than
+ *           nothing.
+ */
+export type StepTrigger = 'manual' | 'timed' | 'hold'
+
+/**
+ * What the step does to the cards it is *not* pointing at.
+ *
+ * A camera move says "look here". Dimming says "and nowhere else", which is a
+ * different and often stronger statement — on a dense map the target is hard
+ * to pick out, and the rest of the map is competing with it for attention.
+ */
+export type StepFocus = 'none' | 'dim' | 'spotlight'
+
+/**
+ * One step of a presentation: what to show, how closely, and when to move on.
  *
  * The target is a card *or* a group — a group being the natural way to frame a
  * section of a map, which is the thing a presentation actually wants to point
@@ -199,12 +235,16 @@ export interface PresentationStep {
   /** How close to come. Clamped to the app's zoom limits, and never more than
    *  the target actually fits at — see `stepViewport`. */
   zoom: number
-  /**
-   * How long the camera takes to arrive, in ms. Zero snaps. Longer reads as a
-   * deliberate move rather than a jump, which is the difference between a
-   * presentation and a slideshow.
-   */
+  /** How the camera arrives. */
+  transition: StepTransition
+  /** What moves this step on. */
+  trigger: StepTrigger
+  /** How long `timed` waits, in ms. Ignored by the other triggers. */
+  autoAdvanceMs: number
+  /** How long the camera takes to arrive, in ms. Zero snaps. */
   durationMs: number
+  /** What happens to everything that is not the target. */
+  focus: StepFocus
 }
 
 /**
@@ -347,5 +387,32 @@ export function createDefaultSettings(): DocSettings {
     defaultConnectionStyle: { ...DEFAULT_CONNECTION_STYLE },
     defaultRelationshipType: DEFAULT_RELATIONSHIP,
     steps: [],
+  }
+}
+
+/**
+ * What a new step gets, before anybody touches it.
+ *
+ * In one place, because a step built from three different places — the toolbar,
+ * the inspector, a keyboard shortcut — and assembled slightly differently in
+ * each is how a presentation ends up with steps that do not match.
+ *
+ * These are the *arrival* defaults. `autoAdvanceMs` is 0 because the trigger is
+ * `manual`, and a manual step has nothing to count down.
+ */
+export function createDefaultStep(
+  input: Partial<Omit<PresentationStep, 'id'>> = {},
+): Omit<PresentationStep, 'id'> {
+  const transition = input.transition ?? 'ease'
+  const trigger = input.trigger ?? 'manual'
+  return {
+    targetId: input.targetId ?? null,
+    targetKind: input.targetKind ?? 'page',
+    zoom: input.zoom ?? 1,
+    transition,
+    trigger,
+    autoAdvanceMs: trigger === 'timed' ? (input.autoAdvanceMs ?? 4000) : 0,
+    durationMs: transition === 'instant' ? 0 : (input.durationMs ?? 450),
+    focus: input.focus ?? 'none',
   }
 }

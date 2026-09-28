@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronUp, ChevronDown, Play, Plus, Trash2 } from 'lucide-react'
+import { ChevronUp, ChevronDown, Play, Plus, Settings2, Trash2 } from 'lucide-react'
 
 import { useCanvasStore } from '@/store/useCanvasStore'
 import { MIN_ZOOM } from '@/types'
@@ -36,6 +36,7 @@ export function PresentMenu() {
   const moveStep = useCanvasStore((s) => s.moveStep)
   const updateStep = useCanvasStore((s) => s.updateStep)
   const startPresenting = useCanvasStore((s) => s.startPresenting)
+  const setPresentationOpen = useCanvasStore((s) => s.setPresentationOpen)
   const readOnlyReason = useCanvasStore((s) => s.readOnlyReason)
 
   useEffect(() => {
@@ -135,6 +136,17 @@ export function PresentMenu() {
           </button>
 
           <hr />
+
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false)
+              setPresentationOpen(true)
+            }}
+          >
+            <Settings2 size={15} className="opacity-70" />
+            Edit the steps…
+          </button>
 
           <button
             type="button"

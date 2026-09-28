@@ -663,6 +663,19 @@ body {
   filter: saturate(0.4);
 }
 
+/*
+ * The card a presentation step is pointing at.
+ *
+ * A ring rather than a raise, because a shadow or a scale would change the
+ * card's box — and the camera is aiming at that box. A ring is outside it, so
+ * the thing being pointed at is still exactly the thing that was measured.
+ */
+.cc-card[data-spotlight='true'] {
+  box-shadow:
+    0 0 0 3px var(--cc-brand),
+    var(--cc-shadow-lg);
+}
+
 .cc-card[data-selected='true'] {
   outline: 2px solid var(--cc-brand);
   outline-offset: 1px;
@@ -1299,6 +1312,24 @@ body {
   border: 0;
   border-top: 1px solid var(--cc-line);
   margin: 0.25rem 0.15rem;
+}
+
+@keyframes cc-countdown {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The bar is information, so it still empties — it just stops sliding. A
+     presentation that is a run of timed steps is exactly the case where the
+     motion is the least of what somebody is sensitive to. */
+  .cc-countdown {
+    animation: none;
+  }
 }
 
 .cc-modal-backdrop {

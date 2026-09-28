@@ -250,7 +250,6 @@ export function Toolbar({
 
         {isCanvas ? (
           <>
-            <InsertCardMenu />
             <PresentMenu />
             <button
               type="button"
@@ -477,6 +476,10 @@ export function Toolbar({
             Group
             <span className="cc-kbd ml-0.5 hidden lg:inline">G</span>
           </button>
+          {/* Choosing a kind sits beside the two things you make, not up in the
+              identity row. It is a tool rather than an identity, and Share is
+              the only primary action on this screen. */}
+          <InsertCardMenu />
 
           <span className="mx-0.5 h-5 w-px shrink-0 bg-line" />
 

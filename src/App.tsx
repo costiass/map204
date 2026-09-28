@@ -8,6 +8,7 @@ import { DevOverlay } from '@/components/DevOverlay'
 import { ImportExportDialog } from '@/components/ImportExportDialog'
 import { InsertCardDialog } from '@/components/InsertCardDialog'
 import { PresentOverlay } from '@/components/PresentOverlay'
+import { PresentationInspector } from '@/components/PresentationInspector'
 import { Inspector } from '@/components/Inspector'
 import { NotFound } from '@/components/NotFound'
 import { PageSidebar } from '@/components/PageSidebar'
@@ -36,6 +37,8 @@ export default function App() {
   const setSidebarOpen = useCanvasStore((s) => s.setSidebarOpen)
   const readOnlyReason = useCanvasStore((s) => s.readOnlyReason)
   const presenting = useCanvasStore((s) => s.presenting)
+  const presentationOpen = useCanvasStore((s) => s.presentationOpen)
+  const setPresentationOpen = useCanvasStore((s) => s.setPresentationOpen)
 
   // Real paths: `/`, `/w/<docId>`, `/settings`. Anything else is a 404.
   // Runs once, before the first route is read, so a saved `#workspace/…` link
@@ -259,10 +262,16 @@ export default function App() {
           <ConnectionTree />
         </div>
 
-        {/* The inspector is the editor. A canvas that cannot be edited has no
-            business showing one — an open panel full of controls that quietly
-            do nothing is worse than no panel, because it looks like it works. */}
-        {readOnlyReason === null ? <Inspector /> : null}
+        {/* The inspector is the editor, and a canvas that cannot be edited has
+            no business showing one — an open panel of controls that quietly do
+            nothing is worse than no panel, because it looks like it works. The
+            presentation inspector edits the document too, so it goes for the
+            same reason. */}
+        {readOnlyReason === null
+          ? presentationOpen
+            ? <PresentationInspector onClose={() => setPresentationOpen(false)} />
+            : <Inspector />
+          : null}
       </div>
 
       {presenting ? <PresentOverlay /> : null}

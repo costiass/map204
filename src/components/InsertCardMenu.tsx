@@ -79,15 +79,14 @@ export function InsertCardMenu() {
     <div ref={ref} className="relative shrink-0">
       <button
         type="button"
-        className="cc-btn"
-        data-variant="primary"
-        title="Insert a card (I)"
+        className="cc-btn shrink-0"
+        title="Insert a card of a chosen kind (I)"
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
         <Plus size={14} />
-        <span className="hidden sm:inline">Insert</span>
+        <span className="hidden md:inline">Insert</span>
       </button>
 
       {open ? (

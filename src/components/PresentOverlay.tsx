@@ -4,6 +4,28 @@ import { ChevronLeft, ChevronRight, Minimize2, Play, X } from 'lucide-react'
 import { useCanvasStore } from '@/store/useCanvasStore'
 
 /**
+ * The bar that empties while a timed step counts down.
+ *
+ * Driven by CSS rather than a re-rendering timer, because the thing it shows is
+ * a duration, and a component that re-renders twenty times a second to draw a
+ * shrinking rectangle is a lot of work for something CSS can do on its own.
+ * The `key` on the element restarts the animation when the step changes.
+ */
+function AutoCountdown({ ms }: { ms: number }) {
+  return (
+    <span
+      className="relative h-1 w-16 shrink-0 overflow-hidden rounded-full bg-line"
+      title={`Moves on in ${(ms / 1000).toFixed(1)}s`}
+    >
+      <span
+        className="cc-countdown absolute inset-y-0 left-0 w-full origin-left rounded-full bg-brand"
+        style={{ animation: `cc-countdown ${ms}ms linear forwards` }}
+      />
+    </span>
+  )
+}
+
+/**
  * What a presentation looks like while it is running.
  *
  * Deliberately almost nothing. A slide is the map with the camera moved, and
@@ -23,6 +45,10 @@ export function PresentOverlay() {
   const prevStep = useCanvasStore((s) => s.prevStep)
   const goToStep = useCanvasStore((s) => s.goToStep)
   const stopPresenting = useCanvasStore((s) => s.stopPresenting)
+
+  const total = steps.length
+  const step = total > 0 ? steps[Math.min(stepIndex, total - 1)] : null
+  const autoAdvance = step?.trigger === 'timed' ? step.autoAdvanceMs : 0
 
   useEffect(() => {
     if (!presenting) return
@@ -55,10 +81,26 @@ export function PresentOverlay() {
     return () => window.removeEventListener('click', onClick)
   }, [presenting, nextStep])
 
+  /* --- the timer ---------------------------------------------------- */
+
+  // Re-arming on `autoAdvance` rather than on the step's id is deliberate: a
+  // presenter who opens the inspector and changes the delay mid-step should see
+  // the change take effect on the step they are looking at, not on the next one.
+  // It also means jumping straight to a step arms its timer from that moment,
+  // rather than inheriting however long was left of the step it replaced.
+  useEffect(() => {
+    if (!presenting || autoAdvance <= 0) return
+    const timer = window.setTimeout(() => {
+      // Re-read rather than closing over `nextStep`: the run may have finished
+      // in the meantime, and calling a stale advance on a stopped presentation
+      // would move the camera for a presentation that is no longer running.
+      if (useCanvasStore.getState().presenting) nextStep()
+    }, autoAdvance)
+    return () => window.clearTimeout(timer)
+  }, [presenting, autoAdvance, stepIndex, nextStep])
+
   if (!presenting) return null
 
-  const total = steps.length
-  const step = total > 0 ? steps[Math.min(stepIndex, total - 1)] : null
   const atEnd = stepIndex >= total - 1
 
   return (
@@ -127,6 +169,13 @@ export function PresentOverlay() {
               ) : null}
             </div>
           </div>
+
+          {/* Only shown while it is counting, and only for a timed step: a
+              bar labelled "manual" or "hold" would be telling the presenter
+              something they already decided. */}
+          {autoAdvance > 0 ? (
+            <AutoCountdown ms={autoAdvance} key={`${stepIndex}-${autoAdvance}`} />
+          ) : null}
 
           {/* A strip of the whole run, so the presenter can see how much is left
               and click to jump. */}

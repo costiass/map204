@@ -5,6 +5,7 @@ import { createSampleDoc } from '@/data/sample'
 import {
   COLLAPSED_HEADER_HEIGHT,
   createDefaultSettings,
+  createDefaultStep,
   MAX_CARD_HEIGHT,
   MAX_CARD_WIDTH,
   MIN_CARD_HEIGHT,
@@ -22,6 +23,8 @@ import {
   type Point,
   type PresentationStep,
   type Rect,
+  type StepFocus,
+  type StepTransition,
   type Viewport,
 } from '@/types'
 import { centerOn, clamp, screenToWorld, stepViewport, visualCardRect } from '@/utils/geometry'
@@ -156,7 +159,7 @@ export interface CanvasStore {
   /* --- presentation ------------------------------------------------- */
   /** The steps of the active page's document, in order. */
   steps: () => PresentationStep[]
-  addStep: (input: Omit<PresentationStep, 'id'>) => string
+  addStep: (input?: Partial<Omit<PresentationStep, 'id'>>) => string
   updateStep: (stepId: string, patch: Partial<Omit<PresentationStep, 'id'>>) => void
   removeStep: (stepId: string) => void
   moveStep: (stepId: string, delta: number) => void
@@ -170,6 +173,18 @@ export interface CanvasStore {
   nextStep: () => void
   prevStep: () => void
   /**
+   * The card or group a running step is pointing at, when it wants everything
+   * else dimmed. `null` means nothing is dimmed.
+   *
+   * Separate from `steps` because it is a property of the *presentation being
+   * watched right now*, not of the document: a step says what it wants, and
+   * this says which one is live.
+   */
+  focusTargetId: string | null
+  /** How the target is marked while everything else is dimmed. */
+  focusMode: StepFocus
+  setFocus: (id: string | null, mode: StepFocus) => void
+  /**
    * A camera move the canvas should carry out.
    *
    * The canvas owns the viewport in a ref, written straight to the DOM each
@@ -177,8 +192,12 @@ export interface CanvasStore {
    * re-render the whole tree sixty times a second. Instead the store says *where
    * to go* and bumps a token; the canvas animates to it and acknowledges.
    */
-  cameraRequest: { viewport: Viewport; durationMs: number; token: number }
-  requestCamera: (viewport: Viewport, durationMs: number) => void
+  cameraRequest: { viewport: Viewport; durationMs: number; transition: StepTransition; token: number }
+  requestCamera: (viewport: Viewport, durationMs: number, transition?: StepTransition) => void
+
+  /** The presentation inspector, which replaces the card inspector when open. */
+  presentationOpen: boolean
+  setPresentationOpen: (open: boolean) => void
 
   /** Which tab the card inspector opens on. */
   inspectorTab: 'content' | 'settings'
@@ -393,7 +412,10 @@ export const useCanvasStore = create<CanvasStore>()(
       readOnlyReason: null,
       presenting: false,
       stepIndex: -1,
-      cameraRequest: { viewport: { x: 0, y: 0, zoom: 1 }, durationMs: 0, token: 0 },
+      cameraRequest: { viewport: { x: 0, y: 0, zoom: 1 }, durationMs: 0, transition: 'ease', token: 0 },
+      focusTargetId: null,
+      focusMode: 'none',
+      presentationOpen: false,
       viewportSize: { width: 1200, height: 800 },
       fitViewToken: 0,
       darkMode: false,
@@ -422,6 +444,9 @@ export const useCanvasStore = create<CanvasStore>()(
           state.presenting = false
           state.stepIndex = -1
           state.readOnlyReason = null
+          // A dim belongs to the run that asked for it, and the run is over.
+          state.focusTargetId = null
+          state.focusMode = 'none'
         })
       },
 
@@ -582,7 +607,9 @@ export const useCanvasStore = create<CanvasStore>()(
         const id = uid('step')
         pushHistory()
         set((state) => {
-          state.doc.settings.steps.push({ ...input, id })
+          // The defaults live in one function, so a step created from the
+          // toolbar, the inspector or a shortcut is the same shape every time.
+          state.doc.settings.steps.push({ ...createDefaultStep(input), id })
         })
         return id
       },
@@ -592,6 +619,13 @@ export const useCanvasStore = create<CanvasStore>()(
           const step = state.doc.settings.steps.find((s) => s.id === stepId)
           if (!step) return
           Object.assign(step, patch)
+          // Two fields depend on their neighbours, and editing one of them must
+          // not leave the other lying. An instant step has no time to spend
+          // arriving, and a manual step has nothing to count down — keeping
+          // those numbers would store a duration and a delay the step ignores,
+          // which is worse than storing none.
+          if (step.transition === 'instant') step.durationMs = 0
+          if (step.trigger !== 'timed') step.autoAdvanceMs = 0
         })
       },
 
@@ -642,7 +676,7 @@ export const useCanvasStore = create<CanvasStore>()(
 
       stopPresenting: () => {
         const state = get()
-        set({ presenting: false, stepIndex: -1 })
+        set({ presenting: false, stepIndex: -1, focusTargetId: null, focusMode: 'none' })
         // Only clear the reason if presenting is what set it. A viewer whose
         // permission is the reason must still be locked after they stop.
         if (state.readOnlyReason === 'presenting') {
@@ -675,9 +709,19 @@ export const useCanvasStore = create<CanvasStore>()(
           if (group) bounds = group.position
         }
 
+        const viewport = stepViewport(bounds, state.viewportSize, step.zoom)
+
+        // What the step does to everything that is not its target. `none` clears
+        // it, which is what stops a dim from one step outliving the step that
+        // asked for it.
+        state.setFocus(step.focus === 'none' ? null : (step.targetId ?? null), step.focus)
+
         state.requestCamera(
-          stepViewport(bounds, state.viewportSize, step.zoom),
-          step.durationMs,
+          viewport,
+          // An instant step has no arrival to animate. Zero is a real value the
+          // canvas handles by writing the viewport in one go, not a missing one.
+          step.transition === 'instant' ? 0 : step.durationMs,
+          step.transition,
         )
       },
 
@@ -685,6 +729,11 @@ export const useCanvasStore = create<CanvasStore>()(
         const state = get()
         const total = state.doc.settings.steps.length
         if (total === 0) return
+        const step = state.doc.settings.steps[state.stepIndex]
+        // A held step ignores the keys on purpose. The presenter left it up while
+        // somebody asked a question, and a stray spacebar yanking the screen away
+        // is worse than a key that does nothing.
+        if (step?.trigger === 'hold') return
         // Stopping at the end rather than wrapping: a loop that silently
         // restarts looks like the app forgot what slide it was on.
         if (state.stepIndex >= total - 1) {
@@ -697,18 +746,25 @@ export const useCanvasStore = create<CanvasStore>()(
       prevStep: () => {
         const state = get()
         if (state.stepIndex <= 0) return
+        const step = state.doc.settings.steps[state.stepIndex]
+        if (step?.trigger === 'hold') return
         state.goToStep(state.stepIndex - 1)
       },
 
-      requestCamera: (viewport, durationMs) => {
+      requestCamera: (viewport, durationMs, transition) => {
         set((state) => {
           state.cameraRequest = {
             viewport,
             durationMs,
+            transition: transition ?? 'ease',
             token: state.cameraRequest.token + 1,
           }
         })
       },
+
+      setFocus: (id, mode) => set({ focusTargetId: id, focusMode: mode }),
+
+      setPresentationOpen: (presentationOpen) => set({ presentationOpen }),
 
       toggleDarkMode: () => set((state) => { state.darkMode = !state.darkMode }),
 

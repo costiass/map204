@@ -12,6 +12,8 @@ export interface CardNodeProps {
   card: Card
   selected: boolean
   dimmed: boolean
+  /** Ringed, because a presentation step is pointing at this one. */
+  spotlight?: boolean
   dragTarget: boolean
   /** Live drag offset applied on top of the stored world position. */
   offset: Point | null
@@ -28,6 +30,7 @@ function CardNodeImpl({
   card,
   selected,
   dimmed,
+  spotlight = false,
   dragTarget,
   offset,
   size,
@@ -103,6 +106,7 @@ function CardNodeImpl({
         data-card-id={card.id}
         data-selected={selected ? 'true' : undefined}
         data-dimmed={dimmed ? 'true' : undefined}
+        data-spotlight={spotlight ? 'true' : undefined}
         data-drag-target={dragTarget ? 'true' : undefined}
         data-shadow={card.style.shadow ? 'true' : 'false'}
         onPointerDown={(event) => onCardPointerDown(event, card.id)}
@@ -160,6 +164,12 @@ function CardNodeImpl({
             onPointerDown={(event) => onHandlePointerDown(event, card.id, side)}
           />
         ))}
+
+        <span
+          className="cc-resize"
+          title="Resize"
+          onPointerDown={(event) => onResizePointerDown(event, card.id)}
+        />
       </div>
     )
   }
@@ -171,6 +181,7 @@ function CardNodeImpl({
       data-card-id={card.id}
       data-selected={selected ? 'true' : undefined}
       data-dimmed={dimmed ? 'true' : undefined}
+        data-spotlight={spotlight ? 'true' : undefined}
       data-collapsed={card.collapsed ? 'true' : undefined}
       data-drag-target={dragTarget ? 'true' : undefined}
       data-shadow={card.style.shadow ? 'true' : 'false'}
@@ -231,7 +242,7 @@ function CardNodeImpl({
           ) : null}
 
           {/* A video or PDF card leads with what it points at. The Markdown body
-              still renders below it, but only when there is one — an empty
+              still renders below it, but only when there is one â€” an empty
               "Nothing here yet" placeholder under a playing video is noise. */}
           {card.type !== 'note' ? (
             <div className="mb-2">
