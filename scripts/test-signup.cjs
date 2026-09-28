@@ -272,6 +272,176 @@ function docker(args, options = {}) {
           String(error.stdout || error.stderr || error.message).slice(0, 300),
       )
     }
+
+    /* -- sharing with somebody who has not signed up yet ------------------- */
+
+    /*
+     * The whole point of `document_invites`, and the reason the share dialog used
+     * to be a closed loop: it looked the address up and refused it when there was no
+     * profile, so the only people a map could be shared with were people who
+     * already had an account.
+     *
+     * The sequence spans two accounts and two separate signups, so this is the
+     * only place it can honestly be tested:
+     *
+     *   1. Alice signs up.
+     *   2. Alice invites bob@example.com, who does not exist yet.
+     *   3. The invite waits.
+     *   4. Bob signs up with that exact address.
+     *   5. Bob has Alice's workspace, without anybody inviting him twice.
+     *
+     * Plus the two ways it can go wrong that a happy path never finds: the address
+     * differing in case between the invite and the sign-up, and a double invite.
+     */
+    const run = (text) => {
+      const file = path.join(os.tmpdir(), 'map204-invite.sql')
+      fs.writeFileSync(file, text, 'utf8')
+      docker(['cp', file, `${CONTAINER}:/tmp/invite.sql`], { stdio: 'ignore' })
+      psql('/tmp/invite.sql')
+    }
+
+    /*
+     * Runs one scalar query and returns it as a *string*.
+     *
+     * A string, because these queries return uuids as often as counts, and a
+     * `Number(uuid)` is `NaN` -- which then goes into the next query as the literal
+     * text "NaN" and Postgres rejects it. The first version of this did exactly
+     * that, and the failure read as a uuid parse error rather than as a helper that
+     * had thrown away what it was given.
+     */
+    const scalar = (expression) =>
+      docker([
+        'exec', CONTAINER, 'psql', '-U', 'supabase_admin', '-d', 'map204', '-t', '-A', '-c',
+        `select ${expression}`,
+      ])
+        .trim()
+        .split('\n')
+        .pop()
+        .trim()
+
+    /** For the queries that really do count. */
+    const count = (expression) => Number(scalar(expression))
+
+    const aliceId = scalar("id from auth.users where email like 'first-time-%'")
+    const aliceDoc = scalar(`id from public.documents where owner_id = '${aliceId}'`)
+
+    run(
+      'insert into public.document_invites (document_id, email, role, invited_by)\n' +
+        `values ('${aliceDoc}', 'bob@example.com', 'editor', '${aliceId}');\n`,
+    )
+
+    if (count('count(*) from public.document_invites') !== 1) {
+      fail('the pending invite was not stored')
+    }
+
+    // The same address twice is refused by the primary key rather than silently
+    // doubled -- two rows would mean the claim inserts once and one invite sits
+    // there forever describing a grant that already happened.
+    let duplicateRefused = false
+    try {
+      run(
+        'insert into public.document_invites (document_id, email, role, invited_by)\n' +
+          `values ('${aliceDoc}', 'bob@example.com', 'viewer', '${aliceId}');\n`,
+      )
+    } catch {
+      duplicateRefused = true
+    }
+    if (!duplicateRefused) {
+      fail('the same address was invited twice and both invites were stored')
+    }
+
+    // A malformed address is refused by the check, rather than being stored here
+    // and failing later inside the mail provider, after the dialog has already
+    // told somebody it was sent.
+    let malformedRefused = false
+    try {
+      run(
+        'insert into public.document_invites (document_id, email, role, invited_by)\n' +
+          `values ('${aliceDoc}', 'not-an-email', 'editor', '${aliceId}');\n`,
+      )
+    } catch {
+      malformedRefused = true
+    }
+    if (!malformedRefused) {
+      fail('an address with no @ was accepted as an invitation')
+    }
+
+    /*
+     * Mixed case is refused too, and that refusal is *what makes case work*.
+     *
+     * The claim compares `document_invites.email` against `lower(auth.users.email)`.
+     * That is only case-insensitive if the stored address is already lower case --
+     * otherwise `Bob@` in one place and `bob@` in the other never match, and the
+     * person signs up to find their share has not arrived with nothing saying why.
+     *
+     * So the guarantee is the `check (email = lower(email))` on the column, and that
+     * is what this asserts. Bob signs up below in mixed case precisely so that the
+     * two halves are tested together: the address is refused on the way *in* as an
+     * invitation, and matched on the way *in* as an account.
+     */
+    let mixedCaseRefused = false
+    try {
+      run(
+        'insert into public.document_invites (document_id, email, role, invited_by)\n' +
+          `values ('${aliceDoc}', 'Mixed@Example.com', 'editor', '${aliceId}');\n`,
+      )
+    } catch {
+      mixedCaseRefused = true
+    }
+    if (!mixedCaseRefused) {
+      fail(
+        'an invitation stored in mixed case was accepted. The claim lower-cases the ' +
+          "sign-up address, so a mixed-case invite could never be matched and the " +
+          'share would silently never arrive.',
+      )
+    }
+
+    // Bob signs up. Deliberately capitalised: the claim matches on the lower-cased
+    // address, and `Bob@example.com` is one person rather than two.
+    run(
+      [
+        'insert into auth.users (',
+        '  instance_id, id, aud, role, email, encrypted_password, confirmed_at,',
+        '  raw_app_meta_data, raw_user_meta_data, created_at, updated_at,',
+        '  confirmation_token, recovery_token, email_change_token, email_change',
+        ') values (',
+        "  '00000000-0000-0000-0000-000000000000',",
+        `  '${crypto.randomUUID()}',`,
+        "  'authenticated', 'authenticated',",
+        "  'Bob@example.com', '', now(),",
+        `  '{"provider":"google","providers":["google"]}'::jsonb,`,
+        `  '{"name":"Bob","picture":"","email":"Bob@example.com"}'::jsonb,`,
+        "  now(), now(), '', '', '', ''",
+        ');',
+        '',
+      ].join('\n'),
+    )
+
+    const bobId = scalar("id from auth.users where lower(email) = 'bob@example.com'")
+
+    // `scalar`, not `count`: the role is a word, and `Number('editor')` is `NaN`,
+    // which is what the first version of this assertion read. A test that fails
+    // with NaN rather than with a value is a test whose failure tells you nothing.
+    const bobRole = scalar(
+      `role from public.document_collaborators where document_id = '${aliceDoc}' and user_id = '${bobId}'`,
+    )
+    if (bobRole !== 'editor') {
+      fail(`the pending invite did not become a share: read "${bobRole}", expected editor`)
+    }
+    if (count('count(*) from public.document_invites') !== 0) {
+      fail('a claimed invite was left behind, so it would be offered again')
+    }
+
+    // The role the app actually reads, derived from the two rows `fetchMyRole`
+    // consults. This is the claim that matters, as opposed to the row existing.
+    const bobRoleRead = scalar(
+      `case when d.owner_id = '${bobId}' then 'owner' else coalesce(c.role, 'none') end ` +
+        'from public.documents d left join public.document_collaborators c ' +
+        `on c.document_id = d.id and c.user_id = '${bobId}' where d.id = '${aliceDoc}'`,
+    )
+    if (bobRoleRead !== 'editor') {
+      fail(`the new account reads as "${bobRoleRead}" on the shared workspace`)
+    }
   } finally {
     cleanup()
   }
@@ -279,7 +449,8 @@ function docker(args, options = {}) {
   if (failures === 0) {
     console.log(
       'signup: a first and a second sign-in each create an account, a profile, ' +
-        'settings, a workspace and two pages',
+        'settings, a workspace and two pages; and an invite to an address that had ' +
+        'no account becomes a share the moment it signs up',
     )
   } else {
     console.log(`\n${failures} check(s) failed.`)

@@ -4,14 +4,18 @@ import { IconTrash, IconUserPlus } from '@/components/Icons'
 import { initialOf } from '@/store/presence'
 import {
   addCollaborator,
+  addPendingInvite,
   findProfileByEmail,
   getProfile,
   listCollaborators,
+  listPendingInvites,
   notifyShare,
   removeCollaborator,
+  removePendingInvite,
   updateCollaboratorRole,
   type CollaboratorRow,
   type DocumentRow,
+  type PendingInviteRow,
   type ProfileRow,
 } from '@/store/supabase-sync'
 import { useCanvasStore } from '@/store/useCanvasStore'
@@ -31,6 +35,24 @@ interface Entry {
   locked: boolean
 }
 
+/**
+ * An invitation that has not been accepted because the address has no account.
+ *
+ * A separate list from `Entry`, not a row in it. The tempting shape is one list with
+ * a nullable `userId` and a flag, because then the rendering loop is shared. That
+ * needs a `userId: string | null` threaded through every handler anyway, and the
+ * result is a list where half the rows cannot be clicked, cannot be re-roled and
+ * have no avatar, and each of those cases is a null check in a place that did not
+ * think about it.
+ *
+ * Two lists say it plainly: these people have access, these people have been
+ * promised access.
+ */
+interface PendingEntry {
+  email: string
+  role: PendingInviteRow['role']
+}
+
 const ROLES: Array<CollaboratorRow['role']> = ['editor', 'viewer']
 
 /**
@@ -39,6 +61,7 @@ const ROLES: Array<CollaboratorRow['role']> = ['editor', 'viewer']
  */
 export function ShareDialog({ document, currentUserId, onClose }: ShareDialogProps) {
   const [entries, setEntries] = useState<Entry[]>([])
+  const [pending, setPending] = useState<PendingEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [email, setEmail] = useState('')
   // Only the two roles that can be *granted*. 'owner' is not a choice here — it
@@ -53,9 +76,10 @@ export function ShareDialog({ document, currentUserId, onClose }: ShareDialogPro
 
   const reload = useCallback(async () => {
     setLoading(true)
-    const [collaborators, owner] = await Promise.all([
+    const [collaborators, owner, invitations] = await Promise.all([
       listCollaborators(document.id),
       getProfile(document.owner_id),
+      listPendingInvites(document.id),
     ])
 
     const next: Entry[] = [
@@ -80,6 +104,7 @@ export function ShareDialog({ document, currentUserId, onClose }: ShareDialogPro
     ]
 
     setEntries(next)
+    setPending(invitations.map((row) => ({ email: row.email, role: row.role })))
     setLoading(false)
   }, [document.id, document.owner_id])
 
@@ -95,6 +120,31 @@ export function ShareDialog({ document, currentUserId, onClose }: ShareDialogPro
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  /**
+   * Share with whoever is at that address.
+   *
+   * The absence of an account used to be a dead end:
+   *
+   *   const profile = await findProfileByEmail(address)
+   *   if (!profile) {
+   *     setInviteError('No Map204 account uses that email address.')
+   *     return
+   *   }
+   *
+   * which made sharing a closed loop -- the only people a map could be shown to were
+   * people already inside Map204. That is backwards. Sharing is how somebody finds
+   * out the thing exists, and the person you most want to show a map to is nearly
+   * always somebody who has not made an account yet.
+   *
+   * So an unknown address is not an error. It becomes a pending invite: a stored row
+   * keyed on the email, which the database claims into a real collaborator row the
+   * moment somebody registers with that address. The share then does not depend on
+   * the email arriving, the person using a different browser, or the mail landing
+   * anywhere but spam.
+   *
+   * Both paths are one function because both are one intention, and the difference
+   * between them is a database detail the person sharing should not have to know.
+   */
   const invite = async () => {
     if (!isOwner) return
     const address = email.trim()
@@ -104,44 +154,89 @@ export function ShareDialog({ document, currentUserId, onClose }: ShareDialogPro
     setInviteError(null)
 
     const profile: ProfileRow | null = await findProfileByEmail(address)
-    if (!profile) {
-      setInviteError('No Map204 account uses that email address.')
+
+    if (profile) {
+      if (profile.id === document.owner_id) {
+        setInviteError('That is you — you already own this workspace.')
+        setBusy(false)
+        return
+      }
+      if (entries.some((entry) => entry.userId === profile.id)) {
+        setInviteError('That person already has access.')
+        setBusy(false)
+        return
+      }
+
+      const result = await addCollaborator(document.id, profile.id, role)
       setBusy(false)
+
+      if (!result.ok) {
+        setInviteError(result.error ?? 'Could not share this workspace.')
+        return
+      }
+      setEmail('')
+      pushToast(`Shared with ${profile.full_name ?? profile.email}.`, 'success')
+      await reload()
+
+      // The grant is already stored, so the mail is a follow-up rather than part
+      // of the operation. A failure is reported but never undoes the share.
+      const sent = await notifyShare(document.id, address, role)
+      if (!sent.ok) {
+        pushToast(
+          `${profile.full_name ?? profile.email} has access, but the email did not send: ${sent.error}`,
+          'error',
+        )
+      }
       return
     }
-    if (profile.id === document.owner_id) {
-      setInviteError('That is you — you already own this workspace.')
-      setBusy(false)
-      return
-    }
-    if (entries.some((entry) => entry.userId === profile.id)) {
-      setInviteError('That person already has access.')
+
+    // No account yet: store the invitation.
+    if (pending.some((row) => row.email === address.toLowerCase())) {
+      setInviteError('There is already an invitation waiting for that address.')
       setBusy(false)
       return
     }
 
-    const result = await addCollaborator(document.id, profile.id, role)
+    const invited = await addPendingInvite(document.id, address, role)
     setBusy(false)
 
-    if (!result.ok) {
-      setInviteError(result.error ?? 'Could not share this workspace.')
+    if (!invited.ok) {
+      setInviteError(invited.error ?? 'Could not send that invitation.')
       return
     }
-    setEmail('')
 
-    // The grant is already stored, so the mail is a follow-up rather than part
-    // of the operation. A failure is reported but never undoes the share, and
-    // the dialog closes either way.
-    pushToast(`Shared with ${profile.full_name ?? profile.email}.`, 'success')
+    setEmail('')
+    pushToast(`Invitation sent to ${address}.`, 'success')
     await reload()
 
     const sent = await notifyShare(document.id, address, role)
     if (!sent.ok) {
       pushToast(
-        `${profile.full_name ?? profile.email} has access, but the email did not send: ${sent.error}`,
+        `The invitation to ${address} is saved, but the email did not send: ${sent.error}`,
         'error',
       )
     }
+  }
+
+  /** Take back an invitation nobody has accepted yet. */
+  const revokeInvite = async (address: string) => {
+    const result = await removePendingInvite(document.id, address)
+    if (!result.ok) {
+      pushToast(result.error ?? 'Could not withdraw that invitation.', 'error')
+      return
+    }
+    pushToast(`Invitation to ${address} withdrawn.`, 'success')
+    await reload()
+  }
+
+  /** Send it again, for somebody whose first one went to spam. */
+  const resendInvite = async (address: string, nextRole: PendingInviteRow['role']) => {
+    const sent = await notifyShare(document.id, address, nextRole)
+    if (!sent.ok) {
+      pushToast(`The email did not send: ${sent.error}`, 'error')
+      return
+    }
+    pushToast(`Invitation sent again to ${address}.`, 'success')
   }
 
   const changeRole = async (userId: string, next: CollaboratorRow['role']) => {
@@ -179,7 +274,18 @@ export function ShareDialog({ document, currentUserId, onClose }: ShareDialogPro
               Share “{document.title}”
             </h2>
             <p className="text-xs text-muted">
-              {entries.length === 1 ? 'Only you have access' : `${entries.length} people have access`}
+              {entries.length === 1 && pending.length === 0
+                ? 'Only you have access'
+                : [
+                    entries.length > 1 ? `${entries.length} people have access` : null,
+                    pending.length === 1
+                      ? '1 invitation waiting'
+                      : pending.length > 1
+                        ? `${pending.length} invitations waiting`
+                        : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
             </p>
           </div>
           <button type="button" className="cc-btn px-1.5 py-1" onClick={onClose} aria-label="Close">
@@ -321,12 +427,85 @@ export function ShareDialog({ document, currentUserId, onClose }: ShareDialogPro
               </li>
             ))
           )}
+
+          {/*
+            Invitations waiting for their recipient to have an account.
+
+            Shown, and worded as what they are. Hiding them would mean a person who
+            was told "Invitation sent" sees an unchanged dialog with no trace of it,
+            and concludes nothing happened. Showing them as ordinary people would be
+            worse: there is no avatar to show, no name, and no role to change yet.
+
+            The wording carries the whole mechanism in one sentence: they get access
+            *when they sign up*. That is true, it is what the database does, and it is
+            the thing somebody would otherwise email to ask about.
+          */}
+          {!loading && pending.length > 0 ? (
+            <li className="px-2 pb-1 pt-3 text-[11px] font-bold uppercase tracking-wider text-muted">
+              Waiting for them to sign up
+            </li>
+          ) : null}
+
+          {pending.map((row) => (
+            <li
+              key={row.email}
+              className="flex items-center gap-2 rounded-lg border border-dashed border-line px-2 py-2"
+            >
+              {/* No avatar, because there is no account to have one. The initials are
+                  taken from the address rather than from a name, so the row is
+                  recognisable at a glance without pretending to know more. */}
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-surface-sunken text-[11px] font-bold uppercase text-muted">
+                {row.email.slice(0, 2)}
+              </span>
+
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[13px] font-medium">{row.email}</span>
+                <span className="block text-[11px] text-muted">
+                  Gets access when they sign up with this address
+                </span>
+              </span>
+
+              <span className="cc-tag shrink-0">{row.role}</span>
+
+              {isOwner ? (
+                <span className="flex shrink-0 items-center gap-0.5">
+                  {/* Resend, because the commonest outcome by far is that the first
+                      one went to spam and the person is now asking where it is. */}
+                  <button
+                    type="button"
+                    className="cursor-pointer rounded p-1 text-muted transition hover:bg-surface-sunken hover:text-ink"
+                    title="Send the invitation again"
+                    aria-label={`Send the invitation to ${row.email} again`}
+                    onClick={() => void resendInvite(row.email, row.role)}
+                  >
+                    <IconUserPlus size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    className="cursor-pointer rounded p-1 text-muted transition hover:bg-danger-soft hover:text-danger dark:hover:bg-danger-soft"
+                    title="Withdraw this invitation"
+                    aria-label={`Withdraw the invitation to ${row.email}`}
+                    onClick={() => void revokeInvite(row.email)}
+                  >
+                    <IconTrash size={14} />
+                  </button>
+                </span>
+              ) : null}
+            </li>
+          ))}
         </ul>
 
         <footer className="border-t border-line px-4 py-3 text-xs text-muted">
-          {isOwner
-            ? 'Editors can change everything on every page. Viewers can only look.'
-            : 'Only the owner can add or remove people.'}
+          {isOwner ? (
+            <>
+              Editors can change everything on every page. Viewers can only look.
+              {pending.length > 0
+                ? ' Somebody without an account can still be invited — the share lands when they sign up.'
+                : null}
+            </>
+          ) : (
+            'Only the owner can add or remove people.'
+          )}
         </footer>
       </aside>
     </div>

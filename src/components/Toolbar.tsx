@@ -261,7 +261,19 @@ export function Toolbar({
                 kind today, so it reads as a quiet badge rather than a label that
                 claims a choice nobody can make yet. */}
             <DocTypeBadge />
-            <SaveIndicator />
+            {/*
+        The save state, for a canvas that has any.
+
+        Not shown to a viewer, and this is not a nicety: the indicator reports on
+        writes, and a viewer has none. Left in place it reads "Saving…" forever
+        against a document they cannot save, or — worse — reports the *other* people's
+        writes, so a guest watching a map being edited elsewhere watches a spinner
+        that has nothing to do with them.
+
+        A viewer has a perfectly good answer to "is this up to date?", and it is that
+        they did not change it. So the toolbar simply does not raise the question.
+      */}
+      {editable ? <SaveIndicator /> : null}
           </div>
         ) : (
           <h1 className="min-w-0 flex-1 truncate px-1.5 text-sm font-semibold text-ink">

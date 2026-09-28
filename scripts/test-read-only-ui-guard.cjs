@@ -87,6 +87,13 @@ const BREAKS = [
     to: 'readOnly={false}',
     expect: 'group title input is not marked readOnly',
   },
+  {
+    label: 'the save indicator is shown to a viewer again',
+    file: 'components/Toolbar.tsx',
+    from: '{editable ? <SaveIndicator /> : null}',
+    to: '<SaveIndicator />',
+    expect: 'the save indicator is shown to a viewer',
+  },
 ]
 
 let caught = 0

@@ -33,7 +33,16 @@ function esc(value) {
  * product. Inline styles only: email clients strip <style> blocks, and a
  * stylesheet that silently fails is how an email ends up as unstyled text.
  */
-function renderEmail({ workspaceTitle, accent, iconLabel, sharerName, role, link }) {
+function renderEmail({
+  workspaceTitle,
+  accent,
+  iconLabel,
+  sharerName,
+  role,
+  link,
+  hasAccount,
+  invitedEmail,
+}) {
   const roleText = role === 'viewer' ? 'can look but not change' : 'can edit'
 
   return `<!doctype html>
@@ -52,18 +61,29 @@ function renderEmail({ workspaceTitle, accent, iconLabel, sharerName, role, link
       <tr>
         <td style="padding:16px 32px 0;">
           <h1 style="margin:0 0 12px;font-size:20px;line-height:1.3;font-weight:700;color:#111827;">
-            ${esc(sharerName)} shared a workspace with you
+            ${hasAccount
+              ? `${esc(sharerName)} shared a workspace with you`
+              : `${esc(sharerName)} invited you to Map204`}
           </h1>
           <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#4b5563;">
             <strong style="color:#111827;">${esc(workspaceTitle)}</strong>
             <span style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:999px;background:#f3f4f6;color:#6b7280;font-size:12px;">${esc(iconLabel)}</span>
           </p>
-
+${
+  hasAccount
+    ? ''
+    : `          <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#4b5563;">
+            Make an account with <strong style="color:#111827;">${esc(invitedEmail)}</strong> and this
+            workspace is already waiting for you. The invitation is saved against the
+            address rather than held in a link, so it works even if this email does not.
+          </p>
+`
+}
           <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
             <tr>
               <td style="background:${esc(accent)};border-radius:10px;">
                 <a href="${esc(link)}" style="display:inline-block;padding:11px 20px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;">
-                  Open the workspace
+                  ${hasAccount ? 'Open the workspace' : 'Create your account'}
                 </a>
               </td>
             </tr>
@@ -82,7 +102,9 @@ function renderEmail({ workspaceTitle, accent, iconLabel, sharerName, role, link
       <tr>
         <td style="padding:24px 32px 28px;border-top:1px solid #f3f4f6;margin-top:24px;">
           <p style="margin:0;font-size:12px;line-height:1.6;color:#9ca3af;">
-            You are receiving this because ${esc(sharerName)} added your account to a workspace on Map204.
+            You are receiving this because ${esc(sharerName)} added ${
+              hasAccount ? 'your account' : 'this address'
+            } to a workspace on Map204.
             If you were not expecting it, you can ignore this email — the workspace owner can remove you at any time.
           </p>
         </td>
@@ -182,7 +204,36 @@ Deno.serve(async (request) => {
 
   const sharerName = me.user_metadata?.name ?? me.user_metadata?.full_name ?? me.email ?? 'Someone'
   const role = payload.role === 'viewer' ? 'viewer' : 'editor'
-  const link = `${APP_URL}/w/${encodeURIComponent(documentId)}`
+
+  /*
+   * Two different emails, decided by whether the recipient already has an account.
+   *
+   * This function used to send one email with one link -- straight to the workspace
+   * -- which only works for somebody who is already signed in. Inviting somebody who
+   * is not was impossible then, so this never came up; now that it is possible, the
+   * same link would drop a stranger on a sign-in page with no explanation of what
+   * they were invited to.
+   *
+   * The lookup is on `public.profiles`, the same place `find_profile_by_email` looks,
+   * so the two agree about who has an account. A miss is not treated as an error: the
+   * join email is the correct message for an address nobody has registered, and a
+   * race between two simultaneous signups is not a failure worth refusing mail over.
+   */
+  const { data: recipient } = await admin
+    .from('profiles')
+    .select('id')
+    .eq('email', to.trim().toLowerCase())
+    .maybeSingle()
+
+  const hasAccount = Boolean(recipient?.id)
+  const link = hasAccount
+    ? `${APP_URL}/w/${encodeURIComponent(documentId)}`
+    : // Straight to sign-in. There is no join route with the address pre-filled --
+      // the only authentication is Google -- so putting the address in the query is
+      // decoration that would go stale the moment somebody used it, and Google
+      // ignores it anyway. The address is in the body so they can check they are
+      // signing in as the right person.
+      `${APP_URL}/?invited=${encodeURIComponent(documentId)}`
 
   const response = await fetch(RESEND_URL, {
     method: 'POST',
@@ -193,7 +244,9 @@ Deno.serve(async (request) => {
     body: JSON.stringify({
       from: FROM,
       to: [to],
-      subject: `${sharerName} shared "${doc.title}" with you`,
+      subject: hasAccount
+        ? `${sharerName} shared "${doc.title}" with you`
+        : `${sharerName} invited you to Map204`,
       html: renderEmail({
         workspaceTitle: doc.title,
         accent,
@@ -201,6 +254,8 @@ Deno.serve(async (request) => {
         sharerName,
         role,
         link,
+        hasAccount,
+        invitedEmail: to.trim().toLowerCase(),
       }),
     }),
   })

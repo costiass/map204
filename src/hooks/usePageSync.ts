@@ -21,6 +21,17 @@ import { screenToWorld } from '@/utils/geometry'
 import { applySnapshot, unionContent, type RemoteSnapshot } from '@/utils/merge'
 
 /**
+ * Whether the open document is being read rather than edited.
+ *
+ * `'viewing'` specifically, not "anything read-only": a presenter is locked too, and
+ * a presenter *should* hear about a write that did not land, because presenting ends
+ * and whatever was in flight would otherwise vanish without a word.
+ */
+function isViewerReadOnly(): boolean {
+  return useCanvasStore.getState().readOnlyReason === 'viewing'
+}
+
+/**
  * Collaboration for the open document.
  *
  * Persistence is idle-debounced like a Google Doc rather than fired on every
@@ -772,12 +783,21 @@ async function writePage(pageId: string): Promise<void> {
         return
       }
       setSaveState('failed')
-      store.pushToast('Could not save this page — try again.', 'error')
+      // Silent for a viewer. A guest has nothing to save, so a refused save is the
+      // arrangement working rather than something that went wrong -- and the toolbar
+      // no longer shows the save state to them, so a toast is the only place this
+      // would otherwise surface. Same reasoning as `handleWriteError`: an *editor*
+      // failing to save is a real bug and is still told.
+      if (!isViewerReadOnly()) {
+        store.pushToast('Could not save this page — try again.', 'error')
+      }
       return
     }
 
     setSaveState('failed')
-    store.pushToast(`Could not save: ${outcome.error}`, 'error')
+    if (!isViewerReadOnly()) {
+      store.pushToast(`Could not save: ${outcome.error}`, 'error')
+    }
   } finally {
     entry.saving = false
   }

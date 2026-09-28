@@ -78,6 +78,19 @@ export interface CollaboratorRow {
   profile: ProfileRow | null
 }
 
+/**
+ * A share to an address with no account behind it.
+ *
+ * No `user_id`, no `profile`, no avatar -- because there is nobody to have any of
+ * those yet. `email` is the identity, and the database claims it when somebody
+ * registers with that address.
+ */
+export interface PendingInviteRow {
+  email: string
+  role: 'editor' | 'viewer'
+  created_at: string
+}
+
 export const DEFAULT_DOC_SETTINGS: DocSettings = {
   defaultNoteStyle: {
     backgroundColor: '#ffffff',
@@ -694,6 +707,81 @@ export async function findProfileByEmail(email: string): Promise<ProfileRow | nu
   }
   const row = (data as ProfileRow[] | null)?.[0]
   return row ?? null
+}
+
+/**
+ * `GET /document_invites` — the shares that have not landed yet.
+ *
+ * A pending invite is a share to an address with no account behind it. It is
+ * rendered as a person who cannot be clicked, cannot have their role changed, and
+ * has no avatar — because none of those are true of them yet. Listing them
+ * separately is the whole point: folding them into the collaborator list would mean
+ * inventing a user id for somebody who does not exist.
+ */
+export async function listPendingInvites(
+  documentId: string,
+): Promise<PendingInviteRow[]> {
+  const db = authRequired()
+  if (!db) return []
+  const { data, error } = await db
+    .from('document_invites')
+    .select('email, role, created_at')
+    .eq('document_id', documentId)
+    .order('created_at', { ascending: true })
+  if (error) {
+    await handleWriteError(error, 'sync:listPendingInvites')
+    return []
+  }
+  return (data as PendingInviteRow[] | null) ?? []
+}
+
+/**
+ * `POST /document_invites` — invite an address that has no account yet.
+ *
+ * The stored row is the share. Nothing else has to succeed for the person to end up
+ * with access: `claim_pending_invites` runs on sign-up and turns the row into a
+ * collaborator row, so the invitation survives the email never being delivered, and
+ * the address being registered from a different browser, and the mail going to spam.
+ *
+ * The address is lower-cased here as well as by the column's CHECK. The check would
+ * refuse a mixed-case insert rather than fix it, and "refused, try again" is a
+ * worse answer than "we know what you meant" for a thing a person typed.
+ */
+export async function addPendingInvite(
+  documentId: string,
+  email: string,
+  role: CollaboratorRow['role'],
+): Promise<{ ok: boolean; error?: string }> {
+  const db = authRequired()
+  if (!db) return { ok: false, error: 'Supabase is not configured.' }
+  const { error } = await db.from('document_invites').upsert(
+    { document_id: documentId, email: email.trim().toLowerCase(), role },
+    { onConflict: 'document_id,email' },
+  )
+  if (error) {
+    await handleWriteError(error, 'sync:addPendingInvite')
+    return { ok: false, error: error.message }
+  }
+  return { ok: true }
+}
+
+/** `DELETE /document_invites` — take back an invitation nobody has accepted. */
+export async function removePendingInvite(
+  documentId: string,
+  email: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const db = authRequired()
+  if (!db) return { ok: false, error: 'Supabase is not configured.' }
+  const { error } = await db
+    .from('document_invites')
+    .delete()
+    .eq('document_id', documentId)
+    .eq('email', email.trim().toLowerCase())
+  if (error) {
+    await handleWriteError(error, 'sync:removePendingInvite')
+    return { ok: false, error: error.message }
+  }
+  return { ok: true }
 }
 
 /** `POST /document_collaborators` */

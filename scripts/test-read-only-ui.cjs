@@ -121,6 +121,156 @@ const guardOn = (flag) =>
  */
 const CLOSES_A_BLOCK = /[)}]\s*(?:\n\s*)?:\s*[^\s)]|\}<\/>/g
 
+/** Every affordance and every shape examined, for the count at the end. */
+let checked = 0
+
+/** The flag the component-level checks look for. */
+const EDITABLE = 'editable'
+
+/** The flag `PresentMenu` splits on, since a viewer may present but not author. */
+const CAN_EDIT_STEPS = 'canEditSteps'
+
+/**
+ * Why `guarded` said no, in one line.
+ *
+ * A source check that fails without saying what it saw is a check you have to
+ * re-derive from scratch, and this one failed on a control that *was* correctly
+ * gated. So the two offsets are reported: the nearest guard opening above the marker
+ * and the nearest block close above it. Guard below close is the condition for
+ * "gated", so when it fails the answer is usually that a closer was mistaken for
+ * the arm this marker lives in -- or the reverse.
+ */
+function explain(source, marker, flag) {
+  const box = region(source, marker)
+  if (!box) return 'the marker was not found at all'
+
+  const above = box.before
+  let lastGuard = -1
+  let lastClose = -1
+  let m
+
+  const guard = new RegExp(guardOn(flag).source, 'g')
+  while ((m = guard.exec(box.search)) !== null) lastGuard = m.index
+
+  const closes = new RegExp(CLOSES_A_BLOCK.source, 'g')
+  while ((m = closes.exec(box.before)) !== null) lastClose = m.index
+
+  if (lastGuard < 0) {
+    return (
+      `no ${flag} conditional anywhere above it in the window. The text directly ` +
+      `above the marker is ${JSON.stringify(above.slice(-70))}`
+    )
+  }
+  if (lastClose > lastGuard) {
+    return (
+      `a block closed ${lastClose - lastGuard} chars *after* the nearest guard, so ` +
+      'that guard belongs to something else. Before it: ' +
+      JSON.stringify(above.slice(Math.max(0, lastClose - 60), lastClose + 20))
+    )
+  }
+  return `nearest guard is ${lastGuard - lastClose} chars below the nearest close`
+}
+
+/* -- the checker, checked --------------------------------------------------- */
+
+/*
+ * The pattern above is the load-bearing part of this file, and it is a regex built
+ * by string concatenation from a template literal -- so a mistake in it does not
+ * throw, it matches *nothing*, and the whole file passes while checking nothing.
+ *
+ * That is not hypothetical. It happened twice while writing this: a pattern that
+ * did not match `{editable ? <SaveIndicator /> : null}` reported a correctly-gated
+ * control as open, and a probe written to investigate it disagreed with the test
+ * because the probe had read the pattern out of the template literal without
+ * evaluating the escapes.
+ *
+ * So the shapes are asserted here, against the same `guardOn` the checks use. A
+ * pattern that stops matching fails this rather than silently approving everything.
+ */
+{
+  const SHAPES = [
+    // [snippet, is it a guard?]
+    ['{editable ? <SaveIndicator /> : null}', true],
+    ['{editable ? (\n  <button />\n) : null}', true],
+    ['{editable && <X />}', true],
+    ['const handles = editable ? (', true],
+    ['onPointerDown={\n  !editable || x\n    ? undefined\n    : handler\n}', true],
+    // Not guards, and each of these was a real false negative.
+    ["data-editable={editable ? 'true' : 'false'}", false],
+    ['const editable = readOnlyReason === null', false],
+    ['disabled={!editable || !canUndo}', false],
+    /*
+     * True, and worth being explicit about why. This *is* a conditional on the
+     * flag -- just not one that wraps whatever comes next. The pattern finds it;
+     * `guarded()` rejects it, because the arm closes at `) : undefined` two
+     * characters after it opens and the marker is past that.
+     *
+     * The pattern and the position rule answer different questions -- "is the flag
+     * tested here?" and "does that test wrap the thing?" -- and only the second one
+     * decides whether a control is gated.
+     */
+    ['onPointerDown={editable ? (event) => handler(event) : undefined}', true],
+  ]
+
+  for (const [snippet, expected] of SHAPES) {
+    checked += 1
+    // Only the guard pattern matters here: `) : undefined}` closes the arm two
+    // characters after it opens, which is exactly why that last case is not a guard
+    // for whatever comes next, and it is why the rule below also compares positions.
+    const isGuard = guardOn('editable').test(snippet)
+    if (isGuard !== expected) {
+      fail(
+        `the guard pattern ${isGuard ? 'matches' : 'does not match'} ${JSON.stringify(snippet)}, ` +
+          `which it should ${expected ? '' : 'not '}(-)match.\n      If this fires, every other ` +
+          'check in this file is untrustworthy: a pattern that stops matching approves ' +
+          'everything.',
+      )
+    }
+  }
+
+  /*
+   * And `guarded` itself, on whole synthetic sources -- because the pattern being
+   * right is not the same as the *position rule* being right, and the two failed
+   * independently while this file was being written.
+   *
+   * The first is the one that bit: a guard written immediately before the marker,
+   * with the search region stopping at the marker, could not see the character
+   * after its `?` and so reported `{editable ? <SaveIndicator /> : null}` as
+   * ungated. A pattern-only self-check cannot express that, because in a bare
+   * snippet the character after `?` is always there.
+   */
+  const PLACEMENTS = [
+    // [source, marker, gated?]
+    ['{editable ? <SaveIndicator /> : null}', '<SaveIndicator />', true],
+    ['{editable ? (\n  <SaveIndicator />\n) : null}', '<SaveIndicator />', true],
+    ['<SaveIndicator />', '<SaveIndicator />', false],
+    // A guard above, but closed before the marker: it belongs to a sibling.
+    [
+      'onPointerDown={editable ? (e) => h(e) : undefined}\n<SaveIndicator />',
+      '<SaveIndicator />',
+      false,
+    ],
+    // A guard above and closed, then the real one wrapping the marker.
+    [
+      'a={editable ? x : undefined}\n{editable ? <SaveIndicator /> : null}',
+      '<SaveIndicator />',
+      true,
+    ],
+  ]
+
+  for (const [source, marker, expected] of PLACEMENTS) {
+    checked += 1
+    const got = guarded(source, marker, EDITABLE)
+    if (got !== expected) {
+      fail(
+        `guarded() said ${got ? 'gated' : 'ungated'} for ${JSON.stringify(source)}, ` +
+          `which it should ${expected ? '' : 'not '}(-)be. ` +
+          explain(source, marker, EDITABLE),
+      )
+    }
+  }
+}
+
 /**
  * Is the marker guarded, and is the guard the one containing it?
  *
@@ -140,11 +290,32 @@ const CLOSES_A_BLOCK = /[)}]\s*(?:\n\s*)?:\s*[^\s)]|\}<\/>/g
  *     for the commoner `cond ? undefined : handler`, because the marker sits in an
  *     arrow-function body, *after* the closing paren of the arm.
  */
-function guarded(source, marker, flag) {
+/**
+ * The text the guard is searched in, which *includes* the marker.
+ *
+ * This is the whole subtlety. The guard pattern needs a character after its `?` --
+ * it has to see that what follows is code rather than a string literal -- and when
+ * the region stopped at the marker, a guard written immediately before it was
+ * invisible: `{editable ? <SaveIndicator />` searched up to `<SaveIndicator`
+ * left a dangling `?` with nothing after it, and `{editable ? <SaveIndicator />`
+ * was reported as ungated while being gated perfectly correctly.
+ *
+ * Including the marker completes the guard without opening the door to one *after*
+ * it, because the search still stops at the marker's last character.
+ */
+function region(source, marker) {
   const at = source.indexOf(marker)
-  if (at < 0) return false
+  if (at < 0) return null
+  return {
+    at,
+    search: source.slice(Math.max(0, at - WINDOW * 80), at + marker.length),
+    before: source.slice(Math.max(0, at - WINDOW * 80), at),
+  }
+}
 
-  const above = source.slice(Math.max(0, at - WINDOW * 80), at)
+function guarded(source, marker, flag) {
+  const box = region(source, marker)
+  if (!box) return false
 
   // Fresh regexes per call, or `lastIndex` carries over and the scan resumes
   // halfway through the string.
@@ -153,16 +324,15 @@ function guarded(source, marker, flag) {
   let match
 
   const guard = new RegExp(guardOn(flag).source, 'g')
-  while ((match = guard.exec(above)) !== null) lastGuard = match.index
+  while ((match = guard.exec(box.search)) !== null) lastGuard = match.index
 
+  // Closes are searched only *before* the marker: a `) : null}` inside the marker
+  // is not a block that closed above it.
   const closes = new RegExp(CLOSES_A_BLOCK.source, 'g')
-  while ((match = closes.exec(above)) !== null) lastClose = match.index
+  while ((match = closes.exec(box.before)) !== null) lastClose = match.index
 
   return lastGuard > lastClose
 }
-
-const EDITABLE = 'editable'
-const CAN_EDIT_STEPS = 'canEditSteps'
 
 /* -- the doors -------------------------------------------------------------- */
 
@@ -217,8 +387,6 @@ const CHECKS = [
     ],
   },
 ]
-
-let checked = 0
 
 for (const group of CHECKS) {
   const source = code(group.file)
@@ -309,6 +477,41 @@ for (const kept of KEPT) {
       'components/PresentMenu.tsx: the menu returns null for a viewer. A viewer must ' +
         'be able to *start* a presentation -- it writes nothing. The step-building ' +
         'below it is what should be gated, and it is.',
+    )
+  }
+}
+
+/* -- and a viewer is told about nothing --------------------------------------- */
+
+/*
+ * The save state and the write-failure toasts.
+ *
+ * Two places, and the same argument in both: a viewer has no writes, so a report
+ * *about* writes is noise. Left in place, a guest watching somebody else edit a map
+ * watches a save indicator spinning for changes they did not make and gets an error
+ * toast for a refusal the app arranged on purpose -- and the reasonable conclusion
+ * is that Map204 is broken rather than that it is correctly refusing them.
+ */
+const SILENT = [
+  {
+    file: 'components/Toolbar.tsx',
+    what: 'the save indicator',
+    marker: '<SaveIndicator />',
+    why: 'it reports on writes, and a viewer has none',
+  },
+]
+
+for (const quiet of SILENT) {
+  const source = code(quiet.file)
+  checked += 1
+  if (!source.includes(quiet.marker)) {
+    fail(`${quiet.file}: ${quiet.what} is gone entirely (${quiet.marker} not found).`)
+    continue
+  }
+  if (!guarded(source, quiet.marker, EDITABLE)) {
+    fail(
+      `${quiet.file}: ${quiet.what} is shown to a viewer. ${quiet.why}, so it reports ` +
+        `on somebody else's changes.\n      ${explain(source, quiet.marker, EDITABLE)}`,
     )
   }
 }

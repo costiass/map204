@@ -48,16 +48,43 @@ export async function handleWriteError(
     const key = `rls:${context}`
     if (!explained.has(key)) {
       explained.add(key)
-      useCanvasStore
-        .getState()
-        .pushToast(
-          'The server refused that change. If you have edit access, this is a bug — the details are in the console.',
-          'error',
-        )
+      /*
+       * Silent for a viewer.
+       *
+       * A viewer's writes are refused by design, so an RLS refusal is not news --
+       * it is the arrangement working. Telling them about it is how a read-only
+       * guest ends up with a stack of error toasts for things they never did, and
+       * the natural conclusion is that the app is broken rather than that it is
+       * correctly refusing them.
+       *
+       * An *editor* hitting the same refusal is a genuine bug and is still told.
+       * The distinction is read from the store rather than from the error, because
+       * the error cannot tell the two apart -- which is the whole reason the
+       * message above refuses to name a cause.
+       */
+      if (!isViewer()) {
+        useCanvasStore
+          .getState()
+          .pushToast(
+            'The server refused that change. If you have edit access, this is a bug — the details are in the console.',
+            'error',
+          )
+      }
     }
   }
 
   console.error(`[${context}]`, error?.code ?? '', error?.message ?? error)
+}
+
+/**
+ * Whether the open document is being read rather than edited.
+ *
+ * `'viewing'` specifically, not "anything read-only". A presenter is also locked, and
+ * a presenter *is* supposed to hear about a failed write — presenting is a mode that
+ * ends, and anything it could not save would otherwise vanish quietly.
+ */
+function isViewer(): boolean {
+  return useCanvasStore.getState().readOnlyReason === 'viewing'
 }
 
 /** Lets a later sign-in report the problem again. */
