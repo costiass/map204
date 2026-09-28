@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Check,
   FolderOpen,
+  LayoutGrid,
   Link2,
-  MoreHorizontal,
+  List,
+  Loader2,
   Pencil,
   Plus,
   Search,
@@ -23,13 +25,7 @@ import {
 } from '@/store/supabase-sync'
 import type { SharedDocument } from '@/store/supabase-sync'
 import { useCanvasStore } from '@/store/useCanvasStore'
-import {
-  DEFAULT_WORKSPACE_ACCENT,
-  DEFAULT_WORKSPACE_ICON,
-  getWorkspaceAccent,
-  getWorkspaceIconLabel,
-  type WorkspaceAccentId,
-} from '@/theme'
+import { getWorkspaceAccent, getWorkspaceIconLabel } from '@/theme'
 
 interface WorkspacePageProps {
   userId: string
@@ -73,14 +69,11 @@ export function WorkspacePage({ userId, onOpenDocument }: WorkspacePageProps) {
   const [documents, setDocuments] = useState<SharedDocument[]>([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
-  const [newTitle, setNewTitle] = useState('')
+  /** List reads names; grid reads colour and icon. Both are kept. */
+  const [view, setView] = useState<'list' | 'grid'>('list')
   const [creating, setCreating] = useState(false)
   /** Which document is open for editing, if any. Only ever one. */
   const [editingId, setEditingId] = useState<string | null>(null)
-  /** What the new document should look like, chosen before it exists. */
-  const [newAccent, setNewAccent] = useState<WorkspaceAccentId>(DEFAULT_WORKSPACE_ACCENT)
-  const [newIcon, setNewIcon] = useState(DEFAULT_WORKSPACE_ICON)
-  const newTitleRef = useRef<HTMLInputElement>(null)
   const pushToast = useCanvasStore((s) => s.pushToast)
 
   const loadDocuments = useCallback(async () => {
@@ -94,17 +87,26 @@ export function WorkspacePage({ userId, onOpenDocument }: WorkspacePageProps) {
     void loadDocuments()
   }, [loadDocuments])
 
+  /**
+   * Create a map and open it.
+   *
+   * No name is asked for. "Untitled" is a perfectly good first name for a thing,
+   * and asking for one before the thing exists was the only step in this that was
+   * not optional — every other action on a new map is easier once you can see
+   * it. The name can be typed in the chrome the moment the map opens, which is
+   * where you are already looking.
+   *
+   * No colour or icon is asked for either: the map gets one automatically, and
+   * both are one edit away on the list.
+   */
   const create = async () => {
-    if (!userId || !newTitle.trim()) return
+    if (!userId) return
     setCreating(true)
-    const created = await createDocument(userId, newTitle.trim(), {
-      accent: newAccent,
-      icon: newIcon,
-    })
+    const created = await createDocument(userId, '', {})
     setCreating(false)
-    setNewTitle('')
 
     if (!created) {
+      pushToast('Could not create a map. Try again.', 'error')
       setDocuments(await listDocuments(userId))
       return
     }
@@ -160,32 +162,76 @@ export function WorkspacePage({ userId, onOpenDocument }: WorkspacePageProps) {
   return (
     <div className="cc-scroll h-full w-full overflow-y-auto">
       <div className="mx-auto w-full max-w-4xl px-6 py-8">
-        <div className="mb-6">
-          <h1 className="text-xl font-bold text-ink-strong">Workspaces</h1>
-          <p className="mt-0.5 text-[13px] text-muted">
-            {loading
-              ? 'Loading…'
-              : documents.length === 0
-                ? 'Nothing here yet.'
-                : `${documents.length} ${documents.length === 1 ? 'workspace' : 'workspaces'}${
-                    sharedCount > 0 ? ` · ${sharedCount} shared with you` : ''
-                  }`}
-          </p>
+        <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 className="text-xl font-bold text-ink-strong">Maps</h1>
+            <p className="mt-0.5 text-[13px] text-muted">
+              {loading
+                ? 'Loading…'
+                : documents.length === 0
+                  ? 'Nothing here yet.'
+                  : `${documents.length} ${documents.length === 1 ? 'map' : 'maps'}${
+                      sharedCount > 0 ? ` · ${sharedCount} shared with you` : ''
+                    }`}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* List or grid. A list is better for *finding* — a name reads in a
+                row, and you scan names. A grid is better for *recognising* — a
+                colour and an icon read at a glance, which is what somebody
+                looking for one specific map they half-remember is doing. Both are
+                legitimate, so the choice is kept rather than guessed. */}
+            <div className="cc-seg" role="group" aria-label="How to show your maps">
+              <button
+                type="button"
+                data-active={view === 'list'}
+                aria-pressed={view === 'list'}
+                title="List"
+                onClick={() => setView('list')}
+              >
+                <List size={14} />
+              </button>
+              <button
+                type="button"
+                data-active={view === 'grid'}
+                aria-pressed={view === 'grid'}
+                title="Grid"
+                onClick={() => setView('grid')}
+              >
+                <LayoutGrid size={14} />
+              </button>
+            </div>
+
+            {/* One button, and no name to type. "Untitled" is a perfectly good
+                first name for a thing, and asking for one before the thing
+                exists is the only step in creating a map that is not optional. */}
+            <button
+              type="button"
+              className="cc-btn"
+              data-variant="primary"
+              disabled={creating}
+              onClick={() => void create()}
+            >
+              {creating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+              New map
+            </button>
+          </div>
         </div>
 
         {/* The search box is the largest thing on the page. It is the only way
             to find anything once there are more than a handful, so it is sized
-            like the primary action rather than tucked into a corner. */}
-        <div className="relative mb-4">
+            like a primary field rather than tucked into a corner. */}
+        <div className="relative mb-5">
           <Search
-            size={16}
-            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted"
+            size={19}
+            className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted"
             aria-hidden="true"
           />
           <input
-            className="cc-input w-full py-2.5 pl-9 pr-9"
-            placeholder="Search workspaces"
-            aria-label="Search workspaces"
+            className="w-full rounded-xl border border-line bg-surface py-3.5 pl-12 pr-11 text-[15px] text-ink shadow-sm outline-none transition placeholder:text-muted hover:border-line-strong focus:border-brand focus:ring-2 focus:ring-brand/20"
+            placeholder="Search maps"
+            aria-label="Search maps"
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -193,60 +239,15 @@ export function WorkspacePage({ userId, onOpenDocument }: WorkspacePageProps) {
           {searching ? (
             <button
               type="button"
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted transition hover:text-ink"
+              className="absolute right-3 top-1/2 -translate-y-1/2 rounded p-1 text-muted transition hover:text-ink"
               title="Clear the search"
               aria-label="Clear the search"
               onClick={() => setQuery('')}
             >
-              <X size={15} />
+              <X size={17} />
             </button>
           ) : null}
         </div>
-
-        {/* New workspace. Colour and icon are chosen here, before it exists,
-            rather than after — the alternative is creating it and then being
-            invited to style it, which is two trips for one job. */}
-        <form
-          className="mb-6 flex flex-wrap items-start gap-2"
-          onSubmit={(event) => {
-            event.preventDefault()
-            void create()
-          }}
-        >
-          <div className="min-w-[14rem] flex-1">
-            <input
-              ref={newTitleRef}
-              className="cc-input w-full"
-              placeholder="New workspace name"
-              aria-label="New workspace name"
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-            />
-          </div>
-          <button
-            type="submit"
-            className="cc-btn"
-            data-variant="primary"
-            disabled={creating || !newTitle.trim()}
-          >
-            <Plus size={14} />
-            New workspace
-          </button>
-          <details className="group w-full">
-            <summary className="cc-btn cursor-pointer list-none text-xs opacity-70 hover:opacity-100">
-              <MoreHorizontal size={14} />
-              Change the new workspace&rsquo;s colour and icon
-            </summary>
-            <div className="mt-2">
-              <LookPicker
-                accent={newAccent}
-                icon={newIcon}
-                onAccent={(accent) => setNewAccent(accent as WorkspaceAccentId)}
-                onIcon={setNewIcon}
-              />
-            </div>
-          </details>
-        </form>
 
         {loading ? (
           <div className="space-y-2">
@@ -259,18 +260,18 @@ export function WorkspacePage({ userId, onOpenDocument }: WorkspacePageProps) {
             <div className="mb-3 grid h-12 w-12 place-items-center rounded-2xl bg-surface shadow-sm">
               <FolderOpen size={20} className="text-brand" />
             </div>
-            <h2 className="text-sm font-semibold text-ink">No workspaces yet</h2>
+            <h2 className="text-sm font-semibold text-ink">No maps yet</h2>
             <p className="mt-1 max-w-xs text-[13px] text-muted">
-              A workspace holds as many pages of cards and arrows as your course needs. Name one
-              above to get started.
+              A map holds as many pages of cards, tables, videos and links as your course needs.
             </p>
             <button
               type="button"
               className="cc-btn mt-4"
               data-variant="primary"
-              onClick={() => newTitleRef.current?.focus()}
+              disabled={creating}
+              onClick={() => void create()}
             >
-              <Plus size={14} /> New workspace
+              <Plus size={14} /> New map
             </button>
           </div>
         ) : visible.length === 0 ? (
@@ -285,6 +286,19 @@ export function WorkspacePage({ userId, onOpenDocument }: WorkspacePageProps) {
               You have {documents.length} {documents.length === 1 ? 'workspace' : 'workspaces'}.
             </p>
           </div>
+        ) : view === 'grid' ? (
+          <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            {visible.map(({ document: doc, role }) => (
+              <li key={doc.id}>
+                <WorkspaceCard
+                  doc={doc}
+                  role={role}
+                  onOpen={() => onOpenDocument(doc.id)}
+                  onEdit={() => setEditingId(doc.id)}
+                />
+              </li>
+            ))}
+          </ul>
         ) : (
           <ul className="space-y-2">
             {visible.map(({ document: doc, role }) => (
@@ -308,6 +322,85 @@ export function WorkspacePage({ userId, onOpenDocument }: WorkspacePageProps) {
           </ul>
         )}
       </div>
+    </div>
+  )
+}
+
+/**
+ * The grid view's tile.
+ *
+ * A grid earns its place by showing the *colour and icon*, which a row can only
+ * hint at. So on a tile they are the decoration rather than hidden — that is the
+ * whole reason to switch to this view, and hiding them here as well would leave
+ * two identical layouts.
+ *
+ * Editing is a separate mode reached from the row view, and a tile's edit button
+ * switches to it rather than editing in place: a tile is too small to hold a
+ * colour picker and a text field without becoming something else.
+ */
+function WorkspaceCard({
+  doc,
+  role,
+  onOpen,
+  onEdit,
+}: {
+  doc: SharedDocument['document']
+  role: SharedDocument['role']
+  onOpen: () => void
+  onEdit: () => void
+}) {
+  const accent = getWorkspaceAccent(doc.accent)
+
+  return (
+    <div
+      className="group relative flex h-full flex-col rounded-xl border border-line bg-surface p-3 text-left shadow-sm transition hover:border-line-strong hover:shadow-md"
+      style={{ borderTopColor: accent.base, borderTopWidth: 2 }}
+      role="button"
+      tabIndex={0}
+      aria-label={`Open ${doc.title}`}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onOpen()
+        }
+      }}
+    >
+      <div className="mb-2 flex items-start justify-between gap-2">
+        <span
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-lg"
+          style={{ background: accent.soft, color: accent.ink }}
+          title={getWorkspaceIconLabel(doc.icon)}
+        >
+          <WorkspaceMark icon={doc.icon} accent={doc.accent} size={16} />
+        </span>
+        {role === 'owner' ? (
+          <button
+            type="button"
+            className="cursor-pointer rounded p-1.5 text-muted transition hover:bg-surface-sunken hover:text-ink focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
+            title="Rename, recolour and re-icon"
+            aria-label={`Edit ${doc.title}`}
+            onClick={(event) => {
+              event.stopPropagation()
+              onEdit()
+            }}
+          >
+            <Pencil size={14} />
+          </button>
+        ) : null}
+      </div>
+
+      <span className="block min-w-0 flex-1 truncate text-sm font-semibold text-ink">
+        {doc.title}
+      </span>
+      <span className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] text-muted">
+        <DocTypeBadge kind={doc.kind} />
+        {role === 'owner' ? null : (
+          <span className="cc-tag" title={`Shared with you as ${role}`}>
+            {role === 'editor' ? 'Can edit' : 'View only'}
+          </span>
+        )}
+      </span>
     </div>
   )
 }

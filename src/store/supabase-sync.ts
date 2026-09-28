@@ -277,9 +277,18 @@ export async function createDocument(
   const db = authRequired()
   if (!db) return null
 
+  // An empty title is *omitted* rather than written, so the column's own default
+  // is what names the map. Hard-coding "Untitled" here as well would mean two
+  // places to change the name of a thing nobody has named, and they would
+  // eventually disagree.
+  const insert: Record<string, string> = { owner_id: userId }
+  if (title.trim()) insert.title = title.trim()
+  if (look?.accent) insert.accent = look.accent
+  if (look?.icon) insert.icon = look.icon
+
   const { data, error } = await db
     .from('documents')
-    .insert({ owner_id: userId, title, ...(look?.accent ? { accent: look.accent } : {}), ...(look?.icon ? { icon: look.icon } : {}) })
+    .insert(insert)
     .select('id, owner_id, title, accent, icon, created_at, updated_at')
     .single()
 
