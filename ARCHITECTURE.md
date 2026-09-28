@@ -100,17 +100,17 @@ interface Page {
 ```sql
 -- Documents (workspaces)
 documents (
-  id text PRIMARY KEY,
-  owner_id text REFERENCES auth.users(id) ON DELETE CASCADE,
+  id text PRIMARY KEY DEFAULT gen_random_uuid()::text,   -- app-generated
+  owner_id uuid REFERENCES auth.users(id) ON DELETE CASCADE,
   title text NOT NULL DEFAULT 'Untitled',
-  settings jsonb NOT NULL DEFAULT '{}',   -- DocSettings: default card/link styles
-  created_at timestamptz DEFAULT now(),
-  updated_at timestamptz DEFAULT now()     -- kept fresh by trg_documents_touch
+  settings jsonb NOT NULL DEFAULT '{}',    -- DocSettings: default card/link styles
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
 )
 
 -- Pages within documents
 pages (
-  id text PRIMARY KEY,                    -- generated in the app, e.g. page_1737…_a1b2c3
+  id text PRIMARY KEY DEFAULT gen_random_uuid()::text,   -- app-generated
   document_id text REFERENCES documents(id) ON DELETE CASCADE,
   title text NOT NULL DEFAULT 'Untitled Page',
   ordinal integer NOT NULL DEFAULT 0,     -- position in the page list
@@ -120,38 +120,58 @@ pages (
   groups jsonb NOT NULL DEFAULT '[]',
   connections jsonb NOT NULL DEFAULT '[]',
   version integer NOT NULL DEFAULT 0,     -- optimistic concurrency
-  created_at timestamptz DEFAULT now(),
-  updated_at timestamptz DEFAULT now()     -- kept fresh by trg_pages_touch
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
 )
 
--- User preferences — one row, created by trg_create_user_settings on signup
+-- User preferences — one row, created by trg_create_settings on signup
 user_settings (
-  user_id text PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  user_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   theme text CHECK (theme IN ('light', 'dark')),
-  default_snap_to_grid boolean DEFAULT true,
+  palette text CHECK (palette IN ('default', 'metallic', 'fluffy', 'contrast')),
+  accent text CHECK (accent IN ('indigo','violet','blue','teal','green','amber','rose')),
+  card_radius integer NOT NULL DEFAULT 12,
+  reduce_motion boolean NOT NULL DEFAULT false,
+  default_snap_to_grid boolean NOT NULL DEFAULT true,
   default_grid_pattern text CHECK (default_grid_pattern IN ('none', 'dots', 'lines')),
-  default_grid_size integer DEFAULT 20,
-  updated_at timestamptz DEFAULT now()
+  default_grid_size integer NOT NULL DEFAULT 20,
+  updated_at timestamptz NOT NULL DEFAULT now()
 )
 
--- Sharing
-document_collaborators (
-  document_id text REFERENCES documents(id) ON DELETE CASCADE,
-  user_id text REFERENCES auth.users(id) ON DELETE CASCADE,
-  role text CHECK (role IN ('owner', 'editor', 'viewer')),
-  PRIMARY KEY (document_id, user_id)
-)
-
--- A safe mirror of auth.users for the share list
+-- A safe mirror of auth.users, for the share list
 profiles (
-  id text PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   email text,
   full_name text,
   avatar_url text,
-  created_at timestamptz DEFAULT now(),
-  updated_at timestamptz DEFAULT now()
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+)
+
+-- Sharing. user_id points at profiles rather than auth.users, so PostgREST can
+-- embed the profile in a collaborator query.
+document_collaborators (
+  document_id text REFERENCES documents(id) ON DELETE CASCADE,
+  user_id uuid REFERENCES profiles(id) ON DELETE CASCADE,
+  role text CHECK (role IN ('owner', 'editor', 'viewer')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (document_id, user_id)
 )
 ```
+
+### Two kinds of id
+
+App objects are `text`, people are `uuid`. That is not a stylistic choice:
+
+- the client names a page before the row exists — the Realtime topic *is* the
+  page id — so it has to generate the id itself
+- `owner_id` and `user_id` refer to `auth.users.id`, so keeping them `uuid`
+  gives real foreign keys, lets PostgREST infer joins, and means **no
+  `auth.uid()` cast anywhere**
+
+An earlier schema made the user columns `text` too, to match the other ids. That
+forced casts and produced `operator does not exist: uuid = text` on every
+query, which is the failure this schema is built to make impossible.
 
 ### Triggers
 
@@ -159,13 +179,14 @@ profiles (
 | --- | --- | --- |
 | `trg_create_default_page` | `documents` | `AFTER INSERT` — creates page #1, so a workspace is never empty |
 | `trg_prevent_last_page_delete` | `pages` | `BEFORE DELETE` — refuses to remove the last page of a document |
-| `trg_documents_touch` | `documents` | `BEFORE UPDATE` — refreshes `updated_at` |
-| `trg_pages_touch` | `pages` | `BEFORE UPDATE` — refreshes `updated_at` |
-| `trg_create_user_settings` | `auth.users` | `AFTER INSERT` — creates the one settings row |
+| `trg_touch_documents` | `documents` | `BEFORE UPDATE` — refreshes `updated_at` |
+| `trg_touch_pages` | `pages` | `BEFORE UPDATE` — refreshes `updated_at` |
+| `trg_touch_profiles` | `profiles` | `BEFORE UPDATE` — refreshes `updated_at` |
+| `trg_create_settings` | `auth.users` | `AFTER INSERT` — creates the one settings row |
 | `trg_sync_profile` | `auth.users` | `AFTER INSERT/UPDATE` — mirrors name, email, avatar into `profiles` |
 
-The first two are `SECURITY DEFINER`, so a client's own RLS policies cannot
-block a write the database itself is required to make.
+The two that write on the caller's behalf are `SECURITY DEFINER`, so a client's
+own RLS policy cannot veto a write the database is required to make.
 
 ### Row Level Security (RLS)
 
@@ -449,22 +470,27 @@ Set in Vercel Dashboard → Project → Settings → Environment Variables:
 
    | File | What it does |
    | ---- | ------------ |
-   | `20260920090000_initial_schema.sql` | tables, RLS, indexes |
-   | `20260920090100_user_settings.sql` | `user_settings` (idempotent; 001 already has it) |
-   | `20260921091500_fix_rls_recursion.sql` | drops the mutually-recursive policies |
-   | `20260921091600_fix_id_types.sql` | ids become `text` to match the app's ids |
-   | `20260922093000_cleanup_and_realtime.sql` | `text` everywhere, `version`, Realtime, sane policies |
-   | `20260927081500_enforce_business_rules.sql` | `position` jsonb, `ordinal`, default page trigger, last-page guard, `updated_at` triggers |
-   | `20260927081600_user_settings_trigger.sql` | settings row created on signup (+ backfill) |
-   | `20260928090000_sharing.sql` | `profiles`, email lookup, the `can_view_*` / `can_edit_*` helpers, collaborator write access |
-   | `20260928090100_realtime_private_channels.sql` | `realtime.messages` policies so private channels are access-checked |
+   | `20261001090000_initial_schema.sql` | tables, ids, indexes |
+   | `20261001090100_access_control.sql` | the `can_view_*` / `can_edit_*` helpers and every policy |
+   | `20261001090200_triggers.sql` | default page, last-page guard, `updated_at`, settings and profile on signup |
+   | `20261001090300_realtime.sql` | publication + `realtime.messages` policies for private channels |
+   | `20261001090400_sharing_functions.sql` | email lookup, record the owner as a collaborator |
 
-   Every file is written to be re-runnable (`IF EXISTS` / `IF NOT EXISTS` /
-   `DROP POLICY IF EXISTS`), so applying one to a database that already has it
-   is a no-op rather than an error. That matters here: the first two were
-   originally run by hand in the SQL Editor, so they exist in the database but
-   not in the history table. `db push` applies them again — harmlessly — and
-   records them, so no repair step is needed.
+   The project is built from an empty database, so this is the whole schema — no
+   "fix the type" migrations, nothing applied twice. Two decisions in 001 are
+   worth keeping in mind before you touch it:
+
+   - **`documents.id` and `pages.id` are `text`**, because the client generates
+     them (`page_1737…_a1b2c3`) and must be able to name a page before its row
+     exists — the Realtime topic *is* the page id.
+   - **`owner_id` and `user_id` are `uuid`**, matching `auth.users.id`. That gives
+     real foreign keys, lets PostgREST infer joins, and means no `auth.uid()`
+     cast is ever needed. An earlier version made these `text` to match the
+     other ids, which forced casts and produced
+     `operator does not exist: uuid = text` on every query.
+
+   Every file is re-runnable (`IF NOT EXISTS`, `DROP … IF EXISTS`), so a push
+   that fails partway can simply be run again.
 
 5. **Check Realtime**: Database → Replication should list `documents`, `pages`
    and `user_settings` (the last migration adds them; verify in the dashboard)
@@ -532,8 +558,8 @@ reviewed and committed. It answers "what does the database look like now?", not
 |-------|----------|
 | "Supabase not configured" | Check `.env` has VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY |
 | "Infinite recursion in policy" | Migrations `003` and `008` replace those policies with the `can_view_*` / `can_edit_*` helpers |
-| "Invalid UUID" | Run `20260921091600_fix_id_types.sql` |
-| Broadcast never arrives | Private channels need the `realtime.messages` policies from `20260928090100_realtime_private_channels.sql` |
+| "Invalid UUID" | Ids are `text` for app objects, `uuid` for people — do not convert either |
+| Broadcast never arrives | Private channels need the `realtime.messages` policies from `20261001090300_realtime.sql` |
 | "row-level security" on a write | The account is a `viewer`: change the role in the share dialog |
 | "User not found" (Vercel) | Re-create `VERCEL_TOKEN` |
 | Realtime not working | Enable tables in Supabase → Replication (migration 009 also does it) |
