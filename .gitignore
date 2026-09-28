@@ -29,4 +29,4 @@ supabase/functions/.env.*
 *.sln
 *.sw?
 
-PRODUCTION.md
+PRODUCTION.mdmap204-page*.json
