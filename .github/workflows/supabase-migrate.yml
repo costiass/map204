@@ -1,23 +1,59 @@
 name: Supabase Migration
 
+# Applying migrations is normally one command. The interesting cases are the ones
+# where supabase/migrations and the database's history table have drifted apart,
+# and there are exactly three legitimate answers — so this workflow names all
+# three instead of only the safe one:
+#
+#   push       apply what is pending. The default, and the only one a git push
+#              can trigger. If the two sides have drifted it fails and tells you
+#              which command to run; it never rewrites history on its own.
+#
+#   reconcile  the migrations in git were rewritten (renamed, squashed, or
+#              rebuilt from scratch) and the history rows for the old versions
+#              are stale. Forgets those versions, then pushes. Data is kept.
+#
+#   rebuild    start over: drops everything this project created and replays the
+#              migrations from empty. Destroys all data, so it needs its own
+#              confirmation. Accounts in auth.users survive.
+
 on:
   push:
     branches: [main]
     paths:
       - 'supabase/migrations/**'
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'How to reconcile the database with the migrations'
+        required: true
+        default: push
+        type: choice
+        options:
+          - push
+          - reconcile
+          - rebuild
+      confirm_data_loss:
+        description: 'Required for rebuild — type YES to confirm all data is dropped'
+        required: false
+        default: ''
+        type: string
 
 concurrency:
-  # One migration run at a time — two pushes must not race on the history table.
+  # Two runs must never touch the history table at the same time.
   group: supabase-migrate
   cancel-in-progress: false
+
+env:
+  SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+  SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
 
 jobs:
   migrate:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
@@ -28,27 +64,136 @@ jobs:
         # SUPABASE_DB_PASSWORD keeps this non-interactive: without it the CLI
         # prompts for the database password and the job hangs.
         run: supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
 
-      - name: What will be applied
-        run: supabase db push --dry-run
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      - name: Check credentials
+        run: |
+          if [ -z "$SUPABASE_DB_PASSWORD" ]; then
+            echo "::warning::SUPABASE_DB_PASSWORD is not set. Reading the migration"
+            echo "::warning::history works without it, but mode=rebuild needs a real password."
+          fi
 
-      - name: Push migrations
-        # Applies every migration whose version is not yet in
-        # supabase_migrations.schema_migrations, in order, and records each one.
+      # ------------------------------------------------------------------
+      # Work out whether the two sides agree, before touching anything.
+      # ------------------------------------------------------------------
+      - name: Compare migrations with history
+        id: compare
+        run: |
+          set -euo pipefail
+
+          # Versions are the filename prefixes: Supabase requires exactly 14
+          # digits, and that length is also what keeps them apart from the
+          # timestamp column the CLI prints (`2026-09-28 09:00:00` would match a
+          # loose pattern as a bare `2026`).
+          local_versions="$(ls -1 supabase/migrations | grep -oE '^[0-9]{14}' | sort -u || true)"
+
+          # The CLI pretty-prints a table, so rather than parse columns we pull
+          # every 14-digit run out of its output: they are the versions.
+          raw="$(supabase db query --linked \
+            "select coalesce(string_agg(version, ' '), '') as v
+             from supabase_migrations.schema_migrations" 2>/dev/null || true)"
+          remote_versions="$(printf '%s' "$raw" | grep -oE '[0-9]{14,}' | sort -u || true)"
+
+          # Recorded remotely but absent from git: the drift the CLI refuses to
+          # resolve on its own.
+          orphans="$(comm -23 \
+            <(printf '%s\n' "$remote_versions" | sed '/^$/d') \
+            <(printf '%s\n' "$local_versions" | sed '/^$/d'))"
+
+          {
+            echo "### Migrations"
+            echo
+            echo "| Source | Versions |"
+            echo "| --- | --- |"
+            echo "| git | $(printf '%s' "$local_versions" | tr '\n' ' ' | sed 's/ $//') |"
+            echo "| database | $(printf '%s' "$remote_versions" | tr '\n' ' ' | sed 's/ $//') |"
+            echo
+            if [ -n "$orphans" ]; then
+              echo "**Drift detected** — recorded in the database but not in git:"
+              echo
+              echo '```'
+              echo "$orphans"
+              echo '```'
+              echo
+              echo "Re-run this workflow with mode=reconcile (keeps data) or mode=rebuild (drops it)."
+            else
+              echo "In step."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Single-line form, so a later step can pass it to a command without
+          # quoting trouble.
+          orphans_line="$(printf '%s' "$orphans" | tr '\n' ' ')"
+          echo "orphans=${orphans_line% }" >> "$GITHUB_OUTPUT"
+
+          if [ -n "$orphans" ]; then
+            echo "::warning title=Migration history has drifted::recorded remotely, absent from git: $orphans_line"
+          fi
+
+      # ------------------------------------------------------------------
+      # push — the only mode a git push can reach
+      # ------------------------------------------------------------------
+      - name: Apply pending migrations
+        if: ${{ github.event_name == 'push' || inputs.mode == 'push' }}
+        env:
+          ORPHANS: ${{ steps.compare.outputs.orphans }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "$ORPHANS" ]; then
+            echo "::error::The database records migrations that are not in this repository:"
+            echo "::error::$ORPHANS"
+            echo "Re-run this workflow with mode=reconcile to forget them and keep the data,"
+            echo "or mode=rebuild to start from an empty database."
+            exit 1
+          fi
+
+          supabase db push --dry-run
+          supabase db push
+
+      # ------------------------------------------------------------------
+      # reconcile — forget stale versions, keep the data
+      # ------------------------------------------------------------------
+      - name: Forget stale history
+        if: ${{ inputs.mode == 'reconcile' }}
+        env:
+          ORPHANS: ${{ steps.compare.outputs.orphans }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$ORPHANS" ]; then
+            echo "Nothing to reconcile — the database and git already agree."
+            exit 0
+          fi
+
+          echo "Forgetting: $ORPHANS"
+          supabase migration repair $ORPHANS --status reverted
+
+      - name: Apply migrations
+        if: ${{ inputs.mode == 'reconcile' }}
         run: supabase db push
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+
+      # ------------------------------------------------------------------
+      # rebuild — empty database, migrations replayed from the start
+      # ------------------------------------------------------------------
+      - name: Confirm rebuild
+        if: ${{ inputs.mode == 'rebuild' }}
+        run: |
+          if [ "${{ inputs.confirm_data_loss }}" != "YES" ]; then
+            echo "::error::Rebuild drops every table and all data. Set confirm_data_loss to YES to go ahead."
+            exit 1
+          fi
+
+      - name: Drop and replay
+        if: ${{ inputs.mode == 'rebuild' }}
+        run: |
+          # db reset --linked removes what this project created (auth.users and
+          # the other managed schemas are left alone) and replays every local
+          # migration, so the schema is guaranteed to match the files.
+          supabase db reset --linked
 
       - name: Migration history
         if: always()
+        # A diagnostic: it should not turn a passing run red, nor hide the
+        # error from whichever step actually failed.
+        continue-on-error: true
         run: supabase migration list
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
