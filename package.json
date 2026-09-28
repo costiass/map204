@@ -16,7 +16,8 @@
     "test:tutorial": "node scripts/test-tutorial-content.cjs",
     "test:migrations": "node scripts/test-migration-sql.cjs",
     "test:policies": "node scripts/test-rls-policies.cjs",
-    "test": "npm run typecheck && npm run test:drift && node scripts/test-bootstrap.cjs && npm run test:bootstrap && npm run test:migrations && npm run test:policies && npm run test:workspace-look && npm run test:tutorial"
+    "test:realtime": "node scripts/test-realtime-wiring.cjs",
+    "test": "npm run typecheck && npm run test:drift && node scripts/test-bootstrap.cjs && npm run test:bootstrap && npm run test:migrations && npm run test:policies && npm run test:realtime && npm run test:workspace-look && npm run test:tutorial"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",

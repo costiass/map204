@@ -1,14 +1,22 @@
 // A cheap structural check for the tutorial migration.
 //
 // The content is hand-written JSONB, so the failure mode is a missing comma or
-// an unbalanced paren — neither of which `tsc` or `oxlint` can see, and both of
+// an unbalanced paren â€” neither of which `tsc` or `oxlint` can see, and both of
 // which only surface when the migration runs against a live database. This
 // catches them at commit time instead.
 
 const fs = require('fs')
 
-const file = process.argv[2] ?? 'supabase/migrations/20261001090900_tutorial_depth.sql'
-const sql = fs.readFileSync(file, 'utf8')
+// The content functions live in 006; the trigger that installs them, and the two
+// page titles, are in 005. Both are read, because "the tutorial demonstrates X"
+// is a claim about the pair — a complete function nobody calls teaches nobody
+// anything.
+const sql = [
+  'supabase/migrations/20261001000005_app_functions.sql',
+  'supabase/migrations/20261001000006_tutorial_content.sql',
+]
+  .map((name) => fs.readFileSync(name, 'utf8'))
+  .join('\n')
 
 let failures = 0
 const fail = (message) => {

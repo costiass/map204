@@ -121,24 +121,86 @@ function historyRows() {
     .join(',\n')
 }
 
+/**
+ * Every function this schema is supposed to leave behind.
+ *
+ * Read out of the migrations rather than listed by hand, so adding a migration
+ * that creates a function cannot be forgotten here — which is the whole point,
+ * since this list is what the bootstrap checks itself against before claiming
+ * to have succeeded.
+ */
+function verificationRows() {
+  const names = new Set()
+  for (const { sql } of migrationFiles()) {
+    for (const m of sql.matchAll(
+      /create or replace function\s+(?:public\.)?(\w+)\s*\(/g,
+    )) {
+      names.add(m[1])
+    }
+  }
+  return [...names]
+    .sort()
+    .map((name) => `    '${name}'`)
+    .join(',\n')
+}
+
+const VERIFICATION_ROWS = verificationRows()
+
 const EPILOGUE = `
 -- -----------------------------------------------------------------------------
--- 3. Record these as applied
+-- 3. Check the schema is actually complete, then record it as applied
 -- -----------------------------------------------------------------------------
 -- \`supabase db push\` compares its history table against supabase/migrations.
--- Left empty it would try to re-apply everything above, and fail on the first
+-- Left empty it would try to re-apply everything above and fail on the first
 -- \`create policy\`. These rows say: done.
+--
+-- **The check comes first, and it is the important part.**
+--
+-- Recording the history unconditionally is how this file produced a database
+-- that reported "up to date" while missing functions the app called. The SQL
+-- Editor continues past a failed statement, so a migration that errored halfway
+-- left the objects after it uncreated — and the unconditional insert still
+-- marked every version as applied. \`db push\` then reported nothing to do, and
+-- the app got 404s for functions the history claimed were there.
+--
+-- So the rows are only written if every object this schema is supposed to
+-- create actually exists. If something is missing, this raises, the transaction
+-- unwinds, and the history stays empty — which is a *visible* failure, because
+-- the next \`db push\` will try again and tell you what went wrong.
 do $$
+declare
+  missing text;
 begin
-  create schema if not exists supabase_migrations;
-  create table if not exists supabase_migrations.schema_migrations (
-    version text primary key,
-    name text,
-    statements text[],
-    inserted_at timestamptz not null default now()
+  select string_agg(name, ', ') into missing
+  from unnest(array[
+${VERIFICATION_ROWS}
+  ]) as name
+  where not exists (
+    select 1
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname = name
   );
+
+  if missing is not null then
+    raise exception
+      'Bootstrap incomplete — these functions do not exist: %. '
+      'A statement above failed, and the SQL Editor carries on past an error. '
+      'The migration history has NOT been recorded, so "supabase db push" will '
+      'report the real problem.', missing;
+  end if;
 end;
 $$;
+
+-- The history table itself, which is normally created by the CLI. Needed here
+-- because a bootstrap may be pasted into a database the CLI has never touched.
+create schema if not exists supabase_migrations;
+create table if not exists supabase_migrations.schema_migrations (
+  version text primary key,
+  name text,
+  statements text[],
+  inserted_at timestamptz not null default now()
+);
 
 insert into supabase_migrations.schema_migrations (version, name)
 values

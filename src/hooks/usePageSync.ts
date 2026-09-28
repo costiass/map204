@@ -37,6 +37,26 @@ import { applySnapshot, unionContent, type RemoteSnapshot } from '@/utils/merge'
 
 const IDLE_FLUSH_MS = 1200
 const MAX_FLUSH_MS = 4000
+/**
+ * Two Realtime channels, and every broadcast must be sent and received on the
+ * *same* one:
+ *
+ *   topic                purpose                                    sent / received
+ *   -------------------  -----------------------------------------  ----------------
+ *   `page:<pageId>`      page content, for people on that page       both
+ *   `document:<docId>`   presence, pointers, "pages were added"     both
+ *
+ * A pointer belongs to the document, not to a page: it carries which page it is
+ * on, and the person may move to another page without the channel changing.
+ * Page *content* is per page, because it is large and only the people on that
+ * page need it.
+ *
+ * Getting this wrong has no symptom. The send succeeds, the app looks healthy,
+ * and every message simply arrives in a room nobody is in — which is exactly
+ * what happened: pointers were published on `page:` and listened for on
+ * `document:`, so the sidebar reported "no pointer sent yet" for every
+ * connected person, indefinitely.
+ */
 const PAGE_TOPIC = 'page:'
 const DOC_TOPIC = 'document:'
 
@@ -394,7 +414,13 @@ export function usePageSync() {
       const page = useCanvasStore.getState().activePage()
       if (!page) return
 
-      void channelRef.current?.send({
+      // Sent on the **document** channel, because that is the channel the
+      // `cursor` handler is registered on. It used to go out on the page
+      // channel, which is a different topic entirely — so every pointer was
+      // published into a room nobody was listening to, and the sidebar showed
+      // "no pointer sent yet" for every connected person while the app looked
+      // perfectly healthy. A topic mismatch has no symptom: the send succeeds.
+      void channels.get(documentId)?.send({
         type: 'broadcast',
         event: 'cursor',
         payload: {

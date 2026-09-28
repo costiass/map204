@@ -1,8 +1,8 @@
 // Guards the three places a workspace's colour and icon are enumerated.
 //
-//   1. src/theme.ts                     — what the app offers
-//   2. the database check constraints    — what the server will accept
-//   3. supabase/functions/…/_workspace_look.ts — what the email describes
+//   1. src/theme.ts                     â€” what the app offers
+//   2. the database check constraints    â€” what the server will accept
+//   3. supabase/functions/â€¦/_workspace_look.ts â€” what the email describes
 //
 // Three hand-written lists for one concept is three chances to disagree, and the
 // failure is silent: a value the app offers but the database rejects shows up
@@ -14,7 +14,7 @@ const fs = require('fs')
 const theme = fs.readFileSync('src/theme.ts', 'utf8')
 const edge = fs.readFileSync('supabase/functions/send-share-email/_workspace_look.ts', 'utf8')
 const migration = fs.readFileSync(
-  'supabase/migrations/20261001090800_workspace_look.sql',
+  'supabase/migrations/20261001000001_schema.sql',
   'utf8',
 )
 
@@ -34,7 +34,7 @@ const between = (text, start, end) => {
 /* ---- accents --------------------------------------------------------- */
 
 // The workspace accent list in the theme: the `ACCENTS` array, plus the neutral
-// `slate` that only workspaces use. Scoped to `ACCENTS` deliberately — a naive
+// `slate` that only workspaces use. Scoped to `ACCENTS` deliberately â€” a naive
 // scan of the file also picks up the *palettes*, which are a different concept
 // with their own ids, and comparing those against the database is meaningless.
 const accentBlock = between(theme, 'export const WORKSPACE_ACCENTS', 'export const DEFAULT_WORKSPACE_ACCENT')
@@ -51,9 +51,36 @@ if (!accentBlock.includes('SLATE')) {
 themeAccents.add('slate')
 
 // The check constraint in the migration.
-const accentCheck = between(migration, 'documents_accent_check\n  check', ");")
+/**
+ * The allowed values for a check constraint, wherever it is declared.
+ *
+ * The constraint is written inline in the `create table` — that is where it
+ * belongs, since a table with a constraint nobody reads is a table that invites
+ * a later `alter table … drop constraint` to weaken it quietly. An earlier
+ * version of this schema declared them separately, so both forms are accepted
+ * rather than the test hard-coding one.
+ */
+function checkValues(text, name) {
+  const inline = new RegExp(
+    `constraint\\s+${name}\\s+check\\s*\\(([\\s\\S]*?)\\n\\s*\\)`,
+    'i',
+  ).exec(text)
+  if (inline) {
+    return new Set([...inline[1].matchAll(/'([a-z-]+)'/g)].map((m) => m[1]))
+  }
+  const separate = new RegExp(
+    `${name}\\s*\\n?\\s*check\\s*\\(([\\s\\S]*?)\\n\\s*\\)`,
+    'i',
+  ).exec(text)
+  if (separate) {
+    return new Set([...separate[1].matchAll(/'([a-z-]+)'/g)].map((m) => m[1]))
+  }
+  return new Set()
+}
+
+const accentCheck = checkValues(migration, 'documents_accent_check')
 const dbAccents = new Set(
-  [...accentCheck.matchAll(/'([a-z]+)'/g)].map((m) => m[1]),
+  [...accentCheck].map((v) => v),
 )
 for (const id of themeAccents) {
   if (!dbAccents.has(id)) fail(`database rejects accent '${id}', which the app offers`)
@@ -77,7 +104,7 @@ for (const id of edgeAccents) {
 // The hex values must match too, or the email names a different colour than the
 // workspace it is describing.
 // The hex for each accent. `id: 'slate' as AccentId` carries a cast, so the
-// pattern has to tolerate one — SLATE is declared in its own block.
+// pattern has to tolerate one â€” SLATE is declared in its own block.
 const accentSource = `${userAccents}\n${between(theme, 'const SLATE: Accent', 'export const WORKSPACE_ACCENTS')}`
 for (const [, id, hex] of accentSource.matchAll(
   /id: '([a-z]+)'(?: as \w+)?,\s*label: '[^']*',\s*base: '(#[0-9a-f]{6})'/g,
@@ -101,8 +128,8 @@ const themeIcons = new Set(
 )
 if (themeIcons.size < 8) fail(`expected the icon list to be populated, found ${themeIcons.size}`)
 
-const iconCheck = between(migration, 'documents_icon_check\n  check', ");")
-const dbIcons = new Set([...iconCheck.matchAll(/'([a-z-]+)'/g)].map((m) => m[1]))
+const iconCheck = checkValues(migration, 'documents_icon_check')
+const dbIcons = new Set([...iconCheck])
 for (const id of themeIcons) {
   if (!dbIcons.has(id)) fail(`database rejects icon '${id}', which the app offers`)
 }

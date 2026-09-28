@@ -26,7 +26,6 @@ drop table if exists public.pages cascade;
 drop table if exists public.profiles cascade;
 drop table if exists public.user_settings cascade;
 
-drop function if exists public.add_document_owner(p_document_id text, p_user_id uuid) cascade;
 drop function if exists public.can_edit_document(p_document_id text) cascade;
 drop function if exists public.can_edit_page(p_page_id text) cascade;
 drop function if exists public.can_view_document(p_document_id text) cascade;
@@ -46,7 +45,6 @@ drop function if exists public.shares_document_with(p_a uuid, p_b uuid) cascade;
 drop function if exists public.sync_profile() cascade;
 drop function if exists public.sync_profile_for(p_user_id uuid) cascade;
 drop function if exists public.touch_updated_at() cascade;
-drop function if exists public.tutorial_page_content() cascade;
 drop function if exists public.tutorial_page_one() cascade;
 drop function if exists public.tutorial_page_two() cascade;
 
@@ -67,36 +65,31 @@ $$;
 -- -----------------------------------------------------------------------------
 -- 2. The schema
 -- -----------------------------------------------------------------------------
--- ---- 20261001090000_initial_schema.sql ---------------------------------
--- ---- 20261001090100_access_control.sql ---------------------------------
--- ---- 20261001090200_triggers.sql ---------------------------------------
--- ---- 20261001090300_realtime.sql ---------------------------------------
--- ---- 20261001090400_sharing_functions.sql ------------------------------
--- ---- 20261001090500_welcome_workspace.sql ------------------------------
--- ---- 20261001090600_profile_repair.sql ---------------------------------
--- ---- 20261001090700_app_name.sql ---------------------------------------
--- ---- 20261001090800_workspace_look.sql ---------------------------------
--- ---- 20261001090900_tutorial_depth.sql ---------------------------------
--- ---- 20261001091000_delete_and_cascade.sql -----------------------------
--- ---- 20261001091100_profile_policy.sql ---------------------------------
--- ---- 20261001091200_import_pages.sql -----------------------------------
+-- ---- 20261001000001_schema.sql -----------------------------------------
+-- ---- 20261001000002_access_control.sql ---------------------------------
+-- ---- 20261001000003_triggers.sql ---------------------------------------
+-- ---- 20261001000004_realtime.sql ---------------------------------------
+-- ---- 20261001000005_app_functions.sql ----------------------------------
+-- ---- 20261001000006_tutorial_content.sql -------------------------------
 
 -- =============================================================================
--- 20261001090000_initial_schema.sql
+-- 20261001000001_schema.sql
 -- =============================================================================
--- 001 · Initial schema
+-- 001 · Schema
 --
--- Two kinds of id, and keeping them straight is the whole point:
+-- Two kinds of id, and keeping them straight is the whole point of this file:
 --
 --   * Everything the app creates — documents, pages — is `text`, because the
 --     client generates readable ids like `page_1737…_a1b2c3` and must be able to
---     reference them before the row exists (the Realtime topic is the page id).
+--     name a page before its row exists. (The Realtime topic *is* the page id.)
+--
 --   * Everything that refers to a person — `owner_id`, `user_id` — stays `uuid`,
 --     matching `auth.users.id`. That gives real foreign keys, lets Postgres
---     infer joins for PostgREST, and means no `auth.uid()` cast is ever needed.
+--     infer joins for PostgREST, and means `auth.uid()` is never cast.
 --
--- Getting this wrong in either direction is what produced the earlier
--- "operator does not exist: uuid = text" failures, so it is stated up front.
+-- Getting this wrong in either direction is what produced the original
+-- "operator does not exist: uuid = text" failures, so it is stated up front and
+-- the rest of the schema depends on it.
 
 -- ----------------------------------------------------------------
 -- documents: a workspace
@@ -105,20 +98,49 @@ create table if not exists public.documents (
   id text primary key default gen_random_uuid()::text,
   owner_id uuid not null references auth.users (id) on delete cascade,
   title text not null default 'Untitled',
+
+  -- The workspace's own look: a colour and an icon, so a subject can be
+  -- recognised before its name is read. Both are *token names*, never hex, so
+  -- they recolour with the reader's theme instead of carrying a fixed shade
+  -- that reads wrong on a dark background.
+  --
+  -- Constrained, because an unrecognised value reaches the browser as an empty
+  -- icon box or a colour nobody chose. The lists here are mirrored in
+  -- src/theme.ts, and scripts/test-workspace-look.cjs fails the build if the two
+  -- ever disagree.
+  accent text not null default 'indigo',
+  icon text not null default 'layout-grid',
+
   -- Document-wide defaults (DocSettings): default card and link styles.
   settings jsonb not null default '{}'::jsonb,
+
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+
+  constraint documents_accent_check check (accent in (
+    'indigo', 'violet', 'blue', 'teal', 'green', 'amber', 'rose', 'slate'
+  )),
+  constraint documents_icon_check check (icon in (
+    'layout-grid', 'book-open', 'graduation-cap', 'flask-conical', 'globe',
+    'calculator', 'microscope', 'languages', 'palette', 'music', 'code',
+    'map', 'lightbulb', 'presentation', 'brain', 'library'
+  ))
 );
 
 -- ----------------------------------------------------------------
--- pages: one row per page, its content stored as JSONB
+-- pages: one row per page, its whole content stored as JSONB
 -- ----------------------------------------------------------------
+-- A page's cards, groups and connections are three JSONB values, not hundreds
+-- of rows. That is a deliberate trade: a page is read and written as one unit,
+-- so there is no per-card access check and no partial write to reconcile. The
+-- cost is that two people editing *different* cards on the same page conflict
+-- at page granularity — which is why the client merges by id rather than
+-- overwriting.
 create table if not exists public.pages (
   id text primary key default gen_random_uuid()::text,
   document_id text not null references public.documents (id) on delete cascade,
   title text not null default 'Untitled Page',
-  -- Position in the page list. The list is ordered by this, never by insertion.
+  -- Position in the page list. Ordered by this, never by insertion time.
   ordinal integer not null default 0,
   position jsonb not null default '{"x":0,"y":0,"width":1920,"height":1080,"zIndex":0}'::jsonb,
   viewport jsonb not null default '{"x":0,"y":0,"zoom":1}'::jsonb,
@@ -156,12 +178,15 @@ create table if not exists public.user_settings (
 );
 
 -- ----------------------------------------------------------------
--- profiles: a safe mirror of auth.users for the share list
+-- profiles: a safe mirror of auth.users
 -- ----------------------------------------------------------------
--- Defined before document_collaborators so that table can point its user_id
+-- Declared before document_collaborators so that table can point its user_id
 -- straight at it. A foreign key to auth.users alone would not do: PostgREST
--- resolves `profile:profiles(...)` only through a direct relationship between
--- the two tables, and the share list embeds it on every row.
+-- resolves the `profile:profiles(...)` embed the share dialog uses only through
+-- a direct relationship between the two tables.
+--
+-- It is a copy rather than a view because `auth.users` is not readable by
+-- clients, and the share list has to show somebody's name and picture.
 create table if not exists public.profiles (
   id uuid primary key references auth.users (id) on delete cascade,
   email text,
@@ -174,6 +199,12 @@ create table if not exists public.profiles (
 -- ----------------------------------------------------------------
 -- document_collaborators: who else may open a workspace
 -- ----------------------------------------------------------------
+-- Note there is deliberately *no* row for the owner. `documents.owner_id` is the
+-- single source of truth for ownership; this table holds only the people the
+-- owner invited, so the two cannot disagree. An earlier schema had an
+-- `add_document_owner` helper intended to add an owner row, and nothing ever
+-- called it — dead code that made several places look for a row that never
+-- existed. It is gone.
 create table if not exists public.document_collaborators (
   document_id text not null references public.documents (id) on delete cascade,
   user_id uuid not null references public.profiles (id) on delete cascade,
@@ -185,27 +216,48 @@ create table if not exists public.document_collaborators (
 create index if not exists document_collaborators_user_idx
   on public.document_collaborators (user_id);
 
+-- ----------------------------------------------------------------
+-- Turn row-level security on
+-- ----------------------------------------------------------------
+-- Every table above, without exception. A policy is inert until the table has RLS
+-- enabled, and a table with policies but no RLS is *worse* than one with neither:
+-- it reads as protected in review and is wide open at runtime. `create policy` in
+-- 002 does not enable anything by itself.
+--
+-- scripts/test-rls-policies.cjs fails if this list and the tables in this file
+-- ever disagree, precisely because the failure is invisible until somebody reads
+-- another person's notes.
+alter table public.documents enable row level security;
+alter table public.pages enable row level security;
+alter table public.user_settings enable row level security;
+alter table public.profiles enable row level security;
+alter table public.document_collaborators enable row level security;
+
 -- =============================================================================
--- 20261001090100_access_control.sql
+-- 20261001000002_access_control.sql
 -- =============================================================================
 -- 002 · Access control
 --
--- One rule governs this whole file: **a policy never queries another table that
--- also has RLS.** The first version of this schema did exactly that — a
--- `documents` policy read `document_collaborators` whose policy read
--- `documents` — and Postgres answered every single request with
+-- One rule governs this file: **a policy never queries another table that also
+-- has RLS.** The first version of this schema did exactly that — a `documents`
+-- policy read `document_collaborators` whose policy read `documents` — and
+-- Postgres answered every request with
+--
 --   42P17  infinite recursion detected in policy for relation "documents"
+--
 -- which is not a permissions problem, it is a dead application.
 --
--- Cross-table access therefore always goes through a SECURITY DEFINER helper.
--- Those functions run with the table owner's rights, so RLS does not re-enter
--- when they read the tables, and the cycle cannot form.
+-- Every cross-table question therefore goes through a `security definer`
+-- function. Those run with the table owner's rights, so RLS does not re-enter
+-- when they read the tables and the cycle cannot form. scripts/test-rls-policies
+-- reads this file and fails if any policy reaches an RLS table directly, because
+-- the mistake is easy to make and quiet when it happens to terminate.
 
 -- ----------------------------------------------------------------
--- Helpers
+-- Helpers — STABLE + SECURITY DEFINER: read-only, cacheable, invisible to RLS
 -- ----------------------------------------------------------------
--- STABLE + SECURITY DEFINER: read-only, cacheable, and invisible to RLS.
 
+-- Can this account see the workspace at all?
 create or replace function public.can_view_document(p_document_id text)
 returns boolean
 language sql
@@ -218,10 +270,14 @@ as $$
     where d.id = p_document_id and d.owner_id = auth.uid()
   ) or exists (
     select 1 from public.document_collaborators dc
-    where dc.document_id = p_document_id and dc.user_id = auth.uid()
+    where dc.document_id = p_document_id
+      and dc.user_id = auth.uid()
   );
 $$;
 
+-- Can this account change the workspace? The owner always can, which is why
+-- every rule below falls back to the first branch rather than relying on a
+-- collaborator row for the owner.
 create or replace function public.can_edit_document(p_document_id text)
 returns boolean
 language sql
@@ -240,6 +296,8 @@ as $$
   );
 $$;
 
+-- A new page has no row yet, so its check is about the document it is going
+-- into — see the "can insert" policy below.
 create or replace function public.can_view_page(p_page_id text)
 returns boolean
 language sql
@@ -282,19 +340,30 @@ as $$
   );
 $$;
 
+-- Do these two accounts share a workspace? Used by the profiles policy, which
+-- would otherwise have to read document_collaborators from inside a policy —
+-- the exact shape that produced 42P17.
+create or replace function public.shares_document_with(p_a uuid, p_b uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.document_collaborators mine
+    join public.document_collaborators theirs
+      on theirs.document_id = mine.document_id
+    where mine.user_id = p_a and theirs.user_id = p_b
+  );
+$$;
+
 grant execute on function public.can_view_document(text) to authenticated;
 grant execute on function public.can_edit_document(text) to authenticated;
 grant execute on function public.can_view_page(text) to authenticated;
 grant execute on function public.can_edit_page(text) to authenticated;
-
--- ----------------------------------------------------------------
--- Enable RLS
--- ----------------------------------------------------------------
-alter table public.documents enable row level security;
-alter table public.pages enable row level security;
-alter table public.user_settings enable row level security;
-alter table public.document_collaborators enable row level security;
-alter table public.profiles enable row level security;
+grant execute on function public.shares_document_with(uuid, uuid) to authenticated;
 
 -- ----------------------------------------------------------------
 -- documents
@@ -332,7 +401,9 @@ create policy "can read"
   on public.pages for select
   using (public.can_view_page(pages.id));
 
--- A new page has no id yet, so the insert asks about the document instead.
+-- A new page has no id of its own yet, so the check is about the document it is
+-- going into. This is the policy that refuses an insert, and it is the only
+-- thing standing between a signed-in user and a page in somebody's workspace.
 create policy "can insert"
   on public.pages for insert
   with check (public.can_edit_document(pages.document_id));
@@ -383,13 +454,7 @@ create policy "can read profile"
   on public.profiles for select
   using (
     id = auth.uid()
-    or exists (
-      select 1
-      from public.document_collaborators mine
-      join public.document_collaborators theirs
-        on theirs.document_id = mine.document_id
-      where mine.user_id = auth.uid() and theirs.user_id = profiles.id
-    )
+    or public.shares_document_with(auth.uid(), profiles.id)
   );
 
 create policy "update own profile"
@@ -398,7 +463,7 @@ create policy "update own profile"
   with check (id = auth.uid());
 
 -- =============================================================================
--- 20261001090200_triggers.sql
+-- 20261001000003_triggers.sql
 -- =============================================================================
 -- 003 · Triggers
 --
@@ -406,13 +471,13 @@ create policy "update own profile"
 -- writes:
 --
 --   * a workspace always has at least one page, created for you
---   * the last page of a workspace cannot be deleted
+--   * a workspace that still exists cannot be emptied of pages
 --   * an account always has a settings row and a profile
 --   * updated_at is never stale
 --
--- The first two are SECURITY DEFINER: they write rows on behalf of the caller,
--- and a caller's own RLS policy must not be able to veto a write the database
--- is required to make.
+-- The triggers that *write* on the caller's behalf are `security definer`: a
+-- caller's own RLS policy must not be able to veto a write the database is
+-- required to make.
 
 -- ----------------------------------------------------------------
 -- A new workspace gets its first page
@@ -427,7 +492,7 @@ declare
   new_page_id text;
   next_ordinal integer;
 begin
-  -- Same shape the client uses, so ids read the same wherever they come from.
+  -- The same shape the client uses, so ids read the same wherever they come from.
   new_page_id := 'page_' || floor(extract(epoch from now()) * 1000)::text
                  || '_' || substr(md5(random()::text), 1, 6);
 
@@ -449,21 +514,50 @@ create trigger trg_create_default_page
   execute function public.create_default_page();
 
 -- ----------------------------------------------------------------
--- The last page cannot be deleted
+-- A workspace that still exists must keep a page
 -- ----------------------------------------------------------------
+-- The subtle part: this trigger must not fire when the page is going because
+-- its *workspace* is going. `pages.document_id` is `on delete cascade`, so
+-- deleting a workspace deletes its pages, and without the check below the
+-- workspace's only page vetoes its own removal:
+--
+--   DELETE /documents  400 Bad Request
+--   P0001  A workspace must keep at least one page. Add another page before
+--          deleting this one.
+--
+-- which made every workspace undeletable.
+--
+-- `pg_trigger_depth()` is how the two cases are told apart: a row removed by a
+-- cascade runs with a deeper trigger stack than one removed by a direct
+-- statement, because the foreign key's own trigger fires first. A fixed number
+-- would not do — the depth varies with the shape of the delete.
+--
+-- `security definer` matters just as much. Without it the check's own
+-- `select … from pages` runs as the calling user and is filtered by the `pages`
+-- policies, so a collaborator who can read pages but not edit the document
+-- could see zero rows from inside the trigger, and the rule would veto an
+-- ordinary page delete — the failure it exists to prevent, caused by the
+-- trigger itself.
 create or replace function public.prevent_deleting_last_page()
 returns trigger
 language plpgsql
+security definer
 set search_path = public
 as $$
 begin
+  -- Being removed because the workspace containing it is going too.
+  if pg_trigger_depth() > 1 then
+    return old;
+  end if;
+
   if not exists (
     select 1 from public.pages p
     where p.document_id = old.document_id
       and p.id <> old.id
   ) then
     raise exception
-      'A workspace must keep at least one page. Add another page before deleting this one.';
+      'A workspace must keep at least one page. Add another page before deleting this one.'
+      using errcode = 'check_violation';
   end if;
 
   return old;
@@ -533,496 +627,18 @@ create trigger trg_create_settings
   execute function public.create_settings_for_new_user();
 
 -- ----------------------------------------------------------------
--- An account gets a profile
+-- An account gets a profile, and keeps it current
 -- ----------------------------------------------------------------
-create or replace function public.sync_profile()
-returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  insert into public.profiles (id, email, full_name, avatar_url)
-  values (
-    new.id,
-    new.email,
-    coalesce(
-      new.raw_user_meta_data ->> 'full_name',
-      new.raw_user_meta_data ->> 'name'
-    ),
-    coalesce(
-      new.raw_user_meta_data ->> 'avatar_url',
-      new.raw_user_meta_data ->> 'picture'
-    )
-  )
-  on conflict (id) do update
-    set email = excluded.email,
-        full_name = excluded.full_name,
-        avatar_url = excluded.avatar_url,
-        updated_at = now();
-
-  return new;
-end;
-$$;
-
-drop trigger if exists trg_sync_profile on auth.users;
-create trigger trg_sync_profile
-  after insert or update of email, raw_user_meta_data on auth.users
-  for each row
-  execute function public.sync_profile();
-
--- ----------------------------------------------------------------
--- Backfill, in case any account predates the triggers
--- ----------------------------------------------------------------
-insert into public.user_settings (user_id)
-select u.id from auth.users u
-on conflict (user_id) do nothing;
-
-insert into public.profiles (id, email, full_name, avatar_url)
-select
-  u.id,
-  u.email,
-  coalesce(u.raw_user_meta_data ->> 'full_name', u.raw_user_meta_data ->> 'name'),
-  coalesce(u.raw_user_meta_data ->> 'avatar_url', u.raw_user_meta_data ->> 'picture')
-from auth.users u
-on conflict (id) do nothing;
-
--- =============================================================================
--- 20261001090300_realtime.sql
--- =============================================================================
--- 004 · Realtime
+-- The logic is a `uuid` function rather than the trigger body, so it can also be
+-- called by hand. That is not a convenience: an earlier version put the upsert
+-- in the trigger and used `on conflict do nothing` in a backfill, which could
+-- only ever *create* a profile and never correct one. Every account whose row
+-- already existed with blanks kept them forever, and the share list showed them
+-- as "Unknown user" with no picture, permanently. With the logic in a callable
+-- function the same code path repairs a bad row.
 --
--- The collaboration channels are private, which means Supabase routes every
--- message through `realtime.messages` and the policies below decide who may
--- listen on `page:<pageId>` and who may publish to it. Without them, anybody
--- holding the public anon key could subscribe to somebody else's page.
---
---   page:<pageId>      page content sync  (broadcast + presence)
---   document:<docId>   who is in the workspace (presence)
-
--- ----------------------------------------------------------------
--- The tables the client listens to
--- ----------------------------------------------------------------
-do $$
-declare
-  t text;
-begin
-  foreach t in array array['documents', 'pages', 'user_settings'] loop
-    if not exists (
-      select 1 from pg_publication_tables
-      where pubname = 'supabase_realtime' and tablename = t
-    ) then
-      execute format('alter publication supabase_realtime add table public.%I', t);
-    end if;
-  end loop;
-end;
-$$;
-
--- ----------------------------------------------------------------
--- Read the page id out of the topic
--- ----------------------------------------------------------------
--- A channel's topic arrives as `realtime:page:<pageId>`.
-create or replace function public.realtime_page_id()
-returns text
-language sql
-stable
-as $$
-  select (regexp_match(realtime.topic(), 'page:([^:]+)$'))[1];
-$$;
-
-create or replace function public.realtime_document_id()
-returns text
-language sql
-stable
-as $$
-  select (regexp_match(realtime.topic(), 'document:([^:]+)$'))[1];
-$$;
-
-grant execute on function public.realtime_page_id() to authenticated;
-grant execute on function public.realtime_document_id() to authenticated;
-
-grant select, insert on realtime.messages to authenticated;
-
--- ----------------------------------------------------------------
--- Listening: anyone who can already see it through REST
--- ----------------------------------------------------------------
-create policy "can receive page broadcasts"
-  on realtime.messages for select to authenticated
-  using (
-    public.realtime_page_id() is not null
-    and public.can_view_page(public.realtime_page_id())
-  );
-
-create policy "can receive document presence"
-  on realtime.messages for select to authenticated
-  using (
-    public.realtime_document_id() is not null
-    and public.can_view_document(public.realtime_document_id())
-  );
-
--- ----------------------------------------------------------------
--- Publishing: editors only, so a viewer cannot push a change
--- ----------------------------------------------------------------
-create policy "can publish page broadcasts"
-  on realtime.messages for insert to authenticated
-  with check (
-    public.realtime_page_id() is not null
-    and public.can_edit_page(public.realtime_page_id())
-  );
-
-create policy "can publish document presence"
-  on realtime.messages for insert to authenticated
-  with check (
-    public.realtime_document_id() is not null
-    and public.can_edit_document(public.realtime_document_id())
-  );
-
--- =============================================================================
--- 20261001090400_sharing_functions.sql
--- =============================================================================
--- 005 · Sharing functions
---
--- Two small functions the share dialog needs, both of which deliberately cannot
--- be done with a plain table read.
-
--- ----------------------------------------------------------------
--- Find somebody by their email
--- ----------------------------------------------------------------
--- The dialog has to turn "sam@example.com" into a user id, but `profiles` is only
--- readable for yourself and your co-collaborators, so a plain SELECT would
--- return nothing. This is SECURITY DEFINER and matches the address exactly, so
--- it can be used to share *with* a known address without becoming a way to
--- enumerate every account that exists.
-create or replace function public.find_profile_by_email(p_email text)
-returns table (id uuid, email text, full_name text, avatar_url text)
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select p.id, p.email, p.full_name, p.avatar_url
-  from public.profiles p
-  where lower(p.email) = lower(trim(p_email))
-  limit 1;
-$$;
-
-revoke all on function public.find_profile_by_email(text) from public;
-grant execute on function public.find_profile_by_email(text) to authenticated;
-
--- ----------------------------------------------------------------
--- Record the owner as a collaborator
--- ----------------------------------------------------------------
--- `documents.owner_id` is the single source of truth for ownership; this exists
--- so a workspace also has an explicit owner row in the share list, without the
--- client being able to add one for somebody else's document.
-create or replace function public.add_document_owner(p_document_id text, p_user_id uuid)
-returns void
-language sql
-security definer
-set search_path = public
-as $$
-  insert into public.document_collaborators (document_id, user_id, role)
-  values (p_document_id, p_user_id, 'owner')
-  on conflict (document_id, user_id)
-  do update set role = 'owner';
-$$;
-
-revoke all on function public.add_document_owner(text, uuid) from public;
-grant execute on function public.add_document_owner(text, uuid) to service_role;
-
--- =============================================================================
--- 20261001090500_welcome_workspace.sql
--- =============================================================================
--- 006 · A welcome workspace for every account
---
--- Signing up to an empty canvas is a bad first five minutes, so every account
--- gets a workspace called `tutorial` with a page that explains the app in
--- cards. It is created by the database, not by the client, so it exists no
--- matter which entry point made the account.
---
--- Re-importing this project's own export lands on the same page ids, so the
--- content is written with `on conflict` semantics rather than assuming the ids
--- are free.
-
--- ----------------------------------------------------------------
--- The tutorial content
--- ----------------------------------------------------------------
--- Written as JSONB and inserted straight into the page, because the alternative
--- is duplicating the client's card defaults here and letting the two drift.
-create or replace function public.tutorial_page_content()
-returns jsonb
-language sql
-immutable
-as $$
-  select jsonb_build_object(
-    'cards', jsonb_build_array(
-      jsonb_build_object(
-        'id', 'tut_welcome',
-        'title', 'Welcome to ClassCards',
-        'content',
-          'This workspace is yours to change. Rename it, delete it, or add pages beside it.'
-          || chr(10) || chr(10)
-          || 'Everything you do is saved to your account and shared with whoever you invite.',
-        'image', jsonb_build_object('src', null, 'alt', ''),
-        'position', jsonb_build_object('x', 0, 'y', 0, 'width', 300, 'height', 240, 'zIndex', 1),
-        'style', jsonb_build_object(
-          'backgroundColor', '#EEF2FF', 'accentColor', '#6366F1', 'textColor', '#111827',
-          'borderColor', '#C7D2FE', 'borderWidth', 1, 'borderRadius', 12, 'shadow', true
-        ),
-        'tags', jsonb_build_array('start-here'),
-        'collapsed', false,
-        'parentId', null,
-        'checklist', jsonb_build_array(),
-        'createdAt', now()::text,
-        'updatedAt', now()::text
-      ),
-      jsonb_build_object(
-        'id', 'tut_basics',
-        'title', 'The basics',
-        'content',
-          '**C** drops a card where you are looking.'
-          || chr(10) || chr(10)
-          || '- **G** adds a group, a box you can gather cards into'
-          || chr(10)
-          || '- **F** fits everything in view'
-          || chr(10)
-          || '- **Delete** removes whatever you have selected'
-          || chr(10) || chr(10)
-          || 'Drag a card by its header to move it, and drag the corner to resize.',
-        'image', jsonb_build_object('src', null, 'alt', ''),
-        'position', jsonb_build_object('x', 340, 'y', 0, 'width', 300, 'height', 300, 'zIndex', 2),
-        'style', jsonb_build_object(
-          'backgroundColor', '#FFFFFF', 'accentColor', '#0EA5E9', 'textColor', '#111827',
-          'borderColor', '#E5E7EB', 'borderWidth', 1, 'borderRadius', 12, 'shadow', true
-        ),
-        'tags', jsonb_build_array('start-here'),
-        'collapsed', false,
-        'parentId', null,
-        'checklist', jsonb_build_array(
-          jsonb_build_object('id', 'tut_task_1', 'text', 'Press C to add a card', 'done', false),
-          jsonb_build_object('id', 'tut_task_2', 'text', 'Press G to add a group', 'done', false),
-          jsonb_build_object('id', 'tut_task_3', 'text', 'Connect two things with a drag', 'done', false)
-        ),
-        'createdAt', now()::text,
-        'updatedAt', now()::text
-      ),
-      jsonb_build_object(
-        'id', 'tut_connect',
-        'title', 'Connect ideas',
-        'content',
-          'Drag from one of the small dots on a card edge onto another card.'
-          || chr(10) || chr(10)
-          || 'The arrow picks the best side by itself. Click it to give the link a'
-          || chr(10)
-          || 'relationship, a colour, and a stroke.',
-        'image', jsonb_build_object('src', null, 'alt', ''),
-        'position', jsonb_build_object('x', 680, 'y', 0, 'width', 300, 'height', 240, 'zIndex', 3),
-        'style', jsonb_build_object(
-          'backgroundColor', '#ECFDF5', 'accentColor', '#16A34A', 'textColor', '#111827',
-          'borderColor', '#BBF7D0', 'borderWidth', 1, 'borderRadius', 12, 'shadow', true
-        ),
-        'tags', jsonb_build_array('start-here'),
-        'collapsed', false,
-        'parentId', null,
-        'checklist', jsonb_build_array(),
-        'createdAt', now()::text,
-        'updatedAt', now()::text
-      ),
-      jsonb_build_object(
-        'id', 'tut_share',
-        'title', 'Work on it together',
-        'content',
-          '**Share** in the top bar invites someone by email.'
-          || chr(10) || chr(10)
-          || '- **Can edit** — they can change anything'
-          || chr(10)
-          || '- **Can view** — they can look but not change'
-          || chr(10) || chr(10)
-          || 'You will see their cursor move, and you can click their avatar to'
-          || chr(10)
-          || 'follow along.',
-        'image', jsonb_build_object('src', null, 'alt', ''),
-        'position', jsonb_build_object('x', 0, 'y', 280, 'width', 300, 'height', 240, 'zIndex', 4),
-        'style', jsonb_build_object(
-          'backgroundColor', '#FFF7ED', 'accentColor', '#D97706', 'textColor', '#111827',
-          'borderColor', '#FED7AA', 'borderWidth', 1, 'borderRadius', 12, 'shadow', true
-        ),
-        'tags', jsonb_build_array('start-here'),
-        'collapsed', false,
-        'parentId', null,
-        'checklist', jsonb_build_array(),
-        'createdAt', now()::text,
-        'updatedAt', now()::text
-      ),
-      jsonb_build_object(
-        'id', 'tut_note',
-        'title', 'A note on cards',
-        'content',
-          'Card bodies are **Markdown**, so links, lists, tables and images all work.'
-          || chr(10) || chr(10)
-          || 'The arrow from *Connect ideas* is a real link between two cards, drawn'
-          || chr(10)
-          || 'from their positions rather than stored coordinates — so it follows'
-          || chr(10)
-          || 'them when you move them.',
-        'image', jsonb_build_object('src', null, 'alt', ''),
-        'position', jsonb_build_object('x', 340, 'y', 340, 'width', 300, 'height', 240, 'zIndex', 5),
-        'style', jsonb_build_object(
-          'backgroundColor', '#FDF2F8', 'accentColor', '#E11D48', 'textColor', '#111827',
-          'borderColor', '#FBCFE8', 'borderWidth', 1, 'borderRadius', 12, 'shadow', true
-        ),
-        'tags', jsonb_build_array('start-here'),
-        'collapsed', false,
-        'parentId', null,
-        'checklist', jsonb_build_array(),
-        'createdAt', now()::text,
-        'updatedAt', now()::text
-      )
-    ),
-    'connections', jsonb_build_array(
-      jsonb_build_object(
-        'id', 'tut_link_1',
-        'source', jsonb_build_object('kind', 'card', 'id', 'tut_basics'),
-        'target', jsonb_build_object('kind', 'card', 'id', 'tut_connect'),
-        'sourceAnchor', null,
-        'targetAnchor', null,
-        'label', 'leads to',
-        'relationshipType', 'leads to',
-        'style', jsonb_build_object(
-          'color', '#6366F1', 'width', 2, 'lineStyle', 'solid', 'routing', 'curved',
-          'arrowStart', 'none', 'arrowEnd', 'arrow', 'animated', false
-        )
-      ),
-      jsonb_build_object(
-        'id', 'tut_link_2',
-        'source', jsonb_build_object('kind', 'card', 'id', 'tut_share'),
-        'target', jsonb_build_object('kind', 'card', 'id', 'tut_welcome'),
-        'sourceAnchor', null,
-        'targetAnchor', null,
-        'label', 'next step',
-        'relationshipType', 'related to',
-        'style', jsonb_build_object(
-          'color', '#6366F1', 'width', 2, 'lineStyle', 'solid', 'routing', 'curved',
-          'arrowStart', 'none', 'arrowEnd', 'arrow', 'animated', false
-        )
-      )
-    )
-  );
-$$;
-
--- ----------------------------------------------------------------
--- Create it for one account
--- ----------------------------------------------------------------
-create or replace function public.create_tutorial_workspace(p_user_id uuid)
-returns text
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  new_document_id text;
-  first_page_id text;
-begin
-  -- One welcome workspace per account, ever. Re-running is harmless.
-  if exists (select 1 from public.documents where owner_id = p_user_id) then
-    select id into new_document_id
-    from public.documents
-    where owner_id = p_user_id
-    order by created_at
-    limit 1;
-    return new_document_id;
-  end if;
-
-  insert into public.documents (owner_id, title)
-  values (p_user_id, 'tutorial')
-  returning id into new_document_id;
-
-  -- trg_create_default_page has already made the first page by now.
-  select id into first_page_id
-  from public.pages
-  where document_id = new_document_id
-  order by ordinal
-  limit 1;
-
-  if first_page_id is null then
-    insert into public.pages (id, document_id, title, ordinal)
-    values ('page_tutorial_' || substr(md5(random()::text), 1, 8), new_document_id, 'Getting started', 0)
-    returning id into first_page_id;
-  else
-    update public.pages
-    set title = 'Getting started',
-        cards = (tutorial_page_content() -> 'cards'),
-        connections = (tutorial_page_content() -> 'connections')
-    where id = first_page_id;
-  end if;
-
-  return new_document_id;
-end;
-$$;
-
--- ----------------------------------------------------------------
--- Fire it on signup
--- ----------------------------------------------------------------
-create or replace function public.create_tutorial_workspace_for_new_user()
-returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  perform public.create_tutorial_workspace(new.id);
-  return new;
-end;
-$$;
-
-drop trigger if exists trg_create_tutorial_workspace on auth.users;
-create trigger trg_create_tutorial_workspace
-  after insert on auth.users
-  for each row
-  execute function public.create_tutorial_workspace_for_new_user();
-
--- ----------------------------------------------------------------
--- Backfill for accounts that signed up before this
--- ----------------------------------------------------------------
-do $$
-declare
-  u record;
-begin
-  for u in
-    select id from auth.users a
-    where not exists (select 1 from public.documents d where d.owner_id = a.id)
-  loop
-    perform public.create_tutorial_workspace(u.id);
-  end loop;
-end;
-$$;
-
--- =============================================================================
--- 20261001090600_profile_repair.sql
--- =============================================================================
--- 007 · Repair profiles, and make the repair repeatable
---
--- A profile row could end up with no name and no picture, and once it did it
--- stayed that way:
---
---   * `trg_sync_profile` only fires on INSERT or on an UPDATE of auth.users, so
---     an account whose metadata arrived after the row was written kept its
---     blanks until something happened to touch auth.users.
---   * The backfill in 003 ended in `on conflict (id) do nothing`, so it could
---     only ever create a profile, never correct one. Every account that already
---     had a blank row was permanently stuck showing as "Unknown user" with no
---     avatar — which is exactly what the share dialog and the presence avatars
---     were reporting.
---
--- This migration makes the profile sync a function that can be called on demand
--- and re-runs it for every account with an update, so a blank row is repaired
--- rather than skipped. To do it by hand later:
---
---   select public.profiles_needing_resync();   -- how many are blank
---   select public.resync_all_profiles();        -- fix them all
---
--- Both are safe to run at any time.
-
+-- `coalesce` covers both spellings of a Google profile: Supabase's own
+-- `avatar_url` and Google's `picture`.
 create or replace function public.sync_profile_for(p_user_id uuid)
 returns void
 language plpgsql
@@ -1058,9 +674,6 @@ begin
 end;
 $$;
 
--- The trigger now calls the function above, so signup, an email change and a
--- metadata change all take the same path — there is only one definition of what
--- a profile is derived from.
 create or replace function public.sync_profile()
 returns trigger
 language plpgsql
@@ -1073,9 +686,493 @@ begin
 end;
 $$;
 
+drop trigger if exists trg_sync_profile on auth.users;
+create trigger trg_sync_profile
+  after insert or update of email, raw_user_meta_data on auth.users
+  for each row
+  execute function public.sync_profile();
+
+grant execute on function public.sync_profile_for(uuid) to service_role;
+
+-- ----------------------------------------------------------------
+-- Bring existing accounts in line
+-- ----------------------------------------------------------------
+-- Both are repairs, not just creates, so a row that already exists with blanks
+-- is fixed rather than skipped.
+insert into public.user_settings (user_id)
+select u.id from auth.users u
+on conflict (user_id) do nothing;
+
+select public.sync_profile_for(id) from auth.users;
+
+-- =============================================================================
+-- 20261001000004_realtime.sql
+-- =============================================================================
+-- 004 · Realtime
+--
+-- The collaboration channels are private, which means Supabase routes every
+-- message through `realtime.messages` and the policies below decide who may
+-- listen and who may publish. Without them, anybody holding the public anon key
+-- could subscribe to somebody else's page.
+--
+--   page:<pageId>      page content, for the people on that page
+--   document:<docId>   presence, live pointers, "pages were added"
+--
+-- Both matter equally and the split is deliberate: page *content* is per page,
+-- because it is large and only the people looking at that page need it. A
+-- pointer belongs to the workspace, because it carries which page it is on and
+-- the person may move to another page without the channel changing.
+--
+-- Sending on one of these and listening on the other fails silently — the send
+-- succeeds and the message arrives in a room nobody is in. So the pairing is
+-- asserted by scripts/test-realtime-wiring.cjs against the client.
+
+-- ----------------------------------------------------------------
+-- The tables the client listens to
+-- ----------------------------------------------------------------
+do $$
+declare
+  t text;
+begin
+  foreach t in array array['documents', 'pages', 'user_settings'] loop
+    if not exists (
+      select 1 from pg_publication_tables
+      where pubname = 'supabase_realtime' and tablename = t
+    ) then
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    end if;
+  end loop;
+end;
+$$;
+
+-- ----------------------------------------------------------------
+-- Read the id out of the topic
+-- ----------------------------------------------------------------
+-- A channel's topic arrives as `realtime:page:<pageId>`.
+create or replace function public.realtime_page_id()
+returns text
+language sql
+stable
+as $$
+  select (regexp_match(realtime.topic(), 'page:([^:]+)$'))[1];
+$$;
+
+create or replace function public.realtime_document_id()
+returns text
+language sql
+stable
+as $$
+  select (regexp_match(realtime.topic(), 'document:([^:]+)$'))[1];
+$$;
+
+grant execute on function public.realtime_page_id() to authenticated;
+grant execute on function public.realtime_document_id() to authenticated;
+
+grant select, insert on realtime.messages to authenticated;
+
+-- ----------------------------------------------------------------
+-- Listening: anyone who could already read it over REST
+-- ----------------------------------------------------------------
+create policy "can receive page broadcasts"
+  on realtime.messages for select to authenticated
+  using (
+    public.realtime_page_id() is not null
+    and public.can_view_page(public.realtime_page_id())
+  );
+
+create policy "can receive document presence"
+  on realtime.messages for select to authenticated
+  using (
+    public.realtime_document_id() is not null
+    and public.can_view_document(public.realtime_document_id())
+  );
+
+-- ----------------------------------------------------------------
+-- Publishing: editors only, so a viewer cannot push a change
+-- ----------------------------------------------------------------
+create policy "can publish page broadcasts"
+  on realtime.messages for insert to authenticated
+  with check (
+    public.realtime_page_id() is not null
+    and public.can_edit_page(public.realtime_page_id())
+  );
+
+create policy "can publish document presence"
+  on realtime.messages for insert to authenticated
+  with check (
+    public.realtime_document_id() is not null
+    and public.can_edit_document(public.realtime_document_id())
+  );
+
+-- =============================================================================
+-- 20261001000005_app_functions.sql
+-- =============================================================================
+-- 005 · Application functions
+--
+-- The things the app needs that a plain table read cannot do.
+
+-- ----------------------------------------------------------------
+-- Find somebody by their email address
+-- ----------------------------------------------------------------
+-- The share dialog has to turn "sam@example.com" into a user id, but `profiles`
+-- is only readable for yourself and your co-collaborators, so a plain SELECT
+-- returns nothing. This is `security definer` and matches exactly, so it can be
+-- used to share *with* a known address without becoming a way to enumerate
+-- every account that exists.
+create or replace function public.find_profile_by_email(p_email text)
+returns table (id uuid, email text, full_name text, avatar_url text)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select p.id, p.email, p.full_name, p.avatar_url
+  from public.profiles p
+  where lower(p.email) = lower(trim(p_email))
+  limit 1;
+$$;
+
+revoke all on function public.find_profile_by_email(text) from public;
+grant execute on function public.find_profile_by_email(text) to authenticated;
+
+-- ----------------------------------------------------------------
+-- Import pages from a file
+-- ----------------------------------------------------------------
+-- One call, one transaction. Every page in the file is *added* to the
+-- workspace; nothing already there is read, written or deleted.
+--
+-- Additive, not "replace the document". A destructive import is a class of bug
+-- with no upside here: it is unsafe to run twice, unsafe to run over somebody
+-- else's work, and possible to get wrong by choosing the wrong option. This way
+-- importing the same file twice gives two independent sets of pages.
+--
+-- Atomic, which the client-driven version it replaced was not. That one did
+-- N inserts, then N deletes, then a read, from the browser — so a failure
+-- part-way through left a workspace holding both the old pages and some of the
+-- new ones, with no record of which state it was in. One statement inside one
+-- transaction is either the whole file or none of it.
+--
+-- The server also mints every id and rewires every reference, so the browser
+-- does none of that work and cannot get it wrong.
+create or replace function public.import_pages(
+  p_document_id text,
+  p_pages jsonb
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  inserted jsonb := '[]'::jsonb;
+  page jsonb;
+  page_id text;
+  next_ordinal integer;
+  new_cards jsonb;
+  new_groups jsonb;
+  new_connections jsonb;
+  card_map jsonb := '{}'::jsonb;
+  group_map jsonb := '{}'::jsonb;
+  conn_map jsonb := '{}'::jsonb;
+begin
+  ----------------------------------------------------------------
+  -- Permission, and it is not optional. Being `security definer` is what lets
+  -- this function insert at all; without an explicit check that would hand every
+  -- account a way to write into any workspace. It is the first statement, and it
+  -- uses the same helper the RLS policies use, so there is one definition of
+  -- "may edit this".
+  ----------------------------------------------------------------
+  if auth.uid() is null then
+    raise exception 'Not signed in.' using errcode = '42501';
+  end if;
+
+  if not public.can_edit_document(p_document_id) then
+    raise exception 'You do not have edit access to that workspace.' using errcode = '42501';
+  end if;
+
+  if p_pages is null
+     or jsonb_typeof(p_pages) <> 'array'
+     or jsonb_array_length(p_pages) = 0 then
+    raise exception 'The file contains no pages.' using errcode = '22023';
+  end if;
+
+  ----------------------------------------------------------------
+  -- Imported pages land after the existing ones, so an import never interleaves
+  -- with pages somebody is working on.
+  ----------------------------------------------------------------
+  select coalesce(max(p.ordinal), -1) + 1 into next_ordinal
+  from public.pages p
+  where p.document_id = p_document_id;
+
+  for page in select value from jsonb_array_elements(p_pages)
+  loop
+    -- A page id is a primary key across every workspace, so it is always minted
+    -- here rather than trusted from the file.
+    page_id := 'page_' || floor(extract(epoch from now()) * 1000)::text
+               || '_' || substr(md5(random()::text), 1, 6);
+
+    card_map := coalesce((
+      select jsonb_object_agg(
+        coalesce(c.value ->> 'id', ''),
+        'card_' || substr(md5(random()::text), 1, 10)
+      )
+      from jsonb_array_elements(coalesce(page -> 'cards', '[]'::jsonb)) c(value)
+    ), '{}'::jsonb);
+
+    group_map := coalesce((
+      select jsonb_object_agg(
+        coalesce(g.value ->> 'id', ''),
+        'group_' || substr(md5(random()::text), 1, 10)
+      )
+      from jsonb_array_elements(coalesce(page -> 'groups', '[]'::jsonb)) g(value)
+    ), '{}'::jsonb);
+
+    conn_map := coalesce((
+      select jsonb_object_agg(
+        coalesce(x.value ->> 'id', ''),
+        'connection_' || substr(md5(random()::text), 1, 10)
+      )
+      from jsonb_array_elements(coalesce(page -> 'connections', '[]'::jsonb)) x(value)
+    ), '{}'::jsonb);
+
+    ----------------------------------------------------------------
+    -- Cards: new id, and a new parentId looked up in the same map. Order is
+    -- preserved so the canvas draws them in the same sequence.
+    --
+    -- Only the reference fields are touched. An earlier draft rewrote ids by
+    -- casting each array to text and running `replace()` over it, which is
+    -- short and wrong: ids are opaque strings that also appear in places they
+    -- are not references — most obviously inside a card's Markdown body, which
+    -- `replace()` would silently corrupt.
+    ----------------------------------------------------------------
+    new_cards := coalesce((
+      select jsonb_agg(
+        c.value || jsonb_build_object(
+          'id', coalesce(card_map ->> (c.value ->> 'id'), c.value ->> 'id'),
+          'parentId', case
+            when c.value -> 'parentId' is null
+              or jsonb_typeof(c.value -> 'parentId') = 'null'
+              then null
+            else coalesce(card_map ->> (c.value ->> 'parentId'), c.value ->> 'parentId')
+          end
+        )
+        order by c.ord
+      )
+      from jsonb_array_elements(coalesce(page -> 'cards', '[]'::jsonb))
+           with ordinality as c(value, ord)
+    ), '[]'::jsonb);
+
+    ----------------------------------------------------------------
+    -- Groups: new id, and both membership lists re-pointed. A member that is not
+    -- on the page is dropped rather than left pointing at a card that is not
+    -- here — the client would drop it on read anyway, and filtering keeps the
+    -- stored row honest.
+    --
+    -- `m` is the table alias, so `m` alone is a row and `m.id` is the value.
+    -- Writing `->> m` is a `jsonb ->> record`, which Postgres rejects.
+    ----------------------------------------------------------------
+    new_groups := coalesce((
+      select jsonb_agg(
+        g.value || jsonb_build_object(
+          'id', coalesce(group_map ->> (g.value ->> 'id'), g.value ->> 'id'),
+          'memberCardIds', coalesce((
+            select jsonb_agg(coalesce(card_map ->> m.id, m.id) order by m.ord)
+            from jsonb_array_elements_text(
+              coalesce(g.value -> 'memberCardIds', '[]'::jsonb)
+            ) with ordinality as m(id, ord)
+            where card_map ? m.id
+          ), '[]'::jsonb),
+          'memberGroupIds', coalesce((
+            select jsonb_agg(coalesce(group_map ->> m.id, m.id) order by m.ord)
+            from jsonb_array_elements_text(
+              coalesce(g.value -> 'memberGroupIds', '[]'::jsonb)
+            ) with ordinality as m(id, ord)
+            where group_map ? m.id
+          ), '[]'::jsonb)
+        )
+        order by g.ord
+      )
+      from jsonb_array_elements(coalesce(page -> 'groups', '[]'::jsonb))
+           with ordinality as g(value, ord)
+    ), '[]'::jsonb);
+
+    ----------------------------------------------------------------
+    -- Connections: new id, and each endpoint re-pointed through the map for
+    -- whichever kind it names. A connection to something absent is dropped,
+    -- because an arrow to nothing is not a link.
+    ----------------------------------------------------------------
+    new_connections := coalesce((
+      select jsonb_agg(
+        x.value || jsonb_build_object(
+          'id', coalesce(conn_map ->> (x.value ->> 'id'), x.value ->> 'id'),
+          'source', (x.value -> 'source') || jsonb_build_object(
+            'id', coalesce(
+              case when x.value -> 'source' ->> 'kind' = 'group'
+                then group_map ->> (x.value -> 'source' ->> 'id')
+                else card_map ->> (x.value -> 'source' ->> 'id')
+              end,
+              x.value -> 'source' ->> 'id'
+            )
+          ),
+          'target', (x.value -> 'target') || jsonb_build_object(
+            'id', coalesce(
+              case when x.value -> 'target' ->> 'kind' = 'group'
+                then group_map ->> (x.value -> 'target' ->> 'id')
+                else card_map ->> (x.value -> 'target' ->> 'id')
+              end,
+              x.value -> 'target' ->> 'id'
+            )
+          )
+        )
+        order by x.ord
+      )
+      from jsonb_array_elements(coalesce(page -> 'connections', '[]'::jsonb))
+           with ordinality as x(value, ord)
+      where (case when x.value -> 'source' ->> 'kind' = 'group'
+                   then group_map ? (x.value -> 'source' ->> 'id')
+                   else card_map ? (x.value -> 'source' ->> 'id') end)
+        and (case when x.value -> 'target' ->> 'kind' = 'group'
+                    then group_map ? (x.value -> 'target' ->> 'id')
+                    else card_map ? (x.value -> 'target' ->> 'id') end)
+    ), '[]'::jsonb);
+
+    insert into public.pages (
+      id, document_id, title, ordinal, position, viewport,
+      cards, groups, connections, version
+    )
+    values (
+      page_id,
+      p_document_id,
+      coalesce(nullif(page ->> 'title', ''), 'Imported page'),
+      next_ordinal,
+      coalesce(page -> 'position', '{"x":0,"y":0,"width":1920,"height":1080,"zIndex":0}'::jsonb),
+      coalesce(page -> 'viewport', '{"x":0,"y":0,"zoom":1}'::jsonb),
+      new_cards,
+      new_groups,
+      new_connections,
+      0
+    );
+
+    next_ordinal := next_ordinal + 1;
+    inserted := inserted || jsonb_build_object(
+      'id', page_id,
+      'title', coalesce(nullif(page ->> 'title', ''), 'Imported page')
+    );
+  end loop;
+
+  return inserted;
+end;
+$$;
+
+grant execute on function public.import_pages(text, jsonb) to authenticated;
+
+-- ----------------------------------------------------------------
+-- A welcome workspace for every account
+-- ----------------------------------------------------------------
+-- Created by the database, not the client, so it exists no matter which entry
+-- point made the account. Two pages, and between them they use every part of
+-- the data model: groups, a card inside a group, links between groups and cards,
+-- every relationship, all three strokes, all three routings, several arrowheads,
+-- and checklists.
+--
+-- A first version was five cards in a row, which demonstrated that cards exist
+-- and nothing else — somebody reading it could not tell that grouping, page
+-- lists or connection styling were features rather than accidents.
+create or replace function public.create_tutorial_workspace(p_user_id uuid)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  new_document_id text;
+  first_page_id text;
+begin
+  -- One welcome workspace per account, ever. Re-running is harmless.
+  if exists (select 1 from public.documents where owner_id = p_user_id) then
+    select id into new_document_id
+    from public.documents
+    where owner_id = p_user_id
+    order by created_at
+    limit 1;
+    return new_document_id;
+  end if;
+
+  insert into public.documents (owner_id, title, accent, icon)
+  values (p_user_id, 'tutorial', 'violet', 'graduation-cap')
+  returning id into new_document_id;
+
+  -- trg_create_default_page has already made the first page by now.
+  select id into first_page_id
+  from public.pages
+  where document_id = new_document_id
+  order by ordinal
+  limit 1;
+
+  update public.pages
+  set title = 'Start here',
+      cards = tutorial_page_one() -> 'cards',
+      groups = tutorial_page_one() -> 'groups',
+      connections = tutorial_page_one() -> 'connections',
+      viewport = '{"x":-60,"y":-40,"zoom":0.8}'::jsonb
+  where id = first_page_id;
+
+  insert into public.pages (
+    id, document_id, title, ordinal, position, viewport, cards, groups, connections
+  )
+  values (
+    'page_tutorial_maps',
+    new_document_id,
+    'Making maps',
+    1,
+    '{"x":0,"y":0,"width":1920,"height":1080,"zIndex":0}'::jsonb,
+    '{"x":-40,"y":-40,"zoom":0.8}'::jsonb,
+    tutorial_page_two() -> 'cards',
+    tutorial_page_two() -> 'groups',
+    tutorial_page_two() -> 'connections'
+  );
+
+  return new_document_id;
+end;
+$$;
+
+create or replace function public.create_tutorial_workspace_for_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  perform public.create_tutorial_workspace(new.id);
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_create_tutorial_workspace on auth.users;
+create trigger trg_create_tutorial_workspace
+  after insert on auth.users
+  for each row
+  execute function public.create_tutorial_workspace_for_new_user();
+
+-- Accounts that already exist and have no workspace at all.
+do $$
+declare
+  u record;
+begin
+  for u in
+    select a.id from auth.users a
+    where not exists (select 1 from public.documents d where d.owner_id = a.id)
+  loop
+    perform public.create_tutorial_workspace(u.id);
+  end loop;
+end;
+$$;
+
+-- ----------------------------------------------------------------
+-- Admin repairs
+-- ----------------------------------------------------------------
 -- How many accounts would change if they were re-derived. A diagnostic, so you
--- can look before changing anything. `language sql`, because this body really is
--- a single query.
+-- can look before changing anything.
 create or replace function public.profiles_needing_resync()
 returns integer
 language sql
@@ -1092,15 +1189,7 @@ as $$
      );
 $$;
 
-/**
- * Re-derive every profile from auth.users. Returns how many it touched.
- *
- * PL/pgSQL, not `language sql`: the body is a `declare` / `begin` / `end` block
- * with an `into` and a `perform`, none of which the SQL-language parser accepts.
- * Postgres rejects that combination at parse time, before it reads the body, so
- * a mismatched `language` here is a hard failure with a misleading message —
- * "syntax error at or near integer" points at the `declare`, not at the cause.
- */
+-- Re-derive every profile. Returns how many it touched. Safe to run whenever.
 create or replace function public.resync_all_profiles()
 returns integer
 language plpgsql
@@ -1116,145 +1205,27 @@ begin
 end;
 $$;
 
-grant execute on function public.sync_profile_for(uuid) to service_role;
 grant execute on function public.profiles_needing_resync() to service_role;
 grant execute on function public.resync_all_profiles() to service_role;
 
--- Repair the rows that are already wrong. An update, not a skip.
-select public.sync_profile_for(id) from auth.users;
-
 -- =============================================================================
--- 20261001090700_app_name.sql
+-- 20261001000006_tutorial_content.sql
 -- =============================================================================
--- 008 · Name the app in its own welcome content
+-- 006 · The welcome content
 --
--- 005 shipped the tutorial workspace with the old product name in the card
--- titles. Editing 005 in place would be wrong if it has already been applied —
--- Postgres would never re-run it — so the text is corrected here instead, and
--- 005 is left as the immutable record of what first shipped.
---
--- The rename is deliberately narrow: only pages belonging to a workspace still
--- called `tutorial` that still carry the old copy. A tutorial the user has
--- renamed, deleted or edited is left exactly as they left it.
-
-update public.pages p
-set title = 'Welcome to Map204',
-    cards = jsonb_set(
-      jsonb_set(
-        cards,
-        '{0,title}',
-        '"Welcome to Map204"'::jsonb
-      ),
-      '{0,content}',
-      to_jsonb('This workspace is yours to change. Rename it, delete it, or add pages beside it.' || chr(10) || chr(10) || 'Everything you do is saved to your account and shared with whoever you invite.'::text)
-    )
-where exists (
-        select 1 from public.documents d
-        where d.id = p.document_id
-          and d.title = 'tutorial'
-      )
-  and p.cards->0->>'id' = 'tut_welcome'
-  and p.cards->0->>'title' = 'Welcome to ClassCards';
-
--- =============================================================================
--- 20261001090800_workspace_look.sql
--- =============================================================================
--- 009 · Give every workspace a colour and an icon
---
--- A workspace is a subject, and subjects are told apart by colour long before
--- they are told apart by name. The workspace list was a grid of identical grey
--- tiles, so twenty courses looked like twenty of the same thing.
---
--- Both values are chosen by the person who owns the workspace and are stored
--- per workspace, so the tile in the list and the dot beside the title in the
--- canvas chrome always agree.
---
--- The colour is a *token name*, not a hex value, for the same reason every
--- other colour in this app is: the theme owns the palette, so a workspace
--- recolours itself when the reader switches to dark mode instead of carrying a
--- fixed colour that reads wrong on the new background.
-
-alter table public.documents
-  add column if not exists accent text not null default 'indigo';
-
-alter table public.documents
-  add column if not exists icon text not null default 'layout-grid';
-
--- Both are constrained to the sets the client can actually draw. A check
--- constraint is the only thing that stops a bad value reaching the browser,
--- where an unknown icon would render as an empty box and an unknown accent
--- would fall back to a colour nobody chose.
---
--- The lists here are the single source of truth for what is offered; the client
--- reads them from `src/utils/workspaceLook.ts`, which is generated to match.
-alter table public.documents
-  drop constraint if exists documents_accent_check;
-alter table public.documents
-  add constraint documents_accent_check
-  check (accent in (
-    'indigo', 'violet', 'blue', 'teal', 'green', 'amber', 'rose', 'slate'
-  ));
-
-alter table public.documents
-  drop constraint if exists documents_icon_check;
-alter table public.documents
-  add constraint documents_icon_check
-  check (icon in (
-    'layout-grid', 'book-open', 'graduation-cap', 'flask-conical', 'globe',
-    'calculator', 'microscope', 'languages', 'palette', 'music', 'code',
-    'map', 'lightbulb', 'presentation', 'brain', 'library'
-  ));
-
--- Give the workspaces that already exist a colour, so opening the list after
--- this migration does not show a wall of identical indigo tiles. Chosen by
--- position rather than at random, so the same workspace keeps its colour.
-with numbered as (
-  select
-    id,
-    row_number() over (order by created_at, id) as n
-  from public.documents
-)
-update public.documents d
-set accent = case
-      when (numbered.n - 1) % 8 = 0 then 'indigo'
-      when (numbered.n - 1) % 8 = 1 then 'teal'
-      when (numbered.n - 1) % 8 = 2 then 'amber'
-      when (numbered.n - 1) % 8 = 3 then 'rose'
-      when (numbered.n - 1) % 8 = 4 then 'green'
-      when (numbered.n - 1) % 8 = 5 then 'violet'
-      when (numbered.n - 1) % 8 = 6 then 'blue'
-      else 'slate'
-    end
-from numbered
-where numbered.id = d.id;
-
--- =============================================================================
--- 20261001090900_tutorial_depth.sql
--- =============================================================================
--- 010 Â· A tutorial that shows what the app can actually do
---
--- The first version of the welcome workspace was five cards in a row. That
--- demonstrated that cards exist and nothing else: no second page, no groups, no
--- variety in how links behave. Someone reading it could not tell that grouping,
--- page lists or connection styling were features rather than accidents.
---
--- So the tutorial is now two pages, and between them they use every part of the
--- data model the app has:
---
---   * page 1 "Start here"    â€” groups, a card grid, links between cards,
---                               links between a card and a group, and one of
---                               each relationship / stroke / routing / arrowhead
---   * page 2 "Making maps"   â€” a worked example: a real argument built as a
---                               chain of claims, with checklists and a
---                               contradicts link
---
--- Like 007, this replaces content rather than adding to it, and it only touches
--- a tutorial nobody has edited. Editing 005 in place would do nothing on any
--- database where 005 has already been applied.
+-- Kept apart from 005 because it is content, not behaviour: two large blocks of
+-- JSONB with no logic in them. Separating them means a change to the wording is
+-- a change to one obvious file, and a reader looking for how import works does
+-- not have to wade through a worked example of a political theory map.
 
 -- ----------------------------------------------------------------
--- Page 1 Â· Start here
+-- Page 1 · Start here
 -- ----------------------------------------------------------------
+-- Between the two pages this exercises: groups, a card inside a group, links
+-- between cards, links between a card and a group, every relationship that
+-- appears in RELATIONSHIP_PRESETS, all three line styles, all three routings,
+-- several arrowheads, and checklists. scripts/test-tutorial-content.cjs asserts
+-- that, so the tutorial cannot quietly lose its point by being edited.
 create or replace function public.tutorial_page_one()
 returns jsonb
 language sql
@@ -1318,7 +1289,7 @@ as $$
         'content',
           'A group is a labelled box. Drop cards inside it and they belong to it'
           || chr(10)
-          || 'together â€” useful for a section of an argument, or one week of notes.'
+          || 'together — useful for a section of an argument, or one week of notes.'
           || chr(10) || chr(10)
           || 'Groups can be linked to each other and to cards, so a box can be an'
           || chr(10)
@@ -1346,9 +1317,9 @@ as $$
           || chr(10)
           || 'relationship, a colour, and a stroke.'
           || chr(10) || chr(10)
-          || 'The three cards to the right are linked three different ways â€” a'
+          || 'The three cards below are linked three different ways — a solid'
           || chr(10)
-          || 'solid **supports**, a dashed **depends on**, and a dotted **contradicts**.',
+          || '**supports**, a dashed **part of**, and a dotted **contradicts**.',
         'image', jsonb_build_object('src', null, 'alt', ''),
         'position', jsonb_build_object('x', 440, 'y', 0, 'width', 340, 'height', 340, 'zIndex', 3),
         'style', jsonb_build_object(
@@ -1419,9 +1390,9 @@ as $$
         'content',
           '**Share** in the top bar invites someone by email.'
           || chr(10) || chr(10)
-          || '- **Can edit** â€” they can change anything'
+          || '- **Can edit** — they can change anything'
           || chr(10)
-          || '- **Can view** â€” they can look but not change'
+          || '- **Can view** — they can look but not change'
           || chr(10) || chr(10)
           || 'You will see their cursor move, and you can click their avatar to'
           || chr(10)
@@ -1449,7 +1420,7 @@ as $$
           || chr(10)
           || 'to add, rename, reorder and delete them.'
           || chr(10) || chr(10)
-          || 'There is a second page here â€” **Making maps** â€” with a worked example'
+          || 'There is a second page here — **Making maps** — with a worked example'
           || chr(10)
           || 'of the whole thing put together.',
         'image', jsonb_build_object('src', null, 'alt', ''),
@@ -1584,8 +1555,11 @@ as $$
 $$;
 
 -- ----------------------------------------------------------------
--- Page 2 Â· Making maps
+-- Page 2 · Making maps
 -- ----------------------------------------------------------------
+-- A worked example rather than a feature list: a claim, the evidence for it, the
+-- strongest objection, the reply, and what is still missing. It is the shape an
+-- essay actually takes, which is the point.
 create or replace function public.tutorial_page_two()
 returns jsonb
 language sql
@@ -1657,7 +1631,7 @@ as $$
         'content',
           'Write down the best argument against you. If you cannot, you have not'
           || chr(10)
-          || 'understood the topic yet â€” and neither has your reader.',
+          || 'understood the topic yet — and neither has your reader.',
         'image', jsonb_build_object('src', null, 'alt', ''),
         'position', jsonb_build_object('x', 400, 'y', 0, 'width', 300, 'height', 220, 'zIndex', 3),
         'style', jsonb_build_object(
@@ -1785,8 +1759,8 @@ as $$
           'arrowStart', 'none', 'arrowEnd', 'triangle', 'animated', false
         )
       ),
-      -- Card into a group, the other way round from the one above: a card that
-      -- is a *part of* the section it sits in.
+      -- Card into a group, the other way round: a card that is a *part of* the
+      -- section it sits in.
       jsonb_build_object(
         'id', 'tut2_link_objection_part',
         'source', jsonb_build_object('kind', 'card', 'id', 'tut2_objection'),
@@ -1827,509 +1801,89 @@ as $$
   );
 $$;
 
--- ----------------------------------------------------------------
--- Apply it
--- ----------------------------------------------------------------
--- Page 1: only if it is still the untouched tutorial from 005. The `->0->>'id'`
--- test is the fingerprint of "we wrote this and nobody has touched it since".
-do $$
-declare
-  target_page text;
-begin
-  for target_page in
-    select p.id
-    from public.pages p
-    join public.documents d on d.id = p.document_id
-    where d.title = 'tutorial'
-      and p.ordinal = 0
-      and p.cards->0->>'id' = 'tut_welcome'
-  loop
-    update public.pages
-    set title = 'Start here',
-        cards = tutorial_page_one() -> 'cards',
-        groups = tutorial_page_one() -> 'groups',
-        connections = tutorial_page_one() -> 'connections',
-        viewport = '{"x":-60,"y":-40,"zoom":0.8}'::jsonb
-    where id = target_page;
-  end loop;
-end;
-$$;
-
--- Page 2: only where it does not already exist, so re-running is harmless.
-insert into public.pages (id, document_id, title, ordinal, position, viewport, cards, groups, connections)
-select
-  'page_tutorial_maps',
-  d.id,
-  'Making maps',
-  1,
-  '{"x":0,"y":0,"width":1920,"height":1080,"zIndex":0}'::jsonb,
-  '{"x":-40,"y":-40,"zoom":0.8}'::jsonb,
-  tutorial_page_two() -> 'cards',
-  tutorial_page_two() -> 'groups',
-  tutorial_page_two() -> 'connections'
-from public.documents d
-where d.title = 'tutorial'
-  and not exists (
-    select 1 from public.pages p where p.id = 'page_tutorial_maps'
-  );
-
--- =============================================================================
--- 20261001091000_delete_and_cascade.sql
--- =============================================================================
--- 010 · Make a workspace deletable again
---
--- ----------------------------------------------------------------
--- What was broken
--- ----------------------------------------------------------------
--- `pages.document_id` is `on delete cascade`, so deleting a workspace deletes
--- its pages. But `trg_prevent_last_page_delete` fires on that cascade too, and
--- the workspace's only page vetoes its own removal:
---
---   DELETE /documents?id=eq.…            400 Bad Request
---   P0001  A workspace must keep at least one page. Add another page before
---          deleting this one.
---
--- The rule is right — a workspace you can still open must have a page — but it
--- is the wrong rule for a workspace on its way out. The trigger could not tell
--- the two cases apart, so it applied the stricter one to both and made every
--- workspace undeletable.
---
--- ----------------------------------------------------------------
--- Why not fix it in the client
--- ----------------------------------------------------------------
--- The tempting workaround is to delete the pages first, then the workspace. That
--- would leave the rule in the database, which is where it belongs, but it
--- spreads one invariant across two writers: anything else deleting a workspace
--- would hit the same wall. The database should know the difference.
---
--- ----------------------------------------------------------------
--- How the two cases are told apart
--- ----------------------------------------------------------------
--- `pg_trigger_depth()`. A row deleted by a cascade runs with a deeper trigger
--- stack than one deleted by a direct statement, because the foreign key's own
--- trigger fires first. This is not a guess about depth: a `document_collaborators`
--- row also cascades, so the stack varies with the shape of the delete, which is
--- exactly why the check is "deeper than a plain delete" rather than a fixed
--- number.
---
--- `security definer` is also added here, and it matters. Without it the
--- trigger's own `select … from pages` runs as the calling user and is subject to
--- the `pages` RLS policies. A collaborator who can read the pages but holds only
--- `viewer` on the document could see zero rows from inside the trigger, and the
--- rule would then veto an ordinary page delete — the failure the trigger exists
--- to prevent, caused by the trigger itself. As a definer function it sees the
--- same rows the constraint is about.
---
--- The error code becomes `check_violation` (23514) rather than the default
--- `raise_exception` (P0001), so the client can tell "you asked for something
--- impossible" apart from "the server broke".
-
-create or replace function public.prevent_deleting_last_page()
-returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  -- Removed as part of deleting the workspace that contains it, so that
-  -- workspace is going too and will not be left without a page.
-  if pg_trigger_depth() > 1 then
-    return old;
-  end if;
-
-  if not exists (
-    select 1 from public.pages p
-    where p.document_id = old.document_id
-      and p.id <> old.id
-  ) then
-    raise exception
-      'A workspace must keep at least one page. Add another page before deleting this one.'
-      using errcode = 'check_violation';
-  end if;
-
-  return old;
-end;
-$$;
-
--- =============================================================================
--- 20261001091100_profile_policy.sql
--- =============================================================================
--- 011 · Give a profile a SECURITY DEFINER helper, so its policy stops reading
---        another RLS table
---
--- ----------------------------------------------------------------
--- The rule that was broken
--- ----------------------------------------------------------------
--- 001 states the rule this whole schema runs on:
---
---   **a policy never queries another table that also has RLS.**
---
--- ...because the first version did, and Postgres answered every request with
---   42P17  infinite recursion detected in policy for relation "documents"
--- which is not a permissions problem, it is a dead application.
---
--- Every other cross-table check in the schema honours that, through a
--- `security definer` helper: `can_view_document`, `can_edit_document`,
--- `can_view_page`, `can_edit_page`.
---
--- The `profiles` read policy did not:
---
---   create policy "can read profile" on public.profiles for select
---   using (
---     id = auth.uid()
---     or exists (
---       select 1 from public.document_collaborators mine
---       join public.document_collaborators theirs
---         on theirs.document_id = mine.document_id
---       where mine.user_id = auth.uid() and theirs.user_id = profiles.id
---     )
---   );
---
--- `document_collaborators` has RLS. So this policy's subquery is itself filtered
--- by `can_view_document`, and whether a profile is visible ends up depending on a
--- second, independent evaluation of the collaborator rules. It happens not to
--- recurse, because the helpers terminate the chain — but it is the shape that
--- caused 42P17 the first time, and it is one policy edit away from it again.
---
--- ----------------------------------------------------------------
--- The fix
--- ----------------------------------------------------------------
--- The question "do these two people share a workspace?" moves into a
--- `security definer` function, like every other cross-table question here. As a
--- definer it reads the tables with the owner's rights, so RLS does not re-enter
--- and the policy is a plain function call.
-
-create or replace function public.shares_document_with(p_a uuid, p_b uuid)
-returns boolean
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  -- One self-join is the whole question: a row for each of the two people on a
-  -- workspace they share. The owner counts, because `add_document_owner` gives
-  -- them a row too, and a person compared with themselves is a row joining
-  -- itself — which is why the caller checks `id = auth.uid()` separately.
-  select exists (
-    select 1
-    from public.document_collaborators mine
-    join public.document_collaborators theirs
-      on theirs.document_id = mine.document_id
-    where mine.user_id = p_a and theirs.user_id = p_b
-  );
-$$;
-
-grant execute on function public.shares_document_with(uuid, uuid) to authenticated;
-
-drop policy if exists "can read profile" on public.profiles;
-
-create policy "can read profile"
-  on public.profiles for select
-  using (
-    id = auth.uid()
-    or public.shares_document_with(auth.uid(), profiles.id)
-  );
-
--- =============================================================================
--- 20261001091200_import_pages.sql
--- =============================================================================
--- 012 · Import pages in one round trip, atomically, additively
---
--- ----------------------------------------------------------------
--- What this replaces
--- ----------------------------------------------------------------
--- The import used to be driven entirely from the browser:
---
---   for each page:  POST /rest/v1/pages
---   then:           DELETE /rest/v1/pages?id=eq.…   (the pages being replaced)
---   then:           GET  /rest/v1/pages             (read it back)
---
--- That is N + N + 1 requests, and it is **not atomic**. If the fourth insert
--- failed, the workspace was left holding three new pages *and* all of the old
--- ones, with no record of which state was intended. The client could only report
--- "something went wrong" and leave the user to work out what they now had.
---
--- The client also had to do the work: parse the file, renumber every id, hold
--- the whole document in memory, and reconcile the result. More code in the
--- client than the task needs.
---
--- ----------------------------------------------------------------
--- What this does instead
--- ----------------------------------------------------------------
--- One call, one transaction, one outcome:
---
---   select public.import_pages('<document id>', '[…]'::jsonb);
---
--- Postgres inserts the pages or it does not. A failure leaves the workspace
--- exactly as it was — the property the old version lacked.
---
--- ----------------------------------------------------------------
--- Additive by design: pages are added, never overwritten
--- ----------------------------------------------------------------
--- There is no "replace this workspace" any more. Every page in the file becomes
--- a new page in the workspace, and nothing already there is touched. That makes
--- import safe to run twice, safe to run over somebody else's work, and
--- impossible to get wrong by picking the wrong option — a destructive import is
--- a class of bug this no longer has.
---
--- ----------------------------------------------------------------
--- Permissions
--- ----------------------------------------------------------------
--- This function is `security definer`, so it bypasses RLS. The check inside it is
--- therefore the *only* thing between a signed-in user and a write to a workspace
--- they do not hold, so it is explicit and raises rather than inserting nothing.
--- Getting it wrong would hand every account a way to write into any workspace,
--- so it is the first statement and uses the same helper the policies use.
---
--- ----------------------------------------------------------------
--- On rewriting the ids
--- ----------------------------------------------------------------
--- Every id is re-issued here, and so is every reference to one:
---
---   cards[].id, cards[].parentId
---   groups[].id, groups[].memberCardIds, groups[].memberGroupIds
---   connections[].id, connections[].source.id, connections[].target.id
---
--- An earlier draft did this by casting each array to text, running `replace()`
--- over the old id, and casting back. That is short and it is wrong: the ids are
--- opaque strings that also appear in places they are not references — most
--- obviously inside a card's Markdown body, which `replace()` would rewrite and
--- silently corrupt. A card id is also not guaranteed to be free of being a
--- substring of another, so one rewrite could truncate another.
---
--- So each array is rebuilt field by field, touching the reference fields and
--- nothing else. Every other key — content, style, position, tags — is copied
--- through untouched, which is what "reproduce the document" requires.
-
-create or replace function public.import_pages(
-  p_document_id text,
-  p_pages jsonb
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  actor uuid := auth.uid();
-  inserted jsonb := '[]'::jsonb;
-  page jsonb;
-  page_id text;
-  next_ordinal integer;
-  new_cards jsonb;
-  new_groups jsonb;
-  new_connections jsonb;
-  card_map jsonb := '{}'::jsonb;
-  group_map jsonb := '{}'::jsonb;
-  conn_map jsonb := '{}'::jsonb;
-begin
-  ----------------------------------------------------------------
-  -- Permission. Not optional: the definer rights that let this insert at all
-  -- are exactly what would make an unchecked version an open door.
-  ----------------------------------------------------------------
-  if actor is null then
-    raise exception 'Not signed in.' using errcode = '42501';
-  end if;
-
-  if not public.can_edit_document(p_document_id) then
-    raise exception 'You do not have edit access to that workspace.' using errcode = '42501';
-  end if;
-
-  if p_pages is null
-     or jsonb_typeof(p_pages) <> 'array'
-     or jsonb_array_length(p_pages) = 0 then
-    raise exception 'The file contains no pages.' using errcode = '22023';
-  end if;
-
-  ----------------------------------------------------------------
-  -- Imported pages land *after* the existing ones, so an import never
-  -- interleaves with pages somebody is working on.
-  ----------------------------------------------------------------
-  select coalesce(max(p.ordinal), -1) + 1 into next_ordinal
-  from public.pages p
-  where p.document_id = p_document_id;
-
-  for page in select value from jsonb_array_elements(p_pages)
-  loop
-    -- A page id is a primary key across every workspace, so it is always minted
-    -- here rather than trusted from the file.
-    page_id := 'page_' || floor(extract(epoch from now()) * 1000)::text
-               || '_' || substr(md5(random()::text), 1, 6);
-
-    card_map := coalesce((
-      select jsonb_object_agg(coalesce(c.value ->> 'id', ''), 'card_' || substr(md5(random()::text), 1, 10))
-      from jsonb_array_elements(coalesce(page -> 'cards', '[]'::jsonb)) c(value)
-    ), '{}'::jsonb);
-
-    group_map := coalesce((
-      select jsonb_object_agg(coalesce(g.value ->> 'id', ''), 'group_' || substr(md5(random()::text), 1, 10))
-      from jsonb_array_elements(coalesce(page -> 'groups', '[]'::jsonb)) g(value)
-    ), '{}'::jsonb);
-
-    conn_map := coalesce((
-      select jsonb_object_agg(coalesce(x.value ->> 'id', ''), 'connection_' || substr(md5(random()::text), 1, 10))
-      from jsonb_array_elements(coalesce(page -> 'connections', '[]'::jsonb)) x(value)
-    ), '{}'::jsonb);
-
-    ----------------------------------------------------------------
-    -- Cards: new id, and a new parentId that is looked up in the same map.
-    -- Order is preserved so the canvas draws them in the same sequence.
-    ----------------------------------------------------------------
-    new_cards := coalesce((
-      select jsonb_agg(
-        c.value || jsonb_build_object(
-          'id', coalesce(card_map ->> (c.value ->> 'id'), c.value ->> 'id'),
-          'parentId', case
-            when c.value -> 'parentId' is null or jsonb_typeof(c.value -> 'parentId') = 'null'
-              then null
-            else coalesce(card_map ->> (c.value ->> 'parentId'), c.value ->> 'parentId')
-          end
-        )
-        order by c.ord
-      )
-      from jsonb_array_elements(coalesce(page -> 'cards', '[]'::jsonb))
-           with ordinality as c(value, ord)
-    ), '[]'::jsonb);
-
-    ----------------------------------------------------------------
-    -- Groups: new id, and both membership lists re-pointed. A member that is not
-    -- in the page is dropped rather than left pointing at a card that is not
-    -- here — the client would drop it on read anyway, and an explicit filter
-    -- keeps the stored row honest.
-    ----------------------------------------------------------------
-    new_groups := coalesce((
-      select jsonb_agg(
-        g.value || jsonb_build_object(
-          'id', coalesce(group_map ->> (g.value ->> 'id'), g.value ->> 'id'),
-          'memberCardIds', coalesce((
-            select jsonb_agg(coalesce(card_map ->> m.id, m.id) order by m.ord)
-            from jsonb_array_elements_text(
-              coalesce(g.value -> 'memberCardIds', '[]'::jsonb)
-            ) with ordinality as m(id, ord)
-            where card_map ? m.id
-          ), '[]'::jsonb),
-          'memberGroupIds', coalesce((
-            select jsonb_agg(coalesce(group_map ->> m.id, m.id) order by m.ord)
-            from jsonb_array_elements_text(
-              coalesce(g.value -> 'memberGroupIds', '[]'::jsonb)
-            ) with ordinality as m(id, ord)
-            where group_map ? m.id
-          ), '[]'::jsonb)
-        )
-        order by g.ord
-      )
-      from jsonb_array_elements(coalesce(page -> 'groups', '[]'::jsonb))
-           with ordinality as g(value, ord)
-    ), '[]'::jsonb);
-
-    ----------------------------------------------------------------
-    -- Connections: new id, and each endpoint re-pointed through the map for
-    -- whichever kind it names. A connection to something that is not on the
-    -- page is dropped, because an arrow to nothing is not a link.
-    ----------------------------------------------------------------
-    new_connections := coalesce((
-      select jsonb_agg(
-        x.value || jsonb_build_object(
-          'id', coalesce(conn_map ->> (x.value ->> 'id'), x.value ->> 'id'),
-          'source', (x.value -> 'source') || jsonb_build_object(
-            'id', coalesce(
-              case when x.value -> 'source' ->> 'kind' = 'group'
-                then group_map ->> (x.value -> 'source' ->> 'id')
-                else card_map ->> (x.value -> 'source' ->> 'id')
-              end,
-              x.value -> 'source' ->> 'id'
-            )
-          ),
-          'target', (x.value -> 'target') || jsonb_build_object(
-            'id', coalesce(
-              case when x.value -> 'target' ->> 'kind' = 'group'
-                then group_map ->> (x.value -> 'target' ->> 'id')
-                else card_map ->> (x.value -> 'target' ->> 'id')
-              end,
-              x.value -> 'target' ->> 'id'
-            )
-          )
-        )
-        order by x.ord
-      )
-      from jsonb_array_elements(coalesce(page -> 'connections', '[]'::jsonb))
-           with ordinality as x(value, ord)
-      where (
-        case when x.value -> 'source' ->> 'kind' = 'group'
-          then group_map ? (x.value -> 'source' ->> 'id')
-          else card_map ? (x.value -> 'source' ->> 'id')
-        end
-      ) and (
-        case when x.value -> 'target' ->> 'kind' = 'group'
-          then group_map ? (x.value -> 'target' ->> 'id')
-          else card_map ? (x.value -> 'target' ->> 'id')
-        end
-      )
-    ), '[]'::jsonb);
-
-    insert into public.pages (
-      id, document_id, title, ordinal, position, viewport,
-      cards, groups, connections, version
-    )
-    values (
-      page_id,
-      p_document_id,
-      coalesce(nullif(page ->> 'title', ''), 'Imported page'),
-      next_ordinal,
-      coalesce(page -> 'position', '{"x":0,"y":0,"width":1920,"height":1080,"zIndex":0}'::jsonb),
-      coalesce(page -> 'viewport', '{"x":0,"y":0,"zoom":1}'::jsonb),
-      new_cards,
-      new_groups,
-      new_connections,
-      0
-    );
-
-    next_ordinal := next_ordinal + 1;
-    inserted := inserted || jsonb_build_object(
-      'id', page_id,
-      'title', coalesce(nullif(page ->> 'title', ''), 'Imported page')
-    );
-  end loop;
-
-  return inserted;
-end;
-$$;
-
-grant execute on function public.import_pages(text, jsonb) to authenticated;
-
 -- -----------------------------------------------------------------------------
--- 3. Record these as applied
+-- 3. Check the schema is actually complete, then record it as applied
 -- -----------------------------------------------------------------------------
 -- `supabase db push` compares its history table against supabase/migrations.
--- Left empty it would try to re-apply everything above, and fail on the first
+-- Left empty it would try to re-apply everything above and fail on the first
 -- `create policy`. These rows say: done.
+--
+-- **The check comes first, and it is the important part.**
+--
+-- Recording the history unconditionally is how this file produced a database
+-- that reported "up to date" while missing functions the app called. The SQL
+-- Editor continues past a failed statement, so a migration that errored halfway
+-- left the objects after it uncreated — and the unconditional insert still
+-- marked every version as applied. `db push` then reported nothing to do, and
+-- the app got 404s for functions the history claimed were there.
+--
+-- So the rows are only written if every object this schema is supposed to
+-- create actually exists. If something is missing, this raises, the transaction
+-- unwinds, and the history stays empty — which is a *visible* failure, because
+-- the next `db push` will try again and tell you what went wrong.
 do $$
+declare
+  missing text;
 begin
-  create schema if not exists supabase_migrations;
-  create table if not exists supabase_migrations.schema_migrations (
-    version text primary key,
-    name text,
-    statements text[],
-    inserted_at timestamptz not null default now()
+  select string_agg(name, ', ') into missing
+  from unnest(array[
+    'can_edit_document',
+    'can_edit_page',
+    'can_view_document',
+    'can_view_page',
+    'create_default_page',
+    'create_settings_for_new_user',
+    'create_tutorial_workspace',
+    'create_tutorial_workspace_for_new_user',
+    'find_profile_by_email',
+    'import_pages',
+    'prevent_deleting_last_page',
+    'profiles_needing_resync',
+    'realtime_document_id',
+    'realtime_page_id',
+    'resync_all_profiles',
+    'shares_document_with',
+    'sync_profile',
+    'sync_profile_for',
+    'touch_updated_at',
+    'tutorial_page_one',
+    'tutorial_page_two'
+  ]) as name
+  where not exists (
+    select 1
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname = name
   );
+
+  if missing is not null then
+    raise exception
+      'Bootstrap incomplete — these functions do not exist: %. '
+      'A statement above failed, and the SQL Editor carries on past an error. '
+      'The migration history has NOT been recorded, so "supabase db push" will '
+      'report the real problem.', missing;
+  end if;
 end;
 $$;
+
+-- The history table itself, which is normally created by the CLI. Needed here
+-- because a bootstrap may be pasted into a database the CLI has never touched.
+create schema if not exists supabase_migrations;
+create table if not exists supabase_migrations.schema_migrations (
+  version text primary key,
+  name text,
+  statements text[],
+  inserted_at timestamptz not null default now()
+);
 
 insert into supabase_migrations.schema_migrations (version, name)
 values
-    ('20261001090000', 'initial_schema'),
-    ('20261001090100', 'access_control'),
-    ('20261001090200', 'triggers'),
-    ('20261001090300', 'realtime'),
-    ('20261001090400', 'sharing_functions'),
-    ('20261001090500', 'welcome_workspace'),
-    ('20261001090600', 'profile_repair'),
-    ('20261001090700', 'app_name'),
-    ('20261001090800', 'workspace_look'),
-    ('20261001090900', 'tutorial_depth'),
-    ('20261001091000', 'delete_and_cascade'),
-    ('20261001091100', 'profile_policy'),
-    ('20261001091200', 'import_pages')
+    ('20261001000001', 'schema'),
+    ('20261001000002', 'access_control'),
+    ('20261001000003', 'triggers'),
+    ('20261001000004', 'realtime'),
+    ('20261001000005', 'app_functions'),
+    ('20261001000006', 'tutorial_content')
 on conflict (version) do nothing;
 
 -- =============================================================================

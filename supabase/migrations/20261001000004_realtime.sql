@@ -2,11 +2,20 @@
 --
 -- The collaboration channels are private, which means Supabase routes every
 -- message through `realtime.messages` and the policies below decide who may
--- listen on `page:<pageId>` and who may publish to it. Without them, anybody
--- holding the public anon key could subscribe to somebody else's page.
+-- listen and who may publish. Without them, anybody holding the public anon key
+-- could subscribe to somebody else's page.
 --
---   page:<pageId>      page content sync  (broadcast + presence)
---   document:<docId>   who is in the workspace (presence)
+--   page:<pageId>      page content, for the people on that page
+--   document:<docId>   presence, live pointers, "pages were added"
+--
+-- Both matter equally and the split is deliberate: page *content* is per page,
+-- because it is large and only the people looking at that page need it. A
+-- pointer belongs to the workspace, because it carries which page it is on and
+-- the person may move to another page without the channel changing.
+--
+-- Sending on one of these and listening on the other fails silently — the send
+-- succeeds and the message arrives in a room nobody is in. So the pairing is
+-- asserted by scripts/test-realtime-wiring.cjs against the client.
 
 -- ----------------------------------------------------------------
 -- The tables the client listens to
@@ -27,7 +36,7 @@ end;
 $$;
 
 -- ----------------------------------------------------------------
--- Read the page id out of the topic
+-- Read the id out of the topic
 -- ----------------------------------------------------------------
 -- A channel's topic arrives as `realtime:page:<pageId>`.
 create or replace function public.realtime_page_id()
@@ -52,7 +61,7 @@ grant execute on function public.realtime_document_id() to authenticated;
 grant select, insert on realtime.messages to authenticated;
 
 -- ----------------------------------------------------------------
--- Listening: anyone who can already see it through REST
+-- Listening: anyone who could already read it over REST
 -- ----------------------------------------------------------------
 create policy "can receive page broadcasts"
   on realtime.messages for select to authenticated

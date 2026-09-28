@@ -74,7 +74,11 @@ function blank(sql) {
         // fails — so the check quietly tests nothing and reports success. Which
         // is what it did the first time, and why it had to be verified against a
         // deliberately broken file rather than trusted.
-        out += sql.slice(i, stop + tag[0].length)
+        //
+        // The body is kept because it is what has to be inspected, but its
+        // comments are not: a comment explaining the `jsonb ->> record` mistake
+        // is prose, and reading it as code reports a bug that is not there.
+        out += tag[0] + blank(sql.slice(i + tag[0].length, stop)) + tag[0]
         i = stop + tag[0].length
         continue
       }

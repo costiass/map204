@@ -55,6 +55,28 @@ if (rlsTables.size === 0) {
   process.exit(1)
 }
 
+/* ---- every table in the schema must have RLS on ---- */
+
+// A policy is inert until the table has RLS enabled, and a table with policies
+// but no RLS is worse than one with neither: it looks protected in review and is
+// wide open at runtime. This is not hypothetical — rewriting the schema left the
+// `enable row level security` statements out, and the policies below were sitting
+// there doing nothing. The failure is invisible until somebody reads another
+// person's notes, so it is checked rather than trusted.
+
+const declared = new Set(
+  [...allSql.matchAll(/create table if not exists\s+(?:public\.)?(\w+)/gi)].map((m) => m[1]),
+)
+
+for (const table of declared) {
+  if (!rlsTables.has(table)) {
+    fail(
+      `table "${table}" is created but RLS is never enabled on it. ` +
+        `Its policies would be inert and every row would be readable.`,
+    )
+  }
+}
+
 /* ---- the state that actually runs ---- */
 
 const allPolicies = []

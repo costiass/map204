@@ -1,27 +1,18 @@
--- 010 Â· A tutorial that shows what the app can actually do
+-- 006 · The welcome content
 --
--- The first version of the welcome workspace was five cards in a row. That
--- demonstrated that cards exist and nothing else: no second page, no groups, no
--- variety in how links behave. Someone reading it could not tell that grouping,
--- page lists or connection styling were features rather than accidents.
---
--- So the tutorial is now two pages, and between them they use every part of the
--- data model the app has:
---
---   * page 1 "Start here"    â€” groups, a card grid, links between cards,
---                               links between a card and a group, and one of
---                               each relationship / stroke / routing / arrowhead
---   * page 2 "Making maps"   â€” a worked example: a real argument built as a
---                               chain of claims, with checklists and a
---                               contradicts link
---
--- Like 007, this replaces content rather than adding to it, and it only touches
--- a tutorial nobody has edited. Editing 005 in place would do nothing on any
--- database where 005 has already been applied.
+-- Kept apart from 005 because it is content, not behaviour: two large blocks of
+-- JSONB with no logic in them. Separating them means a change to the wording is
+-- a change to one obvious file, and a reader looking for how import works does
+-- not have to wade through a worked example of a political theory map.
 
 -- ----------------------------------------------------------------
--- Page 1 Â· Start here
+-- Page 1 · Start here
 -- ----------------------------------------------------------------
+-- Between the two pages this exercises: groups, a card inside a group, links
+-- between cards, links between a card and a group, every relationship that
+-- appears in RELATIONSHIP_PRESETS, all three line styles, all three routings,
+-- several arrowheads, and checklists. scripts/test-tutorial-content.cjs asserts
+-- that, so the tutorial cannot quietly lose its point by being edited.
 create or replace function public.tutorial_page_one()
 returns jsonb
 language sql
@@ -85,7 +76,7 @@ as $$
         'content',
           'A group is a labelled box. Drop cards inside it and they belong to it'
           || chr(10)
-          || 'together â€” useful for a section of an argument, or one week of notes.'
+          || 'together — useful for a section of an argument, or one week of notes.'
           || chr(10) || chr(10)
           || 'Groups can be linked to each other and to cards, so a box can be an'
           || chr(10)
@@ -113,9 +104,9 @@ as $$
           || chr(10)
           || 'relationship, a colour, and a stroke.'
           || chr(10) || chr(10)
-          || 'The three cards to the right are linked three different ways â€” a'
+          || 'The three cards below are linked three different ways — a solid'
           || chr(10)
-          || 'solid **supports**, a dashed **depends on**, and a dotted **contradicts**.',
+          || '**supports**, a dashed **part of**, and a dotted **contradicts**.',
         'image', jsonb_build_object('src', null, 'alt', ''),
         'position', jsonb_build_object('x', 440, 'y', 0, 'width', 340, 'height', 340, 'zIndex', 3),
         'style', jsonb_build_object(
@@ -186,9 +177,9 @@ as $$
         'content',
           '**Share** in the top bar invites someone by email.'
           || chr(10) || chr(10)
-          || '- **Can edit** â€” they can change anything'
+          || '- **Can edit** — they can change anything'
           || chr(10)
-          || '- **Can view** â€” they can look but not change'
+          || '- **Can view** — they can look but not change'
           || chr(10) || chr(10)
           || 'You will see their cursor move, and you can click their avatar to'
           || chr(10)
@@ -216,7 +207,7 @@ as $$
           || chr(10)
           || 'to add, rename, reorder and delete them.'
           || chr(10) || chr(10)
-          || 'There is a second page here â€” **Making maps** â€” with a worked example'
+          || 'There is a second page here — **Making maps** — with a worked example'
           || chr(10)
           || 'of the whole thing put together.',
         'image', jsonb_build_object('src', null, 'alt', ''),
@@ -351,8 +342,11 @@ as $$
 $$;
 
 -- ----------------------------------------------------------------
--- Page 2 Â· Making maps
+-- Page 2 · Making maps
 -- ----------------------------------------------------------------
+-- A worked example rather than a feature list: a claim, the evidence for it, the
+-- strongest objection, the reply, and what is still missing. It is the shape an
+-- essay actually takes, which is the point.
 create or replace function public.tutorial_page_two()
 returns jsonb
 language sql
@@ -424,7 +418,7 @@ as $$
         'content',
           'Write down the best argument against you. If you cannot, you have not'
           || chr(10)
-          || 'understood the topic yet â€” and neither has your reader.',
+          || 'understood the topic yet — and neither has your reader.',
         'image', jsonb_build_object('src', null, 'alt', ''),
         'position', jsonb_build_object('x', 400, 'y', 0, 'width', 300, 'height', 220, 'zIndex', 3),
         'style', jsonb_build_object(
@@ -552,8 +546,8 @@ as $$
           'arrowStart', 'none', 'arrowEnd', 'triangle', 'animated', false
         )
       ),
-      -- Card into a group, the other way round from the one above: a card that
-      -- is a *part of* the section it sits in.
+      -- Card into a group, the other way round: a card that is a *part of* the
+      -- section it sits in.
       jsonb_build_object(
         'id', 'tut2_link_objection_part',
         'source', jsonb_build_object('kind', 'card', 'id', 'tut2_objection'),
@@ -593,49 +587,3 @@ as $$
     )
   );
 $$;
-
--- ----------------------------------------------------------------
--- Apply it
--- ----------------------------------------------------------------
--- Page 1: only if it is still the untouched tutorial from 005. The `->0->>'id'`
--- test is the fingerprint of "we wrote this and nobody has touched it since".
-do $$
-declare
-  target_page text;
-begin
-  for target_page in
-    select p.id
-    from public.pages p
-    join public.documents d on d.id = p.document_id
-    where d.title = 'tutorial'
-      and p.ordinal = 0
-      and p.cards->0->>'id' = 'tut_welcome'
-  loop
-    update public.pages
-    set title = 'Start here',
-        cards = tutorial_page_one() -> 'cards',
-        groups = tutorial_page_one() -> 'groups',
-        connections = tutorial_page_one() -> 'connections',
-        viewport = '{"x":-60,"y":-40,"zoom":0.8}'::jsonb
-    where id = target_page;
-  end loop;
-end;
-$$;
-
--- Page 2: only where it does not already exist, so re-running is harmless.
-insert into public.pages (id, document_id, title, ordinal, position, viewport, cards, groups, connections)
-select
-  'page_tutorial_maps',
-  d.id,
-  'Making maps',
-  1,
-  '{"x":0,"y":0,"width":1920,"height":1080,"zIndex":0}'::jsonb,
-  '{"x":-40,"y":-40,"zoom":0.8}'::jsonb,
-  tutorial_page_two() -> 'cards',
-  tutorial_page_two() -> 'groups',
-  tutorial_page_two() -> 'connections'
-from public.documents d
-where d.title = 'tutorial'
-  and not exists (
-    select 1 from public.pages p where p.id = 'page_tutorial_maps'
-  );

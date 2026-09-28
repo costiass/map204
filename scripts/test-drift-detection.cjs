@@ -1,66 +1,80 @@
-// Verifies the parsing half of the workflow's drift detection: turning whatever
-// the CLI printed into a list of versions, then subtracting the ones in git.
 const fs = require('fs')
-const { execSync } = require('child_process')
 
-const localVersions = () =>
-  fs
-    .readdirSync('supabase/migrations')
-    .map((f) => f.match(/^([0-9]{3,})/))
-    .filter(Boolean)
-    .map((m) => m[1])
-    .sort()
+/**
+ * The drift detector, in a form that can be tested without a database.
+ *
+ * The problem this solves: `supabase_migrations.schema_migrations` on the
+ * database and `supabase/migrations` in the repository can disagree, and the CLI
+ * refuses to resolve it. The only question worth asking is which versions the
+ * database records that the repository does not have.
+ *
+ * The trap it is careful about: the CLI pretty-prints a table, and its timestamp
+ * column looks like a version. A loose pattern reads `2026` out of
+ * `2026-09-28 09:00:00` and decides every date is a migration. Hence the
+ * 14-digit requirement, which is also exactly what Supabase mandates.
+ */
 
-// The CLI pretty-prints a table, and its timestamp column starts with the year
-// (`2026-09-28 09:00:00`), so a loose `[0-9]{3,}` matches a bare `2026` and the
-// workflow would try to repair a version called "2026". Supabase requires a
-// 14-digit version, so requiring 14 is the precise rule, not a workaround.
+const VERSIONS = [...fs.readdirSync('supabase/migrations')]
+  .map((name) => /^(\d{14})/.exec(name)?.[1])
+  .filter(Boolean)
+  .sort()
+
 const parse = (raw) => {
-  const found = String(raw).match(/[0-9]{14,}/g) ?? []
+  const found = raw.match(/\b\d{14,}\b/g) ?? []
   return [...new Set(found)].sort()
 }
 
-const orphans = (remoteRaw) =>
-  parse(remoteRaw).filter((v) => !localVersions().includes(v))
+const orphans = (remoteRaw) => parse(remoteRaw).filter((v) => !VERSIONS.includes(v))
 
-// Verbatim from the failing run.
-const migrationList = `
-   Local            | Remote           | Time (UTC)            
-  ------------------|------------------|-----------------------
-   \` \`              | \`20260920090000\` | \`2026-09-20 09:00:00\` 
-   \` \`              | \`20260920090100\` | \`2026-09-20 09:01:00\` 
-   \` \`              | \`20260921091500\` | \`2026-09-21 09:15:00\` 
-   \` \`              | \`20260921091600\` | \`2026-09-21 09:16:00\` 
-   \` \`              | \`20260922093000\` | \`2026-09-22 09:30:00\` 
-   \` \`              | \`20260927081500\` | \`2026-09-27 08:15:00\` 
-   \` \`              | \`20260927081600\` | \`2026-09-27 08:16:00\` 
-   \` \`              | \`20260928090000\` | \`2026-09-28 09:00:00\` 
-   \` \`              | \`20260928090100\` | \`2026-09-28 09:01:00\` 
-   \` \`              | \`20260928090200\` | \`2026-09-28 09:02:00\` 
-   \`20261001090000\` | \` \`              | \`2026-10-01 09:00:00\` 
-   \`20261001090100\` | \` \`              | \`2026-10-01 09:01:00\` 
-   \`20261001090200\` | \` \`              | \`2026-10-01 09:02:00\` 
-   \`20261001090300\` | \` \`              | \`2026-10-01 09:03:00\` 
-   \`20261001090400\` | \` \`              | \`2026-10-01 09:04:00\` 
-`
+/* ------------------------------------------------------------------ */
+/* Cases                                                                */
+/* ------------------------------------------------------------------ */
 
-// What `supabase db query` would print for the same database.
-const dbQuery = `
- v 
-------------------------------
- 20260920090000 20260928090200 
-------------------------------
-(1 row)
-`
+// Verbatim shape from a real failing run, but with the version numbers written
+// out rather than taken from the repository.
+//
+// They used to be the real ones with a hard-coded expected count, which quietly
+// made this a tripwire for "did somebody renumber a migration". Renumbering is
+// legitimate when the database is being rebuilt, and then the test failed for a
+// reason a reader could not see. Invented versions make the expectations below
+// arithmetic rather than archaeology.
+const REMOTE_ONLY = [
+  '20990101010101',
+  '20990101010102',
+  '20990101010103',
+  '20990101010104',
+  '20990101010105',
+]
 
-const inStep = localVersions().map((v) => `${v} `).join(' ')
+const migrationList = [
+  '   Local            | Remote           | Time (UTC)            ',
+  '  ------------------|------------------|-----------------------',
+  ...REMOTE_ONLY.map((v, i) => `   \` \`              | \`${v}\` | \`2099-01-01 01:0${i}\` `),
+  // A version the repository *does* have, in the Local column, so the fixture
+  // covers both halves of a drift report: absent remotely, and pending locally.
+  ...VERSIONS.map(
+    (v, i) => `   \`${v}\` | \` \`              | \`2099-01-02 02:0${i % 10}\` `,
+  ),
+  '',
+].join('\n')
+
+// What `supabase db query` prints for the same database.
+const dbQuery = `\n v \n----------------------------\n ${REMOTE_ONLY.slice(0, 2).join(' ')} \n---- \n(1 row)\n`
+
+const inStep = VERSIONS.map((v) => `${v} `).join(' ')
 
 const cases = [
-  ['migration list, drifted', migrationList, 10],
+  // Every remote-only version is an orphan. A version that is merely *pending*
+  // is not, which is the whole distinction: that one is what `db push` is for.
+  ['migration list, drifted', migrationList, REMOTE_ONLY.length],
   ['db query, drifted', dbQuery, 2],
   ['migration list, in step', `| \`${inStep.trim()}\` |`, 0],
   ['empty database', '', 0],
   ['null string_agg', ' v \n----\n \n----\n(1 row)\n', 0],
+  // A timestamp column must not be mistaken for a version.
+  ['dates are not versions', '| ` ` | `2026-09-28 09:00:00` |\n', 0],
+  ['short numbers are not versions', '| 2026 | 202609 |', 0],
+  ['a pending migration is not drift', VERSIONS.map((v) => `| \`${v}\` | \` \` |`).join('\n'), 0],
 ]
 
 let failed = 0
@@ -69,7 +83,13 @@ for (const [name, input, expected] of cases) {
   const ok = got.length === expected
   if (!ok) failed += 1
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}  (expected ${expected}, got ${got.length})`)
-  if (got.length) console.log(`        ${got.join(' ')}`)
+  if (!ok && got.length > 0) {
+    console.log(`      would report as drift: ${got.join(' ')}`)
+  }
 }
 
-process.exit(failed === 0 ? 0 : 1)
+if (failed > 0) {
+  console.log(`\n${failed} case(s) failed.`)
+  process.exit(1)
+}
+console.log(`\n${cases.length} cases passed. ${VERSIONS.length} migrations in the repository.`)
