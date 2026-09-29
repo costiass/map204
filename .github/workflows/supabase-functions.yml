@@ -1,0 +1,179 @@
+name: Supabase Functions
+
+# Edge functions are deployed separately from everything else, and this repository
+# had no workflow that did it. That is not a theoretical gap: `supabase-migrate.yml`
+# only ever runs `supabase db push`, which applies schema and nothing else, and
+# `deploy.yml` matches `supabase/**` — so a commit that changed a function rebuilt
+# and redeployed the *frontend*, and the frontend went live calling a function that
+# was still the old one. The deploy looked green and the app was broken.
+#
+# The symptom is the worst kind, because it is silent on both sides. The browser
+# reports a CORS error naming neither the cause nor the function, and the function's
+# own logs show a request arriving. Both halves are working; they are just different
+# halves:
+#
+#   the 405 that a browser sends first, answered by old code
+#   no Access-Control-Allow-Origin, because old code had no CORS at all
+#
+# So this workflow exists to make "the function in the repository" and "the function
+# serving traffic" the same thing, automatically, on the push that changes it.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/functions/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'supabase/functions/**'
+  workflow_dispatch:
+
+concurrency:
+  # Two deploys must not overlap: the second would bundle the first's half-written
+  # output. Unlike the migration group this one is safe to cancel, because a
+  # cancelled deploy simply leaves the previous version serving.
+  group: supabase-functions
+  cancel-in-progress: true
+
+env:
+  SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+jobs:
+  functions:
+    runs-on: ubuntu-latest
+    # Pull requests from forks have no access to the secrets, so there is nothing
+    # to deploy with. Skipping is the honest answer: failing would make every fork
+    # PR red for a reason that has nothing to do with the change.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Check credentials
+        run: |
+          if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then
+            echo "::error::SUPABASE_ACCESS_TOKEN is not set, so nothing can be deployed."
+            echo "::error::Add it under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+      - name: Link Supabase project
+        run: supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+
+      # ------------------------------------------------------------------
+      # Which functions are there, and do they need deploying?
+      # ------------------------------------------------------------------
+      # Every subdirectory of supabase/functions is a function. A bare file there
+      # (a .env.example, a README) is not, and deploying it would fail the run.
+      - name: Find the functions
+        id: found
+        run: |
+          set -euo pipefail
+          list=""
+          for dir in supabase/functions/*/; do
+            [ -f "$dir/index.ts" ] || continue
+            list="$list $(basename "$dir")"
+          done
+          list="${list# }"
+          echo "functions=${list}" >> "$GITHUB_OUTPUT"
+          echo "Deploying:${list}" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -z "$list" ]; then
+            echo "No function has an index.ts, so there is nothing to deploy."
+          fi
+
+      # ------------------------------------------------------------------
+      # Deploy
+      # ------------------------------------------------------------------
+      - name: Deploy
+        if: steps.found.outputs.functions != ''
+        run: |
+          set -euo pipefail
+          # One at a time, deliberately. `supabase functions deploy` with no
+          # argument deploys everything, which also works, but naming them makes
+          # the log say which function went out -- and this bug was invisible for
+          # exactly that reason.
+          for fn in ${{ steps.found.outputs.functions }}; do
+            echo "::group::Deploying $fn"
+            supabase functions deploy "$fn" --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+            echo "::endgroup::"
+          done
+
+      # ------------------------------------------------------------------
+      # Prove the thing that is now serving answers a preflight.
+      # ------------------------------------------------------------------
+      # A successful `functions deploy` only means the bundle uploaded. The bug
+      # this workflow exists to prevent was a *successful* deploy of code that
+      # answered 405 to the browser, so the check that matters is not the exit
+      # code of the deploy -- it is a question asked of the live URL.
+      #
+      # The app's own origin is what has to be allowed. An echo of `*` is a
+      # failure, not a pass: this function sends mail, so an open relay is worse
+      # than the bug being fixed.
+      - name: Check the deployed function answers a preflight
+        if: steps.found.outputs.functions != ''
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$APP_URL" ]; then
+            echo "::warning::APP_URL is not set as a repository variable, so the"
+            echo "::warning::live check is skipped. The deploy itself is done."
+            exit 0
+          fi
+
+          base="https://${{ secrets.SUPABASE_PROJECT_REF }}.supabase.co/functions/v1"
+          failed=0
+
+          for fn in ${{ steps.found.outputs.functions }}; do
+            # The exact request a browser sends first, because a request the
+            # browser never makes cannot break the browser.
+            body="$(curl -sS -i -X OPTIONS \
+              -H "Origin: $APP_URL" \
+              -H "Access-Control-Request-Method: POST" \
+              -H "Access-Control-Request-Headers: authorization,apikey,content-type" \
+              "$base/$fn" || true)"
+
+            status="$(printf '%s' "$body" | head -n1 | awk '{print $2}')"
+            allow="$(printf '%s' "$body" | tr -d '\r' \
+              | grep -i '^access-control-allow-origin:' | head -n1 \
+              | cut -d' ' -f2- || true)"
+
+            {
+              echo "### $fn"
+              echo
+              echo "| | |"
+              echo "| --- | --- |"
+              echo "| preflight status | \`${status:-none}\` |"
+              echo "| allow-origin | \`${allow:-none}\` |"
+              echo
+            } >> "$GITHUB_STEP_SUMMARY"
+
+            if [ "$status" != "204" ]; then
+              echo "::error::$fn answered the preflight with ${status:-no status}, expected 204."
+              echo "::error::The browser will not send the request at all, so the feature is dead."
+              failed=1
+              continue
+            fi
+
+            if [ "$allow" != "$APP_URL" ]; then
+              echo "::error::$fn did not allow origin $APP_URL (got: ${allow:-none})."
+              if [ "$allow" = "*" ]; then
+                echo "::error::A wildcard is an open relay for a function that sends mail."
+              fi
+              echo "::error::Check ALLOWED_ORIGINS in the function against APP_URL."
+              failed=1
+              continue
+            fi
+
+            echo "$fn: the preflight answers and $APP_URL may read it."
+          done
+
+          exit $failed

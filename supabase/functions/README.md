@@ -48,14 +48,37 @@ does not go out.
 supabase secrets set RESEND_API_KEY=re_... --project-ref ofpbdzqnszupgtjkncgv
 ```
 
-4. Deploy the function:
+4. Add `APP_URL` as a repository **variable** (Settings → Secrets and variables →
+   Actions → Variables) with the value `https://map204.vercel.app`, and
+   `SUPABASE_PROJECT_REF` as a **secret**. The migration workflow already needs the
+   latter, so it is probably there.
+
+## Deploying a change to a function
+
+**Edge functions are not part of the migration workflow.** `supabase db push`
+applies schema; it does not touch functions. And `deploy.yml` matches
+`supabase/**`, so a commit that changes a function *does* run — it rebuilds and
+redeploys the frontend, and the green tick means the frontend shipped while the
+function stayed exactly as it was.
+
+That is not hypothetical. It is how the CORS fix below took three attempts to
+reach you: the fix was correct in the repository and correct in the local edge
+runtime, and the deployed copy answered `405` the whole time.
+
+`supabase-functions.yml` deploys on any push touching `supabase/functions/**` and
+then asks the live URL the question a browser asks first. It fails the run on a
+`405`, and on an `access-control-allow-origin` that is not the app's own — a
+wildcard included, since a function that sends mail is an open relay if every
+origin may use it.
+
+To deploy by hand:
 
 ```powershell
 supabase functions deploy send-share-email --project-ref ofpbdzqnszupgtjkncgv
 ```
 
-Without steps 3–4 the app still shares normally; only the email is skipped, and the
-dialog says the person has access but the mail did not send.
+Without the deploy step the app still shares normally; only the email is skipped,
+and the dialog says the person has access but the mail did not send.
 
 ### Checking it is deployed
 
