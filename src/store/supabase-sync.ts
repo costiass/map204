@@ -441,7 +441,19 @@ export async function createPage(
       title: page.title,
       ordinal,
       position: LEGACY_PAGE_POSITION,
-      viewport: page.viewport ?? DEFAULT_PAGE_VIEWPORT,
+      /*
+       * No `viewport`.
+       *
+       * Not an oversight, and not the same omission as the one in the page write
+       * below: this is the column being *seeded*. A page used to be created carrying
+       * whatever camera its creator happened to be looking at, which meant the
+       * person who made the page from the middle of their own map handed that view
+       * to everybody who opened it afterwards.
+       *
+       * The column still exists and still has a default, so a row is written; what
+       * is not written is a *decision*. The camera on arrival is the reader's, from
+       * their own settings file, and `applyDocumentSettings` supplies it.
+       */
       cards: page.elements ?? [],
       groups: page.groups ?? [],
       connections: page.connections ?? [],
@@ -897,6 +909,40 @@ export async function notifyShare(
     if (response.ok) return { ok: true }
 
     const body = (await response.json().catch(() => null)) as { error?: string } | null
+
+    /*
+     * A 401 here is usually not "you are signed out".
+     *
+     * This function answers 401 for a token the project will not verify, and the
+     * most common reason is that the session in this browser was orphaned by a
+     * signing-key rotation: the token's `exp` is still in the future, so the client
+     * sees a live session and never refreshes it, but the `kid` in its header is no
+     * longer published and nothing can verify the signature. Every other request
+     * fails the same way -- PostgREST answers `PGRST301` -- so the app looks broken
+     * while the account is perfectly valid.
+     *
+     * The cure is a new token, and the only source of one is signing in again. So
+     * this clears the dead session rather than reporting a failure that will repeat
+     * on every retry, and says what is actually wrong.
+     */
+    if (response.status === 401) {
+      const message = body?.error ?? ''
+      const orphaned =
+        /not signed in/i.test(message) ||
+        /invalid jwt|signature|expired/i.test(message)
+
+      if (orphaned) {
+        await handleWriteError(
+          { code: 'PGRST301', message: 'token no longer verifies' },
+          'notifyShare',
+        )
+        return {
+          ok: false,
+          error: 'Your session has expired. Sign in again, then share.',
+        }
+      }
+    }
+
     return { ok: false, error: body?.error ?? `The email failed (${response.status}).` }
   } catch (error) {
     return {

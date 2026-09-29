@@ -115,12 +115,44 @@ export function rememberViewport(documentId: string, pageId: string): Viewport |
   }
 }
 
+/**
+ * Where a camera move also goes, beyond this browser.
+ *
+ * A plain callback rather than an import, and the reason is the trap documented at
+ * the top of this file: the canvas store imports this module, so anything this
+ * module imports has to be safe to load without `VITE_SUPABASE_URL` -- which means
+ * nothing that reads `import.meta.env` at load time, which is everything that
+ * touches Supabase. Importing the settings store from here put
+ * `Cannot read properties of undefined (reading 'VITE_SUPABASE_URL')` through
+ * every bundle that builds the canvas store, including the one
+ * `test-read-only.cjs` makes.
+ *
+ * So the direction is reversed. This module knows nothing about the database and
+ * calls out; `documentSettings` registers the real writer and imports whatever it
+ * likes. The canvas store is untouched by any of it.
+ */
+type CameraSink = (documentId: string, pageId: string, viewport: Viewport) => void
+
+let cameraSink: CameraSink | null = null
+
+/** Called by whoever is keeping a copy of the camera. Pass null to stop. */
+export function setCameraSink(sink: CameraSink | null): void {
+  cameraSink = sink
+}
+
 /** Remember a camera. Silently does nothing where storage is unavailable. */
 export function recallViewport(documentId: string, pageId: string, viewport: Viewport): void {
   try {
     window.localStorage.setItem(keyFor(documentId, pageId), JSON.stringify(viewport))
   } catch {
     /* full, disabled, or private. The camera is a convenience; losing it is fine. */
+  }
+  // Not in the try: a broken sink must not stop the cache being written, and a throw
+  // from it must not escape into a pointermove handler.
+  try {
+    cameraSink?.(documentId, pageId, viewport)
+  } catch {
+    /* the far end is optional */
   }
 }
 

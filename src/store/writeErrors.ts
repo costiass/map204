@@ -1,15 +1,25 @@
-import { isMissingAuthUser, supabase } from '@/lib/supabase'
+import { isDeadToken, isMissingAuthUser, supabase } from '@/lib/supabase'
 import { useCanvasStore } from '@/store/useCanvasStore'
 
 /**
  * One place that decides what a failed write means.
  *
- * Most errors are the user's problem to see and ours to log. One is not: a
- * foreign key violation on a user id means the signed-in account no longer
- * exists — the database was rebuilt, or the account was deleted, while the
- * browser kept a JWT that still verifies. Nothing the app does can succeed in
- * that state, and retrying makes it worse, so the only useful response is to say
- * so once and sign out.
+ * Most errors are the user's problem to see and ours to log. Two are not, and both
+ * are the same situation seen from two ends: the session in this browser is no
+ * longer one the project will accept.
+ *
+ *   * A foreign key violation on a user id. The account was deleted, or the
+ *     database rebuilt, while the browser kept a JWT that still verifies.
+ *   * A token the project will not verify at all. Supabase rotates its signing
+ *     keys, and a token issued before a rotation names a `kid` that is no longer
+ *     published, so every request fails with `PGRST301` or `bad_jwt`. The token
+ *     is not *expired* — its `exp` may be hours away — so `autoRefreshToken` has
+ *     no reason to replace it, and nothing notices until something asks for data.
+ *
+ * In both states nothing the app does can succeed, and retrying makes it worse:
+ * the autosave timers, the settings writer and the share dialog all keep sending
+ * a token that is refused. The only useful response is to say so once and clear
+ * the session, so the next sign-in gets a fresh one.
  */
 
 let reported = false
@@ -29,6 +39,22 @@ export async function handleWriteError(
     }
     // Clears the session, which also stops the debounced settings writer and
     // the autosave timers from retrying into the same wall.
+    await supabase?.auth.signOut()
+    return
+  }
+
+  if (isDeadToken(error)) {
+    if (!reported) {
+      reported = true
+      useCanvasStore
+        .getState()
+        .pushToast('Your session has expired. Sign in again to keep working.', 'error')
+    }
+    console.warn(
+      '[auth] the project rejected this session outright; clearing it. A signing-key ' +
+        'rotation orphans every token issued before it, and the app cannot tell that ' +
+        'from an expired one.',
+    )
     await supabase?.auth.signOut()
     return
   }

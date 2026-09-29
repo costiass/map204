@@ -732,6 +732,10 @@ export const useCanvasStore = create<CanvasStore>()(
         // decide where the other was looking.
         withPage((page) => {
           page.viewport = viewport
+          // `recallViewport` is the only exit. It writes the browser cache and then
+          // hands the camera to whoever has registered a sink -- currently the
+          // per-workspace settings file. See the note on `setCameraSink` for why that
+          // is a callback and not an import.
           recallViewport(get().documentId ?? 'local', page.id, viewport)
         })
       },

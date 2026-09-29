@@ -248,12 +248,26 @@ Deno.serve(async (request) => {
     auth: 'none',
   })
 
-  const ctx = (context ?? {
-    // No context: unauthenticated. `handle` refuses it, and the refusal carries the
-    // CORS headers, so the browser can read why.
-    authenticated: false,
-    error: { message: contextError?.message ?? 'Not signed in.' },
-  }) as unknown as SupabaseContext
+  /*
+   * `error` lives on the *tuple*, not on the context.
+   *
+   * `createSupabaseContext` returns `{ data, error }`, and when a caller is not
+   * authenticated the data is absent and the reason is in the second half. Reading
+   * `ctx.error` instead -- which is where `withSupabase` would have put it -- always
+   * found nothing, so every refusal came back as the bare "Not signed in." and the
+   * reason the SDK had worked out was thrown away.
+   *
+   * That distinction is the whole point of using the SDK: it can tell an expired
+   * token from a forged one, from a malformed header, from a preflight with no
+   * credentials at all, and the client can act on the difference. This is where that
+   * reason is kept.
+   */
+  const ctx = {
+    ...(context ?? {}),
+    // Only set when the context could not be built, which is the only case where the
+    // context itself has nothing to say about it.
+    ...(context ? {} : { error: { message: contextError?.message ?? 'Not signed in.' } }),
+  } as unknown as SupabaseContext
 
   try {
     return await handle(request, ctx)

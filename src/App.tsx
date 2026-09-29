@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { AuthGuard } from '@/components/AuthGuard'
+import { applyDocumentSettings, installCameraSink, uninstallCameraSink } from '@/store/documentSettings'
 import { Canvas } from '@/components/Canvas'
 import { ConnectionTree } from '@/components/ConnectionTree'
 import { ContextMenu } from '@/components/ContextMenu'
@@ -31,6 +32,23 @@ import type { SupabaseUser } from '@/lib/supabase'
 import { DEFAULT_WORKSPACE_ACCENT, DEFAULT_WORKSPACE_ICON } from '@/theme'
 
 export default function App() {
+  /*
+   * Every camera move, to this reader's settings file.
+   *
+   * Registered here rather than inside the canvas store because of the constraint
+   * documented on `setCameraSink`: the canvas store cannot import anything that
+   * reads `import.meta.env` at load time, and this module builds a Supabase client.
+   * So the store calls out and this answers.
+   *
+   * Mount and unmount, not once at module load: a hot reload would otherwise stack
+   * registrations, and the last one registered is the only one that would run, so it
+   * would be harmless -- but "harmless by accident" is not a thing to leave in.
+   */
+  useEffect(() => {
+    installCameraSink()
+    return () => uninstallCameraSink()
+  }, [])
+
   useKeyboardShortcuts()
   usePageSync()
 
@@ -87,6 +105,9 @@ export default function App() {
   useEffect(() => {
     const store = useCanvasStore.getState()
     store.setDocumentId(currentDocId)
+    // Fire-and-forget on purpose. The document is loaded below and the canvas must
+    // not wait on anything; this is a convenience applied when it lands.
+    if (currentDocId && user) void applyDocumentSettings(currentDocId)
 
     if (!currentDocId || !user) {
       setDocument(null)
