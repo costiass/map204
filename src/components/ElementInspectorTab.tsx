@@ -29,6 +29,8 @@ export function ElementInspectorTab({ element }: { element: Element }) {
       return <FlashInspector element={element} onChange={updateElement} onCommit={flushCommit} />
     case 'table':
       return <TableInspector element={element} onChange={updateElement} onCommit={flushCommit} />
+    case 'link':
+      return <LinkInspector element={element} onChange={updateElement} onCommit={flushCommit} />
     default:
       return (
         <div className="cc-scroll flex-1 overflow-y-auto p-3">
@@ -402,6 +404,111 @@ function TableInspector({
             />
           </label>
         ))}
+      </Section>
+    </div>
+  )
+}
+
+/**
+ * A link, which had no inspector at all.
+ *
+ * `LinkElement` has had `display` and `show` since version 2 -- how the reference
+ * is drawn, and whether a chip shows the host or the whole address. Neither was
+ * editable, so they were fields with no way to reach them: a link that could only
+ * ever look the way the default said.
+ *
+ * That is the same class of gap as the note's style being discarded at render time
+ * (see `ElementNode`). A field nothing writes is not a feature, and an element you
+ * cannot configure looks like it was not made by whoever made the others.
+ */
+function LinkInspector({
+  element,
+  onChange,
+  onCommit,
+}: {
+  element: Extract<Element, { kind: 'link' }>
+  onChange: Patch
+  onCommit: Commit
+}) {
+  const safe = safeEmbedUrl(element.url)
+
+  return (
+    <div className="cc-scroll flex-1 overflow-y-auto">
+      <Section title="Link">
+        <label className="block">
+          <span className="cc-label">Address</span>
+          <input
+            className="cc-input mt-1 w-full"
+            value={element.url}
+            placeholder="https://example.com/lecture"
+            onChange={(event) =>
+              onChange(element.id, { url: event.target.value }, { silent: true })
+            }
+            onBlur={onCommit}
+          />
+        </label>
+        {element.url.trim() && !safe ? (
+          <p className="mt-1.5 text-[11px] text-danger">
+            That is not an http(s) address, so it will not be linked.
+          </p>
+        ) : null}
+      </Section>
+
+      <Section title="How it shows">
+        <div className="grid grid-cols-3 gap-1.5">
+          {(['preview', 'chip', 'open'] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              className="cc-btn"
+              data-variant={element.display === mode ? 'primary' : undefined}
+              onClick={() => onChange(element.id, { display: mode })}
+            >
+              {mode === 'preview' ? 'Full' : mode === 'chip' ? 'Chip' : 'Text'}
+            </button>
+          ))}
+        </div>
+        <p className="mt-1.5 text-[11px] text-slate-500">
+          Full shows the whole address. A chip is a small tag showing where it goes.
+          Text is the address on its own, for a page of prose with links in it.
+        </p>
+      </Section>
+
+      <Section title="In a chip">
+        <div className="grid grid-cols-3 gap-1.5">
+          {(['host', 'full', 'none'] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              className="cc-btn"
+              data-variant={element.show === mode ? 'primary' : undefined}
+              onClick={() => onChange(element.id, { show: mode })}
+            >
+              {mode === 'host' ? 'Host' : mode === 'full' ? 'Full address' : 'Nothing'}
+            </button>
+          ))}
+        </div>
+        <p className="mt-1.5 text-[11px] text-slate-500">
+          A long address is unreadable at chip size, so the host is the default.
+        </p>
+        {element.show === 'host' && !element.url.trim() ? (
+          <p className="mt-1.5 text-[11px] text-slate-400">
+            There is no address yet, so a chip will show nothing.
+          </p>
+        ) : null}
+      </Section>
+
+      <Section title="Note">
+        <textarea
+          className="cc-input mt-1 w-full"
+          rows={3}
+          value={element.note}
+          placeholder="Shown under the link, and always available."
+          onChange={(event) =>
+            onChange(element.id, { note: event.target.value }, { silent: true })
+          }
+          onBlur={onCommit}
+        />
       </Section>
     </div>
   )

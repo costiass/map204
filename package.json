@@ -28,7 +28,7 @@
     "test:bundle": "node scripts/test-bundle.cjs",
     "test:encoding": "node scripts/test-encoding.cjs",
     "fix:encoding": "node scripts/test-encoding.cjs --fix",
-    "test": "npm run typecheck && npm run test:drift && node scripts/test-bootstrap.cjs && npm run test:bootstrap && npm run test:migrations && npm run test:policies && npm run test:realtime && npm run test:embeds && npm run test:card-types && npm run test:read-only && npm run test:read-only-ui && npm run test:document-settings && npm run test:dead-session && npm run test:dead-session && npm run test:routes && npm run test:migrate-v2 && npm run test:elements && npm run test:element-ops && npm run test:sample && npm run test:bundle && npm run test:element-chrome && npm run test:element-fields && npm run test:share-email && npm run test:signup && npm run test:share-email-live && npm run test:share-email-catch && npm run test:viewport && npm run test:encoding && npm run test:workspace-look && npm run test:tutorial",
+    "test": "npm run typecheck && npm run test:drift && node scripts/test-bootstrap.cjs && npm run test:bootstrap && npm run test:migrations && npm run test:policies && npm run test:realtime && npm run test:embeds && npm run test:card-types && npm run test:read-only && npm run test:read-only-ui && npm run test:document-settings && npm run test:element-style && npm run test:dead-session && npm run test:dead-session && npm run test:routes && npm run test:migrate-v2 && npm run test:elements && npm run test:element-ops && npm run test:sample && npm run test:bundle && npm run test:element-chrome && npm run test:element-fields && npm run test:share-email && npm run test:signup && npm run test:share-email-live && npm run test:share-email-catch && npm run test:viewport && npm run test:encoding && npm run test:workspace-look && npm run test:tutorial",
     "test:element-chrome": "node scripts/test-element-chrome.cjs",
     "test:element-fields": "node scripts/test-element-fields.cjs",
     "test:signup": "node scripts/test-signup.cjs",
@@ -44,7 +44,8 @@
     "test:share-email-catch-guard": "node scripts/test-share-email-catch-guard.cjs",
     "test:dead-session": "node scripts/test-dead-session.cjs",
     "test:dead-session-guard": "node scripts/test-dead-session-guard.cjs",
-    "test:document-settings": "node scripts/test-document-settings.cjs"
+    "test:document-settings": "node scripts/test-document-settings.cjs",
+    "test:element-style": "node scripts/test-element-style.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",

@@ -4,9 +4,10 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 import { IconChevron, IconMore } from '@/components/Icons'
 import { CardEmbedView } from '@/components/CardEmbedView'
 import { FlashDeck } from '@/components/FlashCard'
-import { DEFAULT_NOTE_STYLE } from '@/elements/defaults'
+import { DEFAULT_NOTE_STYLE, DEFAULT_STYLE_BY_KIND } from '@/elements/defaults'
 import { useCanvasStore } from '@/store/useCanvasStore'
 import { ANCHORS, COLLAPSED_HEADER_HEIGHT, type Anchor, type Element, type Point } from '@/types'
+import { safeEmbedUrl } from '@/utils/embeds'
 import { renderMarkdown } from '@/utils/markdown'
 
 /**
@@ -78,10 +79,26 @@ function ElementNodeImpl({
   const x = element.x + (offset?.x ?? 0)
   const y = element.y + (offset?.y ?? 0)
 
-  // Only a note carries a style. The others get the default, so a video is
-  // still a white card with a border rather than an unstyled div — the fallback
-  // is what makes the common chrome look deliberate on every kind.
-  const noteStyle = element.kind === 'note' ? element.style : DEFAULT_NOTE_STYLE
+  /*
+   * The element's own style, for every kind.
+   *
+   * This used to read:
+   *
+   *   const noteStyle = element.kind === 'note' ? element.style : DEFAULT_NOTE_STYLE
+   *
+   * which meant every element that was not a note threw its style away at render
+   * time and drew the note's default instead. The Settings panel is shared by all
+   * kinds and offered a colour picker for a video, a table, a deck and a PDF — and
+   * the colour was accepted, saved, and then ignored. The chrome looked deliberate
+   * on every kind, which is what the comment claimed and what it was for, and that
+   * is the only thing it ever achieved: the one visual constant worth keeping is
+   * the fallback for an element with *no* style at all, which is a different case.
+   *
+   * `DEFAULT_STYLE_BY_KIND` keeps the per-kind defaults the creation code uses — a
+   * video still starts black, a PDF still starts as paper. Those are defaults, and
+   * they are applied when the element is made, not hidden from it afterwards.
+   */
+  const elementStyle = element.style ?? DEFAULT_STYLE_BY_KIND[element.kind] ?? DEFAULT_NOTE_STYLE
 
   const style = {
     left: x,
@@ -89,12 +106,12 @@ function ElementNodeImpl({
     width,
     height: element.collapsed ? COLLAPSED_HEADER_HEIGHT : height,
     zIndex: element.zIndex,
-    '--cc-bg': noteStyle.backgroundColor,
-    '--cc-accent': noteStyle.accentColor,
-    '--cc-fg': noteStyle.textColor,
-    '--cc-border': noteStyle.borderColor,
-    '--cc-border-width': `${noteStyle.borderWidth}px`,
-    '--cc-radius': `${noteStyle.borderRadius}px`,
+    '--cc-bg': elementStyle.backgroundColor,
+    '--cc-accent': elementStyle.accentColor,
+    '--cc-fg': elementStyle.textColor,
+    '--cc-border': elementStyle.borderColor,
+    '--cc-border-width': `${elementStyle.borderWidth}px`,
+    '--cc-radius': `${elementStyle.borderRadius}px`,
   } as CSSProperties
 
   const stop = (event: React.SyntheticEvent) => event.stopPropagation()
@@ -178,7 +195,7 @@ function ElementNodeImpl({
       // canvas will refuse.
       data-editable={editable ? 'true' : 'false'}
       data-dragging={dragging ? 'true' : undefined}
-      data-shadow={noteStyle.shadow ? 'true' : 'false'}
+      data-shadow={elementStyle.shadow ? 'true' : 'false'}
       onContextMenu={editable ? (event) => onContextMenu(event, element.id) : undefined}
     >
       <span className="cc-card__accent" />
@@ -345,13 +362,108 @@ function ElementBody({
       // `link` has no renderer yet: the registry marks it unsupported, so the
       // only way to reach this is a hand-edited file, and it says so rather than
       // rendering as a blank card.
-      return (
-        <p className="cc-card__body opacity-60">
-          {element.kind === 'link'
-            ? 'A link element is not implemented yet.'
-            : 'Nothing to show.'}
-        </p>
-      )
+      if (element.kind === 'link') return <LinkBody element={element} />
+
+      return <p className="cc-card__body opacity-60">Nothing to show.</p>
+  }
+}
+
+/**
+ * A link, which used to render the words "not implemented yet".
+ *
+ * `LinkElement` has carried `url`, `display` and `show` since version 2, and the
+ * renderer never read any of them -- so the element drew a placeholder and the
+ * inspector had nothing to edit. Both halves were missing, which is why it looked
+ * like an unfinished feature rather than a broken one: there was nothing to click
+ * and nothing happened if you did.
+ *
+ * The three `display` modes are the ones `RefDisplay` declares, which the PDF
+ * element shares, so a link and a document from the same source read the same way:
+ *
+ *   chip     a tag showing where it goes, for a row of references
+ *   preview  the address in full, for a link that is also the content
+ *   open     the text alone, for a page of prose with links in it
+ */
+function LinkBody({ element }: { element: Extract<Element, { kind: 'link' }> }) {
+  const safe = safeEmbedUrl(element.url)
+  const label = element.title.trim() || (safe ? hostOf(element.url) : 'A link')
+
+  if (!element.url.trim()) {
+    return <p className="cc-card__body opacity-60">No address yet. Add one in Source.</p>
+  }
+  if (!safe) {
+    return (
+      <p className="cc-card__body opacity-60">
+        That address is not http(s), so it will not be linked.
+      </p>
+    )
+  }
+
+  // `show` decides what a chip says, and only a chip: the other two modes show the
+  // address or the title regardless, because that is the whole of what they are.
+  const chipText =
+    element.show === 'full' ? element.url : element.show === 'none' ? '' : hostOf(element.url)
+
+  if (element.display === 'open') {
+    return (
+      <p className="cc-card__body">
+        <a
+          href={safe}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="underline break-all"
+          // The accent is already a CSS variable on the element's wrapper, set from
+          // this element's own style. Using it here rather than reading the style a
+          // second time means the link cannot disagree with the strip beside it.
+          style={{ color: 'var(--cc-accent)' }}
+        >
+          {element.url}
+        </a>
+      </p>
+    )
+  }
+
+  if (element.display === 'preview') {
+    return (
+      <p className="cc-card__body truncate">
+        <a
+          href={safe}
+          target="_blank"
+          rel="noreferrer noopener"
+          title={element.url}
+          style={{ color: 'var(--cc-accent)' }}
+        >
+          {element.url}
+        </a>
+      </p>
+    )
+  }
+
+  return (
+    <p className="cc-card__body flex items-center gap-1.5">
+      <a
+        href={safe}
+        target="_blank"
+        rel="noreferrer noopener"
+        // The existing tag pill rather than a new class. It already reads as a small
+        // accent-tinted chip, it already has a dark variant, and a second one for the
+        // same idea would drift from it.
+        className="cc-tag"
+        title={element.url}
+      >
+        {chipText || ' '}
+      </a>
+      <span className="truncate opacity-70">{label}</span>
+    </p>
+  )
+}
+
+/** The host of a URL, for a chip that has to be short. Falls back to the address. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host.replace(/^www\./, '')
+  } catch {
+    return url
   }
 }
 
