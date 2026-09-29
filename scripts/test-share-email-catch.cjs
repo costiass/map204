@@ -54,9 +54,21 @@ const lf = original.replace(/\r\n/g, '\n')
 // the one chosen. A guard that only wraps the inner half of the handler would pass
 // a test that threw at the top, and the top is exactly where a future edit is
 // most likely to throw.
-const ANCHOR = "async function handle(request: Request): Promise<Response> {"
-if (!lf.includes(ANCHOR)) {
-  console.log('FAIL  the anchor is gone, so this test no longer matches index.ts')
+/*
+ * The anchor is matched out of the file, not written down here.
+ *
+ * It used to be a literal, and it stopped matching when `handle` grew a second
+ * argument for the SDK's context -- so this test reported "the anchor is gone" and
+ * exited without having proved anything. A pattern that has drifted is the same
+ * failure as a test that cannot fail: it looks like a test, and it verifies nothing.
+ *
+ * Matched by shape -- a function named `handle`, whatever its parameters -- so it
+ * survives an edit to the signature and cannot quietly stop guarding.
+ */
+const ANCHOR = /async function handle\([^)]*\)[^{]*\{/.exec(lf)?.[0]
+if (!ANCHOR) {
+  console.log('FAIL  index.ts has no `async function handle(...)` to inject a throw into.')
+  console.log('      Either the handler was renamed, or this test is no longer testing it.')
   process.exit(1)
 }
 

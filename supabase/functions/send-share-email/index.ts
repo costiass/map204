@@ -17,6 +17,7 @@
 // *whether* to send and that is a different job from writing one.
 
 import { createClient } from 'jsr:@supabase/supabase-js@2'
+import { createSupabaseContext } from 'npm:@supabase/server'
 
 import { ICON_LABELS, WORKSPACE_ACCENT_HEX } from './_workspace_look.ts'
 import { renderEmail, subjectFor } from './email-template.ts'
@@ -25,6 +26,35 @@ const RESEND_URL = 'https://api.resend.com/emails'
 /** Where the link points. Overridable so a preview deployment cannot send real mail. */
 const APP_URL = Deno.env.get('APP_URL') ?? 'https://map204.vercel.app'
 const FROM = Deno.env.get('MAIL_FROM') ?? 'Map204 <onboarding@resend.dev>'
+
+/* -------------------------------------------------------------------------- */
+/* Keys                                                                       */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * There are none in this file, and that is the fix.
+ *
+ * Three separate faults came from reading the keys by hand, each invisible in the
+ * source and each fatal on its own:
+ *
+ *   1. `SUPABASE_ANON_KEY` is a *legacy JWT key*. Building a client with it put that
+ *      key in the client's `Authorization` header, so verifying the caller's token
+ *      meant checking it against the anon key's signing secret. The gateway signs
+ *      with the project's own JWKS, and the two do not match -- so every signed-in
+ *      caller was refused with "token signature is invalid".
+ *   2. `auth.getUser()` with no argument reads the *client's session*, and an edge
+ *      function has none: no localStorage, nobody signed in as far as the process is
+ *      concerned. It refused every caller whatever token they presented.
+ *   3. `SUPABASE_PUBLISHABLE_KEYS` and `SUPABASE_SECRET_KEYS` hold a JSON *object*
+ *      keyed by name, not a string, and were read with a bare `Deno.env.get`.
+ *
+ * `withSupabase({ auth: 'user' })` does the one thing all three were attempting,
+ * with the project's real signing keys (`SUPABASE_JWKS`), and the runtime injects
+ * every variable it needs. So this function no longer reads, parses, or passes a key
+ * at all -- which also means there is nothing here for a secret to leak into.
+ *
+ * See https://supabase.com/docs/guides/functions/auth
+ */
 
 /*
  * A word about `onboarding@resend.dev`, because it is a trap and it was the reason
@@ -152,10 +182,12 @@ function respond(request: Request, body: unknown, status: number): Response {
 /* -------------------------------------------------------------------------- */
 
 /**
- * The whole handler, wrapped.
+ * The whole handler, wrapped twice.
+ *
+ * ## The outer wrapper: nothing escapes
  *
  * A throw anywhere in here is answered by the edge gateway, not by this function.
- * The gateway's own 502 is a fixed 60-byte body carrying `sb-error-code:
+ * The gateway's 502 is a fixed 60-byte body carrying `sb-error-code:
  * EDGE_FUNCTION_ERROR`, naming neither the message nor the stack and none of this
  * function's CORS headers -- which is precisely the confusion the CORS work above
  * was done to remove, one layer up:
@@ -166,10 +198,65 @@ function respond(request: Request, body: unknown, status: number): Response {
  * So nothing is allowed to escape. Every failure becomes a real response with CORS
  * on it, the reason is logged where the function logs can be read, and the caller
  * gets text it can put in a dialog.
+ *
+ * ## The inner wrapper: the SDK's context
+ *
+ * `createSupabaseContext` rather than `withSupabase`, and both the reason and the
+ * alternative are below the call. The short version: `withSupabase` answers CORS
+ * itself with `Access-Control-Allow-Origin: *`, which on a function that sends mail
+ * is an open relay, and it treats the preflight as an authenticated request it has
+ * to refuse. The docs' own escape hatch is the right tool here -- it verifies the
+ * token and hands back a context without ever touching the response.
+ *
+ * `auth: 'none'`, and this is deliberate rather than an oversight: the SDK verifies a
+ * token when one is present but does not *require* one, because a CORS preflight
+ * carries no `Authorization` header. `handle` requires one, from the verified
+ * claims, on the line `if (!ctx.authenticated)`. So the credential is checked, and
+ * checked by the SDK, which is the part that is hard to get right.
  */
+
+/** What the SDK's context is called. Only the fields actually used are named. */
+interface SupabaseContext {
+  authenticated: boolean
+  claims?: Record<string, unknown>
+  error?: { message?: string }
+  supabaseAdmin: ReturnType<typeof createClient>
+}
+
 Deno.serve(async (request) => {
+  // Every response goes through `respond`, and *only* through `respond`. The
+  // alternative -- `withSupabase` wrapping the handler -- is what the docs show, and
+  // it was tried here first, and it breaks this function twice over:
+  //
+  //   1. It answers CORS itself, before this handler runs, and what it sends is
+  //      `Access-Control-Allow-Origin: *` with a method list including DELETE. On a
+  //      function that sends mail that is an open relay: any website on the internet
+  //      could make it send, with a signed-in person as the unwitting trigger. The
+  //      allow-list above exists precisely to prevent that, and the SDK's wrapper
+  //      overrides it -- a preflight it answers itself never reaches the check.
+  //   2. It turns the OPTIONS preflight into an authenticated request, which carries
+  //      no Authorization header, so under `auth: 'user'` it is refused before the
+  //      handler sees it. That is the original bug in this file, arriving by a
+  //      different route.
+  //
+  // `createSupabaseContext` is the documented way out: "use it instead when you want
+  // to shape the response yourself" -- which is exactly this case, since every
+  // response here carries a deliberate allow-list. It verifies the token using the
+  // project's signing keys and hands back the same context, without ever touching
+  // the response.
+  const { data: context, error: contextError } = await createSupabaseContext(request, {
+    auth: 'none',
+  })
+
+  const ctx = (context ?? {
+    // No context: unauthenticated. `handle` refuses it, and the refusal carries the
+    // CORS headers, so the browser can read why.
+    authenticated: false,
+    error: { message: contextError?.message ?? 'Not signed in.' },
+  }) as unknown as SupabaseContext
+
   try {
-    return await handle(request)
+    return await handle(request, ctx)
   } catch (error) {
     // The stack rather than the message, and logged before the response, because
     // the response is deliberately vague: this is a share notification, not a
@@ -181,7 +268,7 @@ Deno.serve(async (request) => {
   }
 })
 
-async function handle(request: Request): Promise<Response> {
+async function handle(request: Request, ctx: SupabaseContext): Promise<Response> {
   // The preflight. Answered before anything else -- it carries no `Authorization`
   // header by definition, so every check below would refuse it.
   //
@@ -217,24 +304,64 @@ async function handle(request: Request): Promise<Response> {
     return respond(request, { error: 'documentId and to are required.' }, 400)
   }
 
-  const userClient = createClient(
-    Deno.env.get('SUPABASE_URL') ?? '',
-    Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-    { global: { headers: { Authorization: authHeader } } },
-  )
+  /*
+   * The caller's identity, already verified.
+   *
+   * `ctx` comes from `withSupabase({ auth: 'user' })`, which checks the caller's
+   * session token against `SUPABASE_JWKS` -- the project's real signing keys -- and
+   * hands back claims that have been verified rather than merely decoded. See the
+   * note above about the three ways this was done by hand before, and why each of
+   * them failed.
+   *
+   * So the claims below can be trusted: an id taken from an unverified token would
+   * make the ownership check that follows worthless, and that check is the only
+   * thing standing between this endpoint and being an open relay.
+   */
+  if (!ctx.authenticated) {
+    // The SDK's own reason, because an expired token and a forged one are different
+    // problems and used to arrive as the same "Not signed in."
+    return respond(request, { error: ctx.error?.message ?? 'Not signed in.' }, 401)
+  }
 
-  const { data: userData, error: userError } = await userClient.auth.getUser()
-  if (userError || !userData?.user) {
+  const claims = (ctx.claims ?? {}) as {
+    sub?: unknown
+    email?: unknown
+    name?: unknown
+    user_metadata?: { name?: unknown } | null
+  }
+
+  const me = {
+    id: typeof claims.sub === 'string' ? claims.sub : '',
+    email: typeof claims.email === 'string' ? claims.email : '',
+    name:
+      (typeof claims.user_metadata?.name === 'string' ? claims.user_metadata.name : undefined) ??
+      (typeof claims.name === 'string' ? claims.name : undefined) ??
+      'Someone',
+  }
+
+  if (!me.id) {
+    // A verified token with no subject is not something a real sign-in produces, so
+    // it is worth saying so in the logs rather than treating as anonymous.
+    console.error('[send-share-email] the verified token carries no subject claim.')
     return respond(request, { error: 'Not signed in.' }, 401)
   }
-  const me = userData.user
 
-  // The same rule the RLS policy applies to writes, so a viewer cannot use this
-  // to mail out the contents of a workspace they were only lent.
-  const admin = createClient(
-    Deno.env.get('SUPABASE_URL') ?? '',
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
-  )
+  /*
+   * The privileged client, for the two queries that have to see rows the caller
+   * cannot.
+   *
+   * `ctx.supabaseAdmin` is authenticated with the secret key and carries BYPASSRLS.
+   * The decision that spends it has already been made above: the caller is the owner
+   * or an editor, checked against `documents.owner_id` and
+   * `document_collaborators`. That is the same rule the RLS policies apply to
+   * writes, so a viewer -- somebody lent the map -- is refused.
+   *
+   * Reading `profiles` is the other one, and it is not the sharer's business whether
+   * an address has an account, so the lookup is done with elevated access and
+   * nothing but a boolean is taken from it. That boolean is what chooses between the
+   * two emails.
+   */
+  const admin = ctx.supabaseAdmin
 
   const { data: doc } = await admin
     .from('documents')

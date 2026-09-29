@@ -28,15 +28,55 @@ anything that sends mail has to run somewhere the key is not. This is an Edge
 Function that calls Resend's HTTP API with a key held as a server-side secret.
 
 The function is also the authorisation boundary. It re-checks that the caller is
-signed in **and** is the owner or an editor of that workspace, using the service role
-key, before it will name the workspace in an email. Without that check the endpoint
-would be an open relay: anyone signed in could ask it to mail the contents of any
-workspace they had been lent, to any address.
+signed in **and** is the owner or an editor of that workspace, before it will name the
+workspace in an email. Without that check the endpoint would be an open relay: anyone
+signed in could ask it to mail the contents of any workspace they had been lent, to
+any address.
 
 A failed email never undoes the share. The grant is written first — to
 `document_collaborators`, or to `document_invites` when the recipient has no account
 yet — and the mail is a notification afterwards. The dialog says so plainly if it
 does not go out.
+
+## No keys are in this file
+
+There is no `Deno.env.get('SUPABASE_...')` anywhere in `index.ts`, and there is not
+meant to be. Every key and every secret lives in Supabase's own environment — Edge
+Functions → Secrets for `RESEND_API_KEY`, `MAIL_FROM` and `APP_URL`, and repository
+secrets for CI. Nothing is read from a file in this tree, and `.env` is gitignored so
+that a local one cannot be committed by accident.
+
+The caller's identity comes from
+[`@supabase/server`](https://supabase.com/docs/guides/functions/auth), which verifies
+their token against `SUPABASE_JWKS` — the project's real signing keys — and hands back
+claims that have been verified rather than merely decoded. Three faults came from
+doing that by hand, and each one made every email fail on its own:
+
+1. `createClient(url, SUPABASE_ANON_KEY)` put a *legacy JWT key* in the client's
+   `Authorization` header, so checking the caller's token meant checking it against
+   the anon key's secret. The project signs with JWKS, and the two do not match:
+   `invalid JWT: ... token signature is invalid`.
+2. `auth.getUser()` with no argument reads the *client's session*, and an edge
+   function has none — no `localStorage`.
+3. `SUPABASE_PUBLISHABLE_KEYS` and `SUPABASE_SECRET_KEYS` hold a JSON **object**
+   keyed by name, not a string.
+
+The SDK is called as `createSupabaseContext(request, { auth: 'none' })` rather than
+the `withSupabase` wrapper the docs show first, for a reason specific to this
+function: the wrapper **answers the response**, and what it sends is
+
+```
+access-control-allow-origin: *
+access-control-allow-methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+```
+
+That is an open relay on a function that sends mail, and it silently overrides the
+allow-list above — a preflight the SDK answers itself never reaches the handler.
+`createSupabaseContext` is the documented way to keep the response ("use it instead
+when you want to shape the response yourself") while still having the token verified
+the right way. `auth: 'none'` because a CORS preflight carries no `Authorization`
+header; `handle` then requires `ctx.authenticated`, so the credential is still
+mandatory.
 
 ## One-time setup
 

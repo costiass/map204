@@ -117,6 +117,61 @@ const BREAKS = [
     expect: 'the refusal is not logged with the status Resend returned',
   },
   {
+    // The SDK is the whole of the caller verification. Take it away and the
+    // function has no way of knowing who is asking.
+    label: 'the SDK that verifies the caller is removed',
+    file: 'index.ts',
+    from: 'createSupabaseContext(request,',
+    to: 'noContext(request,',
+    expect: 'does not call createSupabaseContext',
+  },
+  {
+    // 'user' looks more correct than 'none' and is fatal here: the SDK would refuse
+    // the preflight, which carries no Authorization header, before the function runs.
+    label: "the SDK goes back to auth: 'user', which refuses the preflight",
+    file: 'index.ts',
+    from: "auth: 'none',",
+    to: "auth: 'user',",
+    expect: "auth: 'none'",
+  },
+  {
+    // The wrapper, not the context. It answers CORS itself with
+    // Access-Control-Allow-Origin: *, which on a function that sends mail is an open
+    // relay -- and it overrides the allow-list without the handler ever seeing the
+    // request. This one was tried first, and the tests caught it.
+    label: 'the handler is wrapped in withSupabase, which answers CORS with a wildcard',
+    file: 'index.ts',
+    from: "import { createSupabaseContext } from 'npm:@supabase/server'",
+    to: "import { withSupabase } from 'npm:@supabase/server'\nvoid withSupabase(",
+    expect: 'withSupabase wraps the handler',
+  },
+  {
+    // With auth: 'none' the SDK does not *require* a token, so the handler is the
+    // only thing refusing an anonymous caller. This endpoint sends mail on request.
+    label: "the handler stops requiring an authenticated caller -- auth: 'none' permits any",
+    file: 'index.ts',
+    from: '  if (!ctx.authenticated) {',
+    to: '  if (false) {',
+    expect: 'does not check ctx.authenticated',
+  },
+  {
+    // The id has to come from the verified claims. Anything else makes the
+    // ownership check below meaningless.
+    label: 'the caller id stops coming from the verified claims',
+    file: 'index.ts',
+    from: "id: typeof claims.sub === 'string' ? claims.sub : '',",
+    to: "id: typeof claims.email === 'string' ? claims.email : '',",
+    expect: 'not read from ctx.claims',
+  },
+  {
+    // Reading a key by hand is what caused three of the faults in the first place.
+    label: 'a key is read out of the environment again',
+    file: 'index.ts',
+    from: "const resendKey = Deno.env.get('RESEND_API_KEY')",
+    to: "const resendKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''",
+    expect: 'SUPABASE_ANON_KEY',
+  },
+  {
     label: 'the preflight is answered 405 — the bug that was reported',
     file: 'index.ts',
     from: "  if (request.method === 'OPTIONS') {\n    return respond(request, null, 204)\n  }\n\n",

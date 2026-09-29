@@ -12,11 +12,22 @@ dist
 dist-ssr
 *.local
 
-# Edge Function secrets. `*.local` covers .env.local, but be explicit: a file
-# holding RESEND_API_KEY must never be committed, whatever it is called.
+# Every .env, whatever it is called and wherever it sits.
+#
+# `*.local` covers `.env.local` and nothing else, so a plain `.env` -- which is the
+# name Vite reads VITE_SUPABASE_ANON_KEY from -- was not ignored and would have been
+# committed. Secrets belong in Supabase's own environment (Edge Functions > Secrets,
+# and the repository secrets for CI), never in a file in this tree. Nothing here
+# should be reading a key from disk.
+.env
+.env.*
+!.env.example
 supabase/functions/.env
 supabase/functions/.env.*
 !supabase/functions/.env.example
+
+# `supabase/.temp` holds a linked project's credentials from `supabase link`.
+supabase/.temp
 
 # Editor directories and files
 .vscode/*

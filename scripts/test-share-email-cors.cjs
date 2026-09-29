@@ -267,6 +267,114 @@ const source = code(fn)
   }
 }
 
+/* -- 0d. Keys and tokens are the SDK's job, not this file's ------------------ */
+
+/*
+ * `withSupabase({ auth: 'user' })` verifies the caller's session token against
+ * `SUPABASE_JWKS` -- the project's real signing keys -- and hands back claims that
+ * have been verified rather than merely decoded. That is what
+ * https://supabase.com/docs/guides/functions/auth recommends, and adopting it
+ * removed three separate faults that each made every email fail:
+ *
+ *   1. `createClient(url, SUPABASE_ANON_KEY)` put a *legacy JWT key* in the client's
+ *      Authorization header, so verifying the caller's token checked it against the
+ *      anon key's signing secret. The project signs with JWKS, so every signed-in
+ *      caller was refused: "token signature is invalid".
+ *   2. `auth.getUser()` with no argument reads the client *session*, and an edge
+ *      function has none.
+ *   3. `SUPABASE_PUBLISHABLE_KEYS` and `SUPABASE_SECRET_KEYS` hold a JSON object
+ *      keyed by name, and were read with a bare `Deno.env.get`.
+ *
+ * So these check the file does not take the work back on. Each is a specific, named
+ * symbol rather than a word, because a word appears in the comments that explain
+ * why the symbol is gone.
+ */
+{
+  checked += 1
+  const handler = code(fn)
+
+  // The SDK is what authenticates the caller.
+  //
+  // `createSupabaseContext`, not `withSupabase`. Both come from the same package and
+  // both verify the token with the project's signing keys, but `withSupabase` also
+  // *answers the response*, and what it sends is:
+  //
+  //   access-control-allow-origin: *
+  //   access-control-allow-methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+  //
+  // That is an open relay on a function that sends mail, and it overrides the
+  // allow-list in this file without ever reaching the check: a preflight the SDK
+  // answers itself is a preflight the handler never sees. The docs' own escape is
+  // `createSupabaseContext`, "when you want to shape the response yourself", which
+  // is exactly this function's situation.
+  if (!/createSupabaseContext\(/.test(handler)) {
+    fail(
+      'the function does not call createSupabaseContext. Token verification belongs ' +
+        "to the SDK -- it uses the project's signing keys, which the legacy anon " +
+        "key's secret does not match.",
+    )
+  }
+
+  // ...and not the wrapper, which would take the response away from `respond`.
+  if (/withSupabase\(/.test(handler)) {
+    fail(
+      'withSupabase wraps the handler. It answers CORS itself, with ' +
+        'Access-Control-Allow-Origin: *, and a function that sends mail cannot allow ' +
+        'every origin on the internet. Use createSupabaseContext and let respond() ' +
+        'apply the allow-list.',
+    )
+  }
+
+  // ...and with no credential check, because the preflight has no token to check.
+  if (!/createSupabaseContext\([\s\S]{0,80}auth:\s*'none'/.test(handler)) {
+    fail(
+      "createSupabaseContext is not called with auth: 'none'. A CORS preflight " +
+        "carries no Authorization header, so 'user' would have the SDK refuse it " +
+        'before this function runs: the preflight answered by a refusal, the browser ' +
+        'never sends the POST, and the feature is dead with a CORS error naming no ' +
+        'cause.',
+    )
+  }
+
+  // Which means the function has to make the decision itself.
+  if (!/if\s*\(\s*!ctx\.authenticated\s*\)/.test(handler)) {
+    fail(
+      "the handler does not check ctx.authenticated. With auth: 'none' the SDK " +
+        "verifies a token when one is present but does not require one, so nothing " +
+        'else refuses an anonymous caller -- and this endpoint sends mail on request.',
+    )
+  }
+
+  // The id used for the ownership check has to come from the verified claims.
+  if (!/claims\.sub/.test(handler) && !/claims\?\.sub/.test(handler)) {
+    fail(
+      'the caller id is not read from ctx.claims. An id taken from anywhere other than ' +
+        'the verified token would make the ownership check below meaningless, and that ' +
+        'check is the only thing stopping this being an open relay.',
+    )
+  }
+
+  // Nothing reads a key out of the environment any more.
+  for (const name of ['SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_SECRET_KEYS', 'SUPABASE_PUBLISHABLE_KEYS']) {
+    if (handler.includes("Deno.env.get('" + name + "'")) {
+      fail(
+        name + ' is read out of the environment again. The SDK reads it, from the ' +
+          'same variables, and does the parsing the JSON key objects need. Reading it ' +
+          'by hand is what caused the three faults above.',
+      )
+    }
+  }
+
+  // ...and no token is verified by hand.
+  if (/getUser\(/.test(handler)) {
+    fail(
+      'auth.getUser() is called. With no argument it reads the client session, which an ' +
+        'edge function does not have; with an argument it checks the token against the ' +
+        "key the client was built with, which is not the project's signing key.",
+    )
+  }
+}
+
 /* -- 1. The preflight is answered ------------------------------------------- */
 
 {
@@ -397,7 +505,16 @@ const source = code(fn)
 
   const checks = [
     { what: 'the bearer token', pattern: /Authorization[\s\S]{0,80}Bearer / },
-    { what: 'that the token resolves to a user', pattern: /auth\.getUser\(\)/ },
+    /*
+     * Resolved by the SDK, from the verified token.
+     *
+     * This used to assert `auth.getUser()`. It passed a function that could never
+     * succeed, because a substring cannot tell a working call from one that always
+     * fails -- and `getUser()` with no argument always fails in an edge function, as
+     * the auth docs state plainly: "If no JWT is provided, the JWT from the current
+     * session is used", and there is no session here.
+     */
+    { what: 'that the token resolves to a user', pattern: /ctx\.authenticated/ },
     { what: 'that the caller owns the workspace', pattern: /owner_id\s*===\s*me\.id/ },
     { what: 'that a collaborator may share', pattern: /document_collaborators/ },
     { what: 'that a viewer may not', pattern: /canShare/ },
