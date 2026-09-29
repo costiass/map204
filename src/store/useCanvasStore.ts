@@ -582,11 +582,29 @@ export const useCanvasStore = create<CanvasStore>()(
           const existing = state.doc.pages.find((p) => p.id === pageId)
           if (!existing) return
           existing.title = page.title
-          existing.viewport = page.viewport
+          /*
+           * The camera is *not* taken from the incoming page.
+           *
+           * Everything else in this handler is somebody else's edit and belongs here:
+           * they moved a card, so the card moves. The camera is not theirs to move.
+           * Two people in one map are looking at two different places, and copying a
+           * remote viewport means whoever panned last decided where this reader is
+           * standing -- which is the bug that made the viewport a document field in
+           * the first place, and the reason it was taken out of `pageSignature` and
+           * the broadcast.
+           *
+           * It is also the only assignment here that used to skip the settings file,
+           * so a remote update both moved this reader's camera and left their
+           * remembered one untouched -- two things wrong, and the second one silent.
+           */
           existing.elements = page.elements
           existing.groups = page.groups
           existing.connections = page.connections
           existing.updatedAt = page.updatedAt
+          // Re-save this reader's camera, so the remembered position cannot drift
+          // away from what is on screen while somebody else is editing. Cheap: the
+          // write is debounced and merged, and the value is the one just restored.
+          recallViewport(state.documentId ?? 'local', pageId, existing.viewport)
           // Selections may point at objects that no longer exist.
           const cardIds = new Set(page.elements.map((c) => c.id))
           const groupIds = new Set(page.groups.map((g) => g.id))
@@ -667,6 +685,21 @@ export const useCanvasStore = create<CanvasStore>()(
           page.viewport =
             rememberViewport(state.documentId ?? 'local', pageId) ?? fallbackViewport(page.viewport)
         })
+
+        /*
+         * Record which page this person was on, not just where the camera was.
+         *
+         * Without this the camera of every page is saved and the *page* is not, so a
+         * workspace with forty pages always reopens on the first one. "Where I left
+         * it" is mostly about which page that was.
+         *
+         * Deliberately outside the `set` above. `recallViewport` hands the camera to
+         * the sink, and the sink reads `activePageId` back out of the store -- so
+         * calling it from inside the mutation would record whichever value the store
+         * happened to hold mid-write, which is a race with a wrong answer rather than
+         * an error.
+         */
+        recallViewport(get().documentId ?? 'local', pageId, get().activePage()?.viewport ?? page.viewport)
       },
 
       addPage: (title) => {

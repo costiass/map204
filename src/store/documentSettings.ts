@@ -308,6 +308,44 @@ export function forgetQueuedSettings(documentId?: string, userId?: string): void
  *
  * Safe to call repeatedly: the last registration wins, and there is only ever one.
  */
+/**
+ * Write anything waiting, right now.
+ *
+ * The debounce is 900ms, which is right for a pointer sweeping across a canvas and
+ * badly wrong for the last thing anybody did before closing the tab. Without this,
+ * "pan somewhere, close the tab" -- the single most common way a camera is set --
+ * loses the camera entirely, and the bug looks intermittent because it depends on
+ * how fast the tab went away.
+ */
+export function flushQueuedSettings(): void {
+  for (const key of [...pending.keys()]) {
+    const timer = pending.get(key)
+    if (timer !== undefined) clearTimeout(timer)
+    pending.delete(key)
+
+    const toWrite = queued.get(key)
+    queued.delete(key)
+    if (!toWrite) continue
+
+    const separator = key.indexOf(':')
+    // A key that cannot be split is a bug, and writing to `undefined` would be a
+    // 400 on every keystroke rather than one visible failure.
+    if (separator < 0) continue
+    void writeDocumentSettings(key.slice(0, separator), key.slice(separator + 1), toWrite)
+  }
+}
+
+/**
+ * The listeners `uninstallCameraSink` has to be able to remove.
+ *
+ * Held at module scope because `install` and `uninstall` are separate calls and a
+ * closure would hand the second one a function it had no reference to. Without this
+ * a hot reload stacks listeners: each flushes the same key, so the worst case is the
+ * same write twice and the best is a listener outliving the component that made it.
+ */
+const onHideRef: { current: (() => void) | null } = { current: null }
+const onVisibilityRef: { current: (() => void) | null } = { current: null }
+
 export function installCameraSink(): void {
   setCameraSink((documentId, pageId, viewport) => {
     // 'local' is the canvas store's name for "no workspace open", which is what an
@@ -325,10 +363,38 @@ export function installCameraSink(): void {
       },
     })
   })
+
+  // The debounce has a floor, and the last camera before a tab closes is inside it.
+  //
+  // `pagehide` is the event that actually fires on mobile Safari, where a tab is
+  // dismissed by a swipe rather than a button. `visibilitychange` covers the rest
+  // and also covers switching to another tab, which is the same shape of loss.
+  //
+  // `beforeunload` is deliberately not used: it cannot await a fetch, so the write
+  // would be cancelled by the navigation it was racing -- which would look like it
+  // worked and lose the camera anyway.
+  if (typeof window === 'undefined') return
+
+  const onHide = () => flushQueuedSettings()
+  const onVisibility = () => {
+    if (document.visibilityState === 'hidden') flushQueuedSettings()
+  }
+
+  onHideRef.current = onHide
+  onVisibilityRef.current = onVisibility
+  window.addEventListener('pagehide', onHide)
+  document.addEventListener('visibilitychange', onVisibility)
 }
 
 export function uninstallCameraSink(): void {
   setCameraSink(null)
+  if (typeof window === 'undefined') return
+  if (onHideRef.current) window.removeEventListener('pagehide', onHideRef.current)
+  if (onVisibilityRef.current) {
+    document.removeEventListener('visibilitychange', onVisibilityRef.current)
+  }
+  onHideRef.current = null
+  onVisibilityRef.current = null
 }
 
 /**
