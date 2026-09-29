@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { AuthGuard } from '@/components/AuthGuard'
+import { DevPanel } from '@/components/DevPanel'
 import { applyDocumentSettings, installCameraSink, uninstallCameraSink } from '@/store/documentSettings'
 import { Canvas } from '@/components/Canvas'
 import { ConnectionTree } from '@/components/ConnectionTree'
@@ -49,6 +50,40 @@ export default function App() {
     return () => uninstallCameraSink()
   }, [])
 
+  /*
+   * Ctrl+Shift, on its own, toggles the developer panel.
+   *
+   * Two things about this are easy to get wrong and both were:
+   *
+   *   * The check is on `key === 'Shift'`, not on the combination. With only Shift
+   *     newly pressed, the event reports `key` as the name of the key already held,
+   *     so on most layouts Ctrl+Shift arrives as `key === 'Control'`. Matching on
+   *     that would fire the panel on every Ctrl+press, and Ctrl+Shift+C to copy
+   *     would open it.
+   *
+   *   * Nothing happens on key *up*. The first version closed the panel when Shift
+   *     was released, which meant it was never open: you pressed the shortcut, the
+   *     panel appeared for as long as it took to let go of the key. It is a panel
+   *     you are meant to read, so it stays until it is closed -- by pressing the
+   *     shortcut again, by the cross, or by any other Shift chord.
+   */
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Shift' && event.ctrlKey) {
+        event.preventDefault()
+        setDevOpen((open) => !open)
+        return
+      }
+      // A different key with Shift held is a real shortcut -- copy, paste, and the
+      // app's own. That is not a request for the panel, so it gets out of the way
+      // rather than sitting there over whatever is being worked on.
+      if (event.shiftKey) setDevOpen(false)
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
   useKeyboardShortcuts()
   usePageSync()
 
@@ -74,6 +109,7 @@ export default function App() {
   const [showShare, setShowShare] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [loadingDoc, setLoadingDoc] = useState(false)
+  const [devOpen, setDevOpen] = useState(false)
   const settings = useUserSettings((s) => s.settings)
   const loadSettings = useUserSettings((s) => s.loadSettings)
 
@@ -237,6 +273,10 @@ export default function App() {
         <StatusBar />
         <InsertCardDialog />
         <Toasts />
+        {/* Outside the `user` guard, deliberately: the panel exists to explain why
+            the camera is not being saved, and "not signed in" is one of the
+            reasons. Hiding it until there is a user would hide the answer. */}
+        {devOpen ? <DevPanel onClose={() => setDevOpen(false)} /> : null}
       </div>
     </AuthGuard>
   )

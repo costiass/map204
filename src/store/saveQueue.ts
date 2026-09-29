@@ -30,6 +30,31 @@ export interface SaveQueueOptions<T> {
   /** Used between retries. Injected so a test does not have to wait. */
   setTimer?: (fn: () => void, ms: number) => unknown
   clearTimer?: (handle: unknown) => void
+  /** Called whenever anything a developer would want to see changes. */
+  onState?: (state: SaveQueueState) => void
+}
+
+/**
+ * Everything a developer menu needs, and nothing it has to compute.
+ *
+ * The question this exists to answer is "why is my camera not being saved", and the
+ * answer is always one of four things: nothing was queued, a write is in flight, a
+ * write failed, or a write succeeded. None of them can be read out of the database
+ * -- a successful write and a queue that never emptied look identical from there.
+ */
+export interface SaveQueueState {
+  /** Something is waiting to be written. */
+  queued: boolean
+  /** A write has started and not finished. */
+  inFlight: boolean
+  /** How many times the current value has been attempted, including the first. */
+  attempts: number
+  /** Milliseconds since the last successful write, or null if there has not been one. */
+  lastSuccessAgeMs: number | null
+  /** The last failure, if the most recent attempt failed. */
+  lastError: string | null
+  /** How many values have been written successfully since this queue was made. */
+  writes: number
 }
 
 export interface SaveQueue<T> {
@@ -44,7 +69,7 @@ export interface SaveQueue<T> {
 }
 
 export function createSaveQueue<T>(options: SaveQueueOptions<T>): SaveQueue<T> {
-  const { debounceMs, write, onError, retries = 2 } = options
+  const { debounceMs, write, onError, retries = 2, onState } = options
 
   const setTimer = options.setTimer ?? ((fn, ms) => setTimeout(fn, ms))
   const clearTimer = options.clearTimer ?? ((handle) => clearTimeout(handle as never))
@@ -54,6 +79,27 @@ export function createSaveQueue<T>(options: SaveQueueOptions<T>): SaveQueue<T> {
   let timer: unknown = null
   let inFlight = false
   let failedAttempts = 0
+  let lastError: string | null = null
+  let lastSuccessAt: number | null = null
+  let writes = 0
+
+  /**
+   * Report the state, and report it whenever it changes.
+   *
+   * `lastSuccessAgeMs` is an age rather than a timestamp because the interesting
+   * question is "how long ago", and a menu that has to compute that from a clock is
+   * a menu that is wrong whenever it re-renders.
+   */
+  const report = () => {
+    onState?.({
+      queued: pending !== null,
+      inFlight,
+      attempts: failedAttempts,
+      lastSuccessAgeMs: lastSuccessAt === null ? null : Date.now() - lastSuccessAt,
+      lastError,
+      writes,
+    })
+  }
 
   const schedule = () => {
     if (timer !== null) clearTimer(timer)
@@ -61,6 +107,7 @@ export function createSaveQueue<T>(options: SaveQueueOptions<T>): SaveQueue<T> {
       timer = null
       void drain()
     }, debounceMs)
+    report()
   }
 
   async function drain(): Promise<void> {
@@ -76,14 +123,19 @@ export function createSaveQueue<T>(options: SaveQueueOptions<T>): SaveQueue<T> {
     if (value === null) return
 
     inFlight = true
+    report()
     try {
       await write(value)
       // Only clear once the write has actually succeeded. Clearing before was the
       // bug: an error lost the value, and there was nothing left to retry.
       if (pending === value) pending = null
       failedAttempts = 0
+      lastError = null
+      lastSuccessAt = Date.now()
+      writes += 1
     } catch (error) {
       failedAttempts += 1
+      lastError = error instanceof Error ? error.message : String(error)
       onError?.(error)
       if (failedAttempts <= retries) {
         // The value is still in `pending`, so this is a genuine retry of the same
@@ -92,6 +144,7 @@ export function createSaveQueue<T>(options: SaveQueueOptions<T>): SaveQueue<T> {
       }
     } finally {
       inFlight = false
+      report()
     }
   }
 
@@ -120,6 +173,10 @@ export function createSaveQueue<T>(options: SaveQueueOptions<T>): SaveQueue<T> {
       pending = null
       inFlight = false
       failedAttempts = 0
+      lastError = null
+      lastSuccessAt = null
+      writes = 0
+      report()
     },
   }
 }

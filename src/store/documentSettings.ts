@@ -32,7 +32,7 @@
  */
 
 import { supabase } from '@/lib/supabase'
-import { createSaveQueue, type SaveQueue } from '@/store/saveQueue'
+import { createSaveQueue, type SaveQueue, type SaveQueueState } from '@/store/saveQueue'
 import { handleWriteError } from '@/store/writeErrors'
 import { recallViewport, setCameraSink } from '@/store/viewportStore'
 import { useUserSettings } from '@/store/userSettings'
@@ -239,10 +239,131 @@ function queueFor(userId: string, documentId: string): SaveQueue<DocumentSetting
         'docSettings:save',
       )
     },
+    onState: (state) => {
+      diagnostics.set(key, { ...state })
+      emit()
+    },
   })
 
   queues.set(key, queue)
   return queue
+}
+
+/* -------------------------------------------------------------------------- */
+/* Diagnostics                                                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What a developer menu needs to answer "is my camera being saved, and if not why".
+ *
+ * The four states a write can be in, none of which can be told apart by looking at
+ * the database -- a write that succeeded and a queue that never emptied look the
+ * same from there:
+ *
+ *   queued      something is waiting, the debounce has not elapsed
+ *   inFlight    a write has started and not finished
+ *   lastError   the last attempt failed; the value is being retried
+ *   lastSuccess the last attempt worked
+ *
+ * Plus the two reasons nothing is ever queued, which are not errors at all and so
+ * produce no error: no `userId`, and `documentId === 'local'`. Both happened, and
+ * both look exactly like "the camera is not being saved".
+ */
+export interface SettingsDiagnostics {
+  /** The camera sink is installed and will be called. */
+  sinkInstalled: boolean
+  /** The signed-in account. Without one, nothing is ever queued. */
+  userId: string | null
+  /** The open workspace. 'local' means there is nowhere to save to. */
+  documentId: string | null
+  /** Why nothing is queued, if that is the case. Null when it is queued fine. */
+  blockedBecause: string | null
+  /** What this browser has waiting, before it is written. */
+  pending: DocumentSettings | null
+  /** What the server last returned. The only honest answer to "is it saved". */
+  fromServer: DocumentSettings | null
+  /** When `fromServer` was read, so a stale reading is visibly stale. */
+  fromServerAt: number | null
+  state: SaveQueueState
+}
+
+const diagnostics = new Map<string, SaveQueueState>()
+
+/** The last value queued per workspace, so the menu can show what is on its way. */
+const queuedValues = new Map<string, DocumentSettings>()
+
+/** The last read from the server, so the menu can render without another round trip. */
+let serverCopy: { settings: DocumentSettings; at: number } | null = null
+
+const EMPTY_STATE: SaveQueueState = {
+  queued: false,
+  inFlight: false,
+  attempts: 0,
+  lastSuccessAgeMs: null,
+  lastError: null,
+  writes: 0,
+}
+
+let listener: (() => void) | null = null
+let sinkInstalled = false
+
+function emit(): void {
+  listener?.()
+}
+
+/** Subscribe to changes. Returns the unsubscribe, for a component's cleanup. */
+export function subscribeSettingsDiagnostics(fn: () => void): () => void {
+  listener = fn
+  fn()
+  return () => {
+    if (listener === fn) listener = null
+  }
+}
+
+export function getSettingsDiagnostics(): SettingsDiagnostics {
+  const userId = useUserSettings.getState().userId
+  const documentId = useCanvasStore.getState().documentId
+  const key = userId && documentId ? `${userId}:${documentId}` : null
+
+  // The two reasons nothing is ever queued, named rather than left to be inferred
+  // from an absence. Both produce no error and no write, which is the worst shape a
+  // silent failure can have.
+  let blockedBecause: string | null = null
+  if (!sinkInstalled) blockedBecause = 'the camera sink is not installed'
+  else if (!userId) blockedBecause = 'not signed in, so there is no account to save against'
+  else if (!documentId) blockedBecause = 'no workspace is open'
+  else if (documentId === 'local') blockedBecause = 'this is an unsaved map, which has no file'
+
+  return {
+    sinkInstalled,
+    userId,
+    documentId,
+    blockedBecause,
+    pending: key ? (queuedValues.get(key) ?? null) : null,
+    fromServer: serverCopy?.settings ?? null,
+    fromServerAt: serverCopy?.at ?? null,
+    state: (key && diagnostics.get(key)) || EMPTY_STATE,
+  }
+}
+
+/**
+ * Read the file back from the server and remember it, so the menu can show the two
+ * side by side.
+ *
+ * This is the check that answers the actual question. A write that succeeded and a
+ * write that never left the browser are indistinguishable from the database; putting
+ * the queued value next to the stored one is the difference between "it saved" and
+ * "it looks like it saved", and it separates a failed write from one never attempted.
+ */
+export async function readSettingsFromServer(): Promise<DocumentSettings | null> {
+  const userId = useUserSettings.getState().userId
+  const documentId = useCanvasStore.getState().documentId
+  if (!userId || !documentId || !supabase) return null
+
+  const loaded = await loadDocumentSettings(userId, documentId)
+  serverCopy = { settings: loaded, at: Date.now() }
+  emit()
+  return loaded
 }
 
 /**
@@ -259,6 +380,9 @@ export function queueSettings(
 ): void {
   if (!userId || !documentId) return
 
+  const key = `${userId}:${documentId}`
+  const alreadyQueued = queuedValues.get(key)
+
   queueFor(userId, documentId).push((current) => {
     const base = current ?? emptySettings()
     return {
@@ -272,6 +396,18 @@ export function queueSettings(
         pages: { ...base.position.pages, ...(patch.position?.pages ?? {}) },
       },
     }
+  })
+
+  // Remembered for the developer menu: the queue itself has no getter, and this is
+  // the value the next write is about to carry.
+  queuedValues.set(key, {
+    version: SETTINGS_VERSION,
+    defaults: patch.defaults ?? alreadyQueued?.defaults ?? null,
+    position: {
+      activePageId:
+        patch.position?.activePageId ?? alreadyQueued?.position.activePageId ?? null,
+      pages: { ...(alreadyQueued?.position.pages ?? {}), ...(patch.position?.pages ?? {}) },
+    },
   })
 }
 
@@ -358,6 +494,8 @@ const onHideRef: { current: (() => void) | null } = { current: null }
 const onVisibilityRef: { current: (() => void) | null } = { current: null }
 
 export function installCameraSink(): void {
+  sinkInstalled = true
+
   setCameraSink((documentId, pageId, viewport) => {
     // 'local' is the canvas store's name for "no workspace open", which is what an
     // unsaved scratch map is. There is nowhere to put a file for it, and nobody to
@@ -399,6 +537,7 @@ export function installCameraSink(): void {
 
 export function uninstallCameraSink(): void {
   setCameraSink(null)
+  sinkInstalled = false
   if (typeof window === 'undefined') return
   if (onHideRef.current) window.removeEventListener('pagehide', onHideRef.current)
   if (onVisibilityRef.current) {

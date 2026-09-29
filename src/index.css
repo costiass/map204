@@ -1435,6 +1435,41 @@ body {
   .cc-countdown {
     animation: none;
   }
+
+  /* The developer panel's dot is information too: it says a write is happening.
+     It stops pulsing but keeps its colour, because the colour is the signal and
+     the pulse is only the emphasis. */
+  .cc-saving-dot {
+    animation: none !important;
+  }
+}
+
+/*
+ * The developer panel's "a write is happening" dot.
+ *
+ * Named rather than inlined so `prefers-reduced-motion` can switch it off, which
+ * an inline `animation` property in a style attribute cannot be reached by. The dot
+ * is information — a static amber dot says the same thing, more quietly — so it
+ * loses the pulse and keeps the colour.
+ */
+@keyframes cc-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.cc-saving-dot {
+  animation: cc-pulse 1s ease-in-out infinite;
+}
+
+/* The dot when nothing is in flight. Overrides the pulse for the still states, so
+   the class can stay on the element and only the animation changes. */
+.cc-saving-dot-still {
+  animation: none;
 }
 
 .cc-modal-backdrop {
