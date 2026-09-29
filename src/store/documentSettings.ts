@@ -32,6 +32,7 @@
  */
 
 import { supabase } from '@/lib/supabase'
+import { createSaveQueue, type SaveQueue } from '@/store/saveQueue'
 import { handleWriteError } from '@/store/writeErrors'
 import { recallViewport, setCameraSink } from '@/store/viewportStore'
 import { useUserSettings } from '@/store/userSettings'
@@ -203,18 +204,53 @@ export async function loadDocumentSettings(
 /* Writing                                                                     */
 /* -------------------------------------------------------------------------- */
 
-/** A camera move arrives per wheel tick, so writes are batched. */
-const SAVE_DEBOUNCE_MS = 900
+/**
+ * How long to wait before writing.
+ *
+ * The same figure the default-style save uses (`userSettings.ts`, 400ms), on
+ * purpose. They are both "a change the person made, remembered shortly afterwards",
+ * and there is no reason the camera should take more than twice as long to be
+ * remembered as the colours beside it. It was 900ms, which meant a pan followed by
+ * a quick look elsewhere and back was not written before the second move replaced
+ * the first.
+ */
+const SAVE_DEBOUNCE_MS = 400
 
-const pending = new Map<string, ReturnType<typeof setTimeout>>()
-const queued = new Map<string, DocumentSettings>()
+/** One queue per person per workspace, so two maps do not overwrite each other. */
+const queues = new Map<string, SaveQueue<DocumentSettings>>()
+
+function emptySettings(): DocumentSettings {
+  return { version: SETTINGS_VERSION, defaults: null, position: { activePageId: null, pages: {} } }
+}
+
+function queueFor(userId: string, documentId: string): SaveQueue<DocumentSettings> {
+  const key = `${userId}:${documentId}`
+  const existing = queues.get(key)
+  if (existing) return existing
+
+  const queue = createSaveQueue<DocumentSettings>({
+    debounceMs: SAVE_DEBOUNCE_MS,
+    write: (settings) => writeDocumentSettings(userId, documentId, settings),
+    onError: (error) => {
+      // Reported, not swallowed. A camera that quietly stops being remembered is
+      // indistinguishable from one that was never remembered.
+      void handleWriteError(
+        { code: 'settings:save', message: error instanceof Error ? error.message : String(error) },
+        'docSettings:save',
+      )
+    },
+  })
+
+  queues.set(key, queue)
+  return queue
+}
 
 /**
  * Remember something about this workspace for this person.
  *
- * Merged into whatever is already queued rather than replacing it, so a camera move
+ * Merged into whatever is still waiting rather than replacing it, so a camera move
  * followed by a page switch one tick later is one write carrying both, and neither
- * is lost.
+ * is lost. That merge is the queue's job, which is why it is in one place.
  */
 export function queueSettings(
   userId: string,
@@ -223,37 +259,23 @@ export function queueSettings(
 ): void {
   if (!userId || !documentId) return
 
-  const key = `${userId}:${documentId}`
-  const current = queued.get(key) ?? { ...EMPTY_SETTINGS, position: { activePageId: null, pages: {} } }
-
-  const next: DocumentSettings = {
-    version: SETTINGS_VERSION,
-    defaults: patch.defaults !== undefined ? patch.defaults : current.defaults,
-    position: {
-      activePageId:
-        patch.position?.activePageId !== undefined
-          ? patch.position.activePageId
-          : current.position.activePageId,
-      pages: { ...current.position.pages, ...(patch.position?.pages ?? {}) },
-    },
-  }
-
-  queued.set(key, next)
-
-  const existing = pending.get(key)
-  if (existing) clearTimeout(existing)
-  pending.set(
-    key,
-    setTimeout(() => {
-      pending.delete(key)
-      const toWrite = queued.get(key)
-      queued.delete(key)
-      if (toWrite) void writeDocumentSettings(userId, documentId, toWrite)
-    }, SAVE_DEBOUNCE_MS),
-  )
+  queueFor(userId, documentId).push((current) => {
+    const base = current ?? emptySettings()
+    return {
+      version: SETTINGS_VERSION,
+      defaults: patch.defaults !== undefined ? patch.defaults : base.defaults,
+      position: {
+        activePageId:
+          patch.position?.activePageId !== undefined
+            ? patch.position.activePageId
+            : base.position.activePageId,
+        pages: { ...base.position.pages, ...(patch.position?.pages ?? {}) },
+      },
+    }
+  })
 }
 
-/** Write immediately, and report whether it worked. */
+/** Write now, and reject on failure so the queue retries rather than losing it. */
 async function writeDocumentSettings(
   userId: string,
   documentId: string,
@@ -266,11 +288,10 @@ async function writeDocumentSettings(
     { onConflict: 'user_id,document_id' },
   )
 
-  if (error) {
-    // The camera is a convenience, so this is logged rather than shown. The next
-    // move will try again, and the file is not in a state this can corrupt.
-    await handleWriteError(error, 'docSettings:save')
-  }
+  // Thrown, not logged. The queue retries, and it only clears the value once a
+  // write has actually succeeded -- so an error here keeps the data rather than
+  // dropping it, which is what happened when this logged and returned.
+  if (error) throw error
 }
 
 /**
@@ -281,15 +302,19 @@ async function writeDocumentSettings(
  * person who is no longer signed in.
  */
 export function forgetQueuedSettings(documentId?: string, userId?: string): void {
-  for (const [key, timer] of [...pending.entries()]) {
-    const [keyUser, keyDocument] = key.split(':')
+  for (const [key, queue] of [...queues.entries()]) {
+    const separator = key.indexOf(':')
+    if (separator < 0) continue
+    const keyUser = key.slice(0, separator)
+    const keyDocument = key.slice(separator + 1)
+
     const matches =
       (documentId === undefined || keyDocument === documentId) &&
       (userId === undefined || keyUser === userId)
     if (!matches) continue
-    clearTimeout(timer)
-    pending.delete(key)
-    queued.delete(key)
+
+    queue.clear()
+    queues.delete(key)
   }
 }
 
@@ -318,21 +343,7 @@ export function forgetQueuedSettings(documentId?: string, userId?: string): void
  * how fast the tab went away.
  */
 export function flushQueuedSettings(): void {
-  for (const key of [...pending.keys()]) {
-    const timer = pending.get(key)
-    if (timer !== undefined) clearTimeout(timer)
-    pending.delete(key)
-
-    const toWrite = queued.get(key)
-    queued.delete(key)
-    if (!toWrite) continue
-
-    const separator = key.indexOf(':')
-    // A key that cannot be split is a bug, and writing to `undefined` would be a
-    // 400 on every keystroke rather than one visible failure.
-    if (separator < 0) continue
-    void writeDocumentSettings(key.slice(0, separator), key.slice(separator + 1), toWrite)
-  }
+  for (const queue of queues.values()) queue.flush()
 }
 
 /**
