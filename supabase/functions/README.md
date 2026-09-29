@@ -1,23 +1,42 @@
 # Share emails
 
-When you invite somebody to a workspace, Map204 emails them a link to it.
+When you invite somebody to a workspace, Map204 emails them a link to it — or, if
+they have no account yet, an invitation to make one.
+
+## Where things are
+
+| | |
+|---|---|
+| The function | `supabase/functions/send-share-email/index.ts` |
+| **The email template** | `supabase/functions/send-share-email/email-template.ts` |
+| Function configuration | `supabase/functions/send-share-email/config.toml` |
+| Secret names | `supabase/functions/.env.example` |
+
+The words, the layout and the colour are all in `email-template.ts`. You do not need
+to read the authorisation code to change what the email says.
+
+There are two emails, chosen by whether the recipient already has an account:
+
+* **They have one** — “X shared a workspace with you”, linking straight to the map.
+* **They do not** — “X invited you to Map204”, linking to sign-up, and explaining that
+  the workspace is already saved against their address.
 
 ## Why a function
 
 The browser cannot send mail, and the Supabase anon key is public by design — so
-anything that sends mail has to run somewhere the key is not. That is
-`supabase/functions/send-share-email`, an Edge Function that calls Resend's HTTP
-API with a key held as a server-side secret.
+anything that sends mail has to run somewhere the key is not. This is an Edge
+Function that calls Resend's HTTP API with a key held as a server-side secret.
 
 The function is also the authorisation boundary. It re-checks that the caller is
-signed in **and** is the owner or an editor of that workspace, using the service
-role key, before it will name the workspace in an email. Without that check the
-endpoint would be an open relay: anyone signed in could ask it to mail the
-contents of any workspace they had been lent, to any address.
+signed in **and** is the owner or an editor of that workspace, using the service role
+key, before it will name the workspace in an email. Without that check the endpoint
+would be an open relay: anyone signed in could ask it to mail the contents of any
+workspace they had been lent, to any address.
 
-A failed email never undoes the invite. The grant is written to
-`document_collaborators` first; the mail is a notification afterwards, and the
-share dialog says so plainly if it does not go out.
+A failed email never undoes the share. The grant is written first — to
+`document_collaborators`, or to `document_invites` when the recipient has no account
+yet — and the mail is a notification afterwards. The dialog says so plainly if it
+does not go out.
 
 ## One-time setup
 
@@ -35,40 +54,68 @@ supabase secrets set RESEND_API_KEY=re_... --project-ref ofpbdzqnszupgtjkncgv
 supabase functions deploy send-share-email --project-ref ofpbdzqnszupgtjkncgv
 ```
 
-Without step 3–4 the app still shares normally; only the email is skipped, and
-the dialog says the person has access but the mail did not send.
+Without steps 3–4 the app still shares normally; only the email is skipped, and the
+dialog says the person has access but the mail did not send.
 
-## Optional secrets
-
-| Secret | Default | Purpose |
-| --- | --- | --- |
-| `RESEND_API_KEY` | — | Required. The Resend API key. |
-| `MAIL_FROM` | `Map204 <onboarding@resend.dev>` | The From header. Resend's default only allows sending to your own address until a domain is verified. |
-| `APP_URL` | `https://map204.vercel.app` | The link in the email. Set this on a preview deployment so a test share cannot point at production. |
-
-## Local development
+### Checking it is deployed
 
 ```powershell
-supabase functions serve send-share-email --env-file supabase/functions/.env.local
+curl.exe -i -X OPTIONS -H "Origin: https://map204.vercel.app" `
+  -H "Access-Control-Request-Method: POST" `
+  https://ofpbdzqnszupgtjkncgv.supabase.co/functions/v1/send-share-email
 ```
 
-`supabase/functions/.env.local` is git-ignored and should hold the three values
-above for local runs.
+You want `HTTP/1.1 204` and an `access-control-allow-origin` of
+`https://map204.vercel.app`.
 
-## Keeping the three lists in step
+A `405`, or a `204` with no allow-origin header, means the deployed copy is older
+than `config.toml` and `index.ts` here — redeploy. That was the state this function
+was in: it answered the browser's preflight with `405 Method not allowed` and no
+response carried `Access-Control-Allow-Origin`, so **every email failed with a CORS
+error** while the share itself worked. The message in the console named neither the
+cause nor the function, which is why it looked like an OAuth problem.
 
-A workspace's colour and icon are enumerated in three places — the app
-(`src/theme.ts`), the database (`documents_accent_check` and
-`documents_icon_check` in migration `…90800`), and the email
-(`supabase/functions/send-share-email/_workspace_look.ts`). An Edge Function is
-bundled separately and cannot import from `src/`, so the duplication is
-unavoidable.
+### Running it locally
 
-`npm run test:workspace-look` compares all three, including the exact hex values
-and the icon labels, and fails the build if they disagree. It also checks that
-every icon the app offers is one `WorkspaceMark` can actually draw — an id with
-no component behind it renders as an empty box.
+```powershell
+supabase functions serve send-share-email --env-file .env.local
+```
 
-Run it after adding a colour or an icon. You will need to update the migration
-too; because migrations must not be rewritten once applied, that means a new
-migration that drops and re-adds the constraint.
+## CORS
+
+Three things, and all three have to be true or the browser refuses every response:
+
+1. **`OPTIONS` is answered with 204 and a null body.** A browser sends a preflight
+   whenever a request is not “simple”, and one carrying `Authorization` and a JSON
+   content type never is. Deno throws on a 204 *with* a body — even an empty string —
+   so the preflight sends `null`.
+2. **Every response carries the headers**, including the error paths. An error the
+   browser cannot read is indistinguishable from the function being down, which is
+   how the above hid.
+3. **The origin is allow-listed**, not reflected. This function sends mail: anyone who
+   can make it send can put mail in any inbox. `ALLOWED_ORIGINS` in `index.ts` holds
+   the list; an unlisted origin gets no allow-origin at all, and `Vary: Origin`
+   stops a shared cache serving one origin's response to another.
+
+`config.toml` sets `verify_jwt = false`, because the gateway otherwise checks the
+JWT before the function runs and a preflight has none to check. That is not a hole:
+the function authenticates every request itself and then checks that the caller
+*owns* that workspace, which is a stronger test than the gateway's.
+
+## Tests
+
+| | |
+|---|---|
+| `npm run test:share-email` | the source: preflight, headers, allow-list, auth, template |
+| `npm run test:share-email-guard` | breaks each of those in turn and expects a failure |
+| `npm run test:share-email-live` | **runs the function** in Supabase's edge runtime and makes real requests |
+
+The live one is the one that earns its place. Every source-level check passed while
+the preflight was still broken, because the bug was `new Response('', {status: 204})`
+— correct-looking, and a runtime error in Deno:
+
+```
+TypeError: Response with null body status cannot have body
+```
+
+It skips cleanly where Docker or the edge-runtime image is absent.

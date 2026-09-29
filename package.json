@@ -28,7 +28,7 @@
     "test:bundle": "node scripts/test-bundle.cjs",
     "test:encoding": "node scripts/test-encoding.cjs",
     "fix:encoding": "node scripts/test-encoding.cjs --fix",
-    "test": "npm run typecheck && npm run test:drift && node scripts/test-bootstrap.cjs && npm run test:bootstrap && npm run test:migrations && npm run test:policies && npm run test:realtime && npm run test:embeds && npm run test:card-types && npm run test:read-only && npm run test:read-only-ui && npm run test:routes && npm run test:migrate-v2 && npm run test:elements && npm run test:element-ops && npm run test:sample && npm run test:bundle && npm run test:element-chrome && npm run test:element-fields && npm run test:signup && npm run test:viewport && npm run test:encoding && npm run test:workspace-look && npm run test:tutorial",
+    "test": "npm run typecheck && npm run test:drift && node scripts/test-bootstrap.cjs && npm run test:bootstrap && npm run test:migrations && npm run test:policies && npm run test:realtime && npm run test:embeds && npm run test:card-types && npm run test:read-only && npm run test:read-only-ui && npm run test:routes && npm run test:migrate-v2 && npm run test:elements && npm run test:element-ops && npm run test:sample && npm run test:bundle && npm run test:element-chrome && npm run test:element-fields && npm run test:share-email && npm run test:signup && npm run test:share-email-live && npm run test:viewport && npm run test:encoding && npm run test:workspace-look && npm run test:tutorial",
     "test:element-chrome": "node scripts/test-element-chrome.cjs",
     "test:element-fields": "node scripts/test-element-fields.cjs",
     "test:signup": "node scripts/test-signup.cjs",
@@ -36,7 +36,10 @@
     "test:read-only-ui": "node scripts/test-read-only-ui.cjs",
     "test:read-only-ui-guard": "node scripts/test-read-only-ui-guard.cjs",
     "test:viewport": "node scripts/test-viewport-private.cjs",
-    "test:viewport-guard": "node scripts/test-viewport-private-guard.cjs"
+    "test:viewport-guard": "node scripts/test-viewport-private-guard.cjs",
+    "test:share-email": "node scripts/test-share-email-cors.cjs",
+    "test:share-email-guard": "node scripts/test-share-email-cors-guard.cjs",
+    "test:share-email-live": "node scripts/test-share-email-live.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",
