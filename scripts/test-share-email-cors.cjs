@@ -192,6 +192,81 @@ const source = code(fn)
   }
 }
 
+/* -- 0c. A refusal from Resend says what is wrong --------------------------- */
+
+/*
+ * A 502 with "The email could not be sent." in it, for a misconfigured sender, cost
+ * a whole debugging session. Every email failed; the console showed 502; the
+ * function logs said only that Resend had refused it. The three causes that matter
+ * -- an unverified sender, a bad key, a malformed payload -- produce byte-identical
+ * responses from the outside and have nothing in common to fix.
+ *
+ * So the refusal has to carry Resend's own reason, and the case that has a specific
+ * remedy has to name it. The share is already written by the time this runs, so this
+ * message lands in the dialog in front of the person who can actually fix it.
+ *
+ * These are *shape* checks, not presence checks. The first version looked for the
+ * words "resendMessage" and "MAIL_FROM", and all three deliberate breaks sailed
+ * through them: every one of those words occurs more than once in the file, so
+ * changing one occurrence left the others standing. A check that a word appears can
+ * only fail when the word vanishes everywhere, which is not the regression anyone
+ * makes. What is looked for instead is the shape -- a binding, a call, a default in
+ * a particular position -- and a shape occurs once.
+ */
+{
+  checked += 1
+  const handler = code(fn)
+
+  // The reason is bound from the response...
+  if (!/const\s+resendMessage\s*=\s*\(/.test(handler)) {
+    fail(
+      "Resend's message is never read out of its response, so the dialog cannot say " +
+        "what is wrong. It will keep saying \"The email could not be sent.\"",
+    )
+  }
+
+  // ...and reaches the caller, rather than stopping at the log. A reason that ends
+  // at console.error helps whoever reads the dashboard and nobody else.
+  if (!/error\s*=\s*`[^`]*\$\{resendMessage\}/.test(handler)) {
+    fail(
+      "Resend's reason is logged but not returned, so the person sharing -- the only " +
+        'one who can fix it -- never sees it.',
+    )
+  }
+
+  // The refusal is logged with Resend's own status beside it.
+  if (!/console\.error\(\s*'\[send-share-email\] resend refused:',\s*response\.status/.test(handler)) {
+    fail(
+      'the refusal is not logged with the status Resend returned. A log line reading ' +
+        'only "refused" is what had to be debugged by hand.',
+    )
+  }
+
+  // The sender is configurable, and the default is Resend's own test address.
+  //
+  // `onboarding@resend.dev` may only send to the account that owns the key, so every
+  // real invitation is refused with a 403 while the deployment looks entirely
+  // healthy. The default stays -- it is the right thing for a first send to
+  // yourself -- and the check exists so that changing it is deliberate: the warning
+  // at the top of the file explains a trap that no longer applies otherwise.
+  const from = handler.match(/const\s+FROM\s*=\s*Deno\.env\.get\('MAIL_FROM'\)[^\n]*/)
+  if (!from) {
+    fail(
+      'the sender address is no longer read from MAIL_FROM, so it cannot be ' +
+        'configured without a redeploy.',
+    )
+  } else if (!/onboarding@resend\.dev/.test(from[0])) {
+    fail(
+      'the default sender is no longer onboarding@resend.dev. If that changed on ' +
+        'purpose, this check needs updating -- and so does the warning at the top of ' +
+        'the file, which explains the trap that address is.',
+    )
+  }
+  if (!/MAIL_FROM/.test(handler)) {
+    fail('index.ts does not mention MAIL_FROM, so the sender cannot be configured at all.')
+  }
+}
+
 /* -- 1. The preflight is answered ------------------------------------------- */
 
 {

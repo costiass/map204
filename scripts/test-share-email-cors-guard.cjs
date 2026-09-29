@@ -96,6 +96,27 @@ const BREAKS = [
     expect: 'no [functions.send-share-email] section',
   },
   {
+    label: "a refusal from Resend goes back to a shrug -- the reason is never read",
+    file: 'index.ts',
+    from: '      const resendMessage = (result as { message?: string } | null)?.message ?? \'\'',
+    to: "      const resendMessage = ''",
+    expect: "Resend's message is never read out of its response",
+  },
+  {
+    label: 'the sender can no longer be configured',
+    file: 'index.ts',
+    from: "const FROM = Deno.env.get('MAIL_FROM') ?? 'Map204 <onboarding@resend.dev>'",
+    to: "const FROM = 'Map204 <hello@map204.app>'",
+    expect: 'the sender address is no longer read from MAIL_FROM',
+  },
+  {
+    label: "Resend's refusal stops at the log and never reaches the dialog",
+    file: 'index.ts',
+    from: 'console.error(\'[send-share-email] resend refused:\', response.status, result)',
+    to: "console.error('[send-share-email] resend refused')",
+    expect: 'the refusal is not logged with the status Resend returned',
+  },
+  {
     label: 'the preflight is answered 405 — the bug that was reported',
     file: 'index.ts',
     from: "  if (request.method === 'OPTIONS') {\n    return respond(request, null, 204)\n  }\n\n",

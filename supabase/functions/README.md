@@ -53,6 +53,26 @@ supabase secrets set RESEND_API_KEY=re_... --project-ref ofpbdzqnszupgtjkncgv
    `SUPABASE_PROJECT_REF` as a **secret**. The migration workflow already needs the
    latter, so it is probably there.
 
+## Why no email arrives: `MAIL_FROM`
+
+**This is the one that bites.** If `MAIL_FROM` is not set, the function sends as
+`onboarding@resend.dev` — Resend's own test address, which may only send **to the
+address on the Resend account that owns the key**. Every real invitation is refused
+with a 403.
+
+Nothing about that is visible. The key is present, the function starts, the share
+works, the dialog closes, and the only sign is a `502` in the console. The function
+now warns on startup when `MAIL_FROM` is unset, and a refusal from Resend returns
+Resend's own reason rather than "The email could not be sent", so the dialog says
+what is actually wrong.
+
+```powershell
+supabase secrets set MAIL_FROM="Map204 <hello@yourdomain.com>" --project-ref ofpbdzqnszupgtjkncgv
+```
+
+The address has to be on a domain verified in Resend, or the one on your account.
+Verifying a domain is the one piece of setup that cannot be done from here.
+
 ## Deploying a change to a function
 
 **Edge functions are not part of the migration workflow.** `supabase db push`
@@ -129,11 +149,17 @@ the function authenticates every request itself and then checks that the caller
 
 | | |
 |---|---|
-| `npm run test:share-email` | the source: **that it parses**, preflight, headers, allow-list, auth, template |
+| `npm run test:share-email` | the source: **that it parses**, the gateway setting's location, preflight, headers, allow-list, auth, template, and what a Resend refusal says |
 | `npm run test:share-email-guard` | breaks each of those in turn and expects a failure |
 | `npm run test:share-email-live` | **runs the function** in Supabase's edge runtime and makes real requests |
 | `npm run test:share-email-catch` | makes the handler throw, and checks the answer is readable |
 | `npm run test:share-email-catch-guard` | removes the catch-all and expects a failure |
+
+`scripts/probe-share-email-auth.cjs` is separate and not in `npm test`: it walks the
+authenticated path against the **live** database with only the identity faked. It is
+what located the `MAIL_FROM` problem above — it put the failure at the Resend fetch
+and showed the status came from this function rather than from the gateway. It needs
+the Supabase CLI, a service role key and Docker.
 
 The live ones are the ones that earn their place. Every source-level check passed
 while the preflight was still broken, because the bug was

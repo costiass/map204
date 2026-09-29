@@ -26,6 +26,28 @@ const RESEND_URL = 'https://api.resend.com/emails'
 const APP_URL = Deno.env.get('APP_URL') ?? 'https://map204.vercel.app'
 const FROM = Deno.env.get('MAIL_FROM') ?? 'Map204 <onboarding@resend.dev>'
 
+/*
+ * A word about `onboarding@resend.dev`, because it is a trap and it was the reason
+ * every invitation failed.
+ *
+ * Resend lets you send without setting up a domain, and the address it lets you use
+ * is `onboarding@resend.dev` -- but *only* to the address on the Resend account.
+ * Any other recipient is refused with a 403 and a message about the sender.
+ *
+ * So a deployment with no `MAIL_FROM` set looks completely healthy: the key is
+ * there, the function starts, the share works, and every email is refused. The
+ * default is kept because it is the right thing for a first send to yourself, and
+ * warned about here because it is the wrong thing for everything after it.
+ */
+if (!Deno.env.get('MAIL_FROM')) {
+  console.warn(
+    '[send-share-email] MAIL_FROM is not set, so every email is sent as ' +
+      'onboarding@resend.dev. Resend only allows that address to send to the ' +
+      'account that owns the key, so invitations to anyone else will be refused. ' +
+      'Set MAIL_FROM to a verified address, e.g. "Map204 <hello@yourdomain.com>".',
+  )
+}
+
 /* -------------------------------------------------------------------------- */
 /* CORS                                                                       */
 /* -------------------------------------------------------------------------- */
@@ -318,7 +340,42 @@ async function handle(request: Request): Promise<Response> {
 
     if (!response.ok) {
       console.error('[send-share-email] resend refused:', response.status, result)
-      return respond(request, { error: 'The email could not be sent.' }, 502)
+
+      /*
+       * Say what is wrong, not just that something was.
+       *
+       * This returned a flat "The email could not be sent." for a 502 and it cost
+       * a whole debugging session, because the three causes look identical from the
+       * outside and have nothing in common to fix:
+       *
+       *   403  the *sender* is not allowed to send to this recipient. Almost always
+       *        `MAIL_FROM` being unset, which leaves the default below -- and
+       *        `onboarding@resend.dev` is Resend's own test address, which may only
+       *        ever send to the account that owns the key. Every real invitation is
+       *        refused, and the refusal names neither the sender nor the reason.
+       *   401  the API key is wrong or was revoked.
+       *   422  the payload is wrong -- a `from` Resend will not parse, say.
+       *
+       * The share has already been written by the time this runs, so the person has
+       * access either way and this is a notification about it. Which means the
+       * message goes in the dialog, where the person sharing can act on it, and it
+       * has to be the thing that is actually wrong rather than a shrug.
+       */
+      const resendName = (result as { name?: string } | null)?.name ?? ''
+      const resendMessage = (result as { message?: string } | null)?.message ?? ''
+
+      let error = 'The email could not be sent.'
+      if (resendName === 'validation_error' || resendName.includes('domain')) {
+        error =
+          `The sending address is not set up: ${resendMessage || 'Resend refused the sender.'} ` +
+          'Set MAIL_FROM to a verified address on this project.'
+      } else if (resendName === 'missing_api_key' || resendName === 'invalid_api_key') {
+        error = 'The email service rejected the API key. Check RESEND_API_KEY on this deployment.'
+      } else if (resendMessage) {
+        error = `The email could not be sent: ${resendMessage}`
+      }
+
+      return respond(request, { error }, 502)
     }
   } catch (error) {
     // A network failure or a non-JSON body from Resend. Caught rather than thrown,
