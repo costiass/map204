@@ -129,7 +129,37 @@ function respond(request: Request, body: unknown, status: number): Response {
 
 /* -------------------------------------------------------------------------- */
 
+/**
+ * The whole handler, wrapped.
+ *
+ * A throw anywhere in here is answered by the edge gateway, not by this function.
+ * The gateway's own 502 is a fixed 60-byte body carrying `sb-error-code:
+ * EDGE_FUNCTION_ERROR`, naming neither the message nor the stack and none of this
+ * function's CORS headers -- which is precisely the confusion the CORS work above
+ * was done to remove, one layer up:
+ *
+ *   the browser reports a bare 502, the dashboard reports an error code, and
+ *   nothing anywhere says `Cannot read properties of undefined`
+ *
+ * So nothing is allowed to escape. Every failure becomes a real response with CORS
+ * on it, the reason is logged where the function logs can be read, and the caller
+ * gets text it can put in a dialog.
+ */
 Deno.serve(async (request) => {
+  try {
+    return await handle(request)
+  } catch (error) {
+    // The stack rather than the message, and logged before the response, because
+    // the response is deliberately vague: this is a share notification, not a
+    // debugging channel, and it should not become a way to read the server's
+    // internals by asking it to fail.
+    const message = error instanceof Error ? (error.stack ?? error.message) : String(error)
+    console.error('[send-share-email] unhandled:', message)
+    return respond(request, { error: 'The email could not be sent.' }, 500)
+  }
+})
+
+async function handle(request: Request): Promise<Response> {
   // The preflight. Answered before anything else -- it carries no `Authorization`
   // header by definition, so every check below would refuse it.
   //
@@ -301,4 +331,4 @@ Deno.serve(async (request) => {
   }
 
   return respond(request, { ok: true, id: result?.id ?? null }, 200)
-})
+}

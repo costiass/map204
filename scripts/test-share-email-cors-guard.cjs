@@ -3,8 +3,8 @@
 // The first two breaks are the bug that was actually reported -- the preflight
 // answered 405, and no response carrying an Access-Control-Allow-Origin. The rest
 // are the realistic ways it comes back: a new early return that forgets the helper,
-// an origin echoed instead of checked, and the gateway configuration lost on a
-// redeploy.
+// an origin echoed instead of checked, a file that no longer parses, and the
+// gateway setting lost or restored to the default.
 const fs = require('fs')
 const path = require('path')
 const { execFileSync } = require('child_process')
@@ -15,18 +15,86 @@ const TEST = path.join(__dirname, 'test-share-email-cors.cjs')
 const run = () =>
   execFileSync(process.execPath, [TEST], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
 
-/** Patch a file, ignoring line endings, and hand back a restore. */
+/**
+ * Patch a file, ignoring line endings, and hand back a restore.
+ *
+ * Three ways this used to be able to destroy the file it was testing, all of them
+ * reached in one run:
+ *
+ *   * An empty `from` matches everywhere, so `String.replace` deletes the entire
+ *     file. `index.ts` was 304 lines and became 0.
+ *   * `restore` was only called from a `finally` around the *run*, so a throw
+ *     between the write and the try -- or an early `continue` -- left the
+ *     repository holding a deliberate break.
+ *   * A `from` that no longer matched the file was reported as SKIP, which reads
+ *     as harmless. It is not: it means the test is guarding a string that has
+ *     moved, and it is indistinguishable from a test that is guarding nothing.
+ *
+ * So: refuse an empty pattern, verify the replacement actually changed something,
+ * and verify the restore afterwards. The whole point of this file is to break code
+ * on purpose, so it has to be impossible for it to break it by accident.
+ */
 function patch(file, from, to) {
-  const full = path.join(dir, file)
+  // `../config.toml` is the root supabase config, one level up from the function
+  // directory. Every other break is in the function's own files.
+  const full = path.resolve(dir, file)
   const original = fs.readFileSync(full, 'utf8')
   const lf = original.replace(/\r\n/g, '\n')
-  if (!lf.includes(from)) return null
+
+  // A reason, not a bare null. The caller has to be able to say how many breaks
+  // went un-attempted, because a skip and a pass look the same in a wall of green
+  // and only one of them means the guard is still working.
+  if (from === '') {
+    return { skip: `a break against ${file} has an empty pattern, which would delete it` }
+  }
+  if (!lf.includes(from)) {
+    return { skip: `the text to change is not in ${file} -- it has moved` }
+  }
+
+  const patched = lf.replace(from, to)
+  if (patched === lf) {
+    return { skip: `the pattern in ${file} matched but changed nothing` }
+  }
+
   const crlf = original.includes('\r\n')
-  fs.writeFileSync(full, (crlf ? lf.replace(from, to).replace(/\n/g, '\r\n') : lf.replace(from, to)), 'utf8')
-  return () => fs.writeFileSync(full, original, 'utf8')
+  fs.writeFileSync(full, crlf ? patched.replace(/\n/g, '\r\n') : patched, 'utf8')
+
+  const restore = () => {
+    fs.writeFileSync(full, original, 'utf8')
+    // Verify, because a restore that silently failed is how a deliberate break
+    // becomes a permanent one.
+    const now = fs.readFileSync(full, 'utf8')
+    if (now !== original) {
+      console.log(`FAIL  could not restore ${file}. It is left in a broken state.`)
+      process.exitCode = 1
+    }
+  }
+
+  return { restore }
 }
 
 const BREAKS = [
+  {
+    label: 'an unbalanced brace from wrapping the handler -- the deploy looked fine',
+    file: 'index.ts',
+    from: "  return respond(request, { ok: true, id: result?.id ?? null }, 200)\n}",
+    to: "  return respond(request, { ok: true, id: result?.id ?? null }, 200)\n})",
+    expect: 'does not parse',
+  },
+  {
+    label: 'the gateway setting goes back to verifying the JWT',
+    file: '../../config.toml',
+    from: '[functions.send-share-email]\nverify_jwt = false',
+    to: '[functions.send-share-email]\nverify_jwt = true',
+    expect: 'does not set verify_jwt = false',
+  },
+  {
+    label: 'the [functions] section is dropped from the root config',
+    file: '../../config.toml',
+    from: '[functions.send-share-email]\nverify_jwt = false',
+    to: '# removed',
+    expect: 'no [functions.send-share-email] section',
+  },
   {
     label: 'the preflight is answered 405 — the bug that was reported',
     file: 'index.ts',
@@ -80,13 +148,16 @@ const BREAKS = [
 
 let caught = 0
 let checked = 0
+let skipped = 0
 
 for (const brk of BREAKS) {
-  const restore = patch(brk.file, brk.from, brk.to)
-  if (!restore) {
-    console.log(`SKIP  ${brk.label}\n      the text to change is not in ${brk.file} -- it has moved`)
+  const applied = patch(brk.file, brk.from, brk.to)
+  if (applied.skip) {
+    console.log(`SKIP  ${brk.label}\n      ${applied.skip}`)
+    skipped += 1
     continue
   }
+  const restore = applied.restore
   checked += 1
   try {
     try {
@@ -104,27 +175,85 @@ for (const brk of BREAKS) {
   }
 }
 
-// The seventh break deletes a file, so it is done last and restored by hand.
-{
-  const config = path.join(dir, 'config.toml')
-  const original = fs.readFileSync(config, 'utf8')
-  fs.rmSync(config)
+/*
+ * Two breaks that move a file rather than edit one, so they cannot use patch().
+ *
+ * The first is the one that actually happened: a `config.toml` written inside the
+ * function's own directory, which the CLI never reads. It sat there through a
+ * deploy, every check passed, and the gateway went on verifying the JWT.
+ *
+ * The second is a root config with no [functions] section at all, which is what a
+ * well-meaning tidy-up of supabase/config.toml looks like.
+ */
+
+const MOVES = [
+  {
+    label: 'a config.toml appears in the function directory, where the CLI ignores it',
+    make: (dir) => {
+      const local = path.join(dir, 'config.toml')
+      const root = path.join(dir, '..', '..', 'config.toml')
+      const rootText = fs.readFileSync(root, 'utf8')
+      const section = rootText.match(/\[functions\.send-share-email\][\s\S]*$/m)[0]
+      fs.writeFileSync(local, section, 'utf8')
+      return () => fs.rmSync(local, { force: true })
+    },
+    expect: 'its own config.toml, which the CLI does not read',
+  },
+  {
+    label: 'the [functions] section is dropped when the root config is tidied',
+    make: (dir) => {
+      const root = path.join(dir, '..', '..', 'config.toml')
+      const original = fs.readFileSync(root, 'utf8')
+      fs.writeFileSync(root, original.replace(/\[functions\.send-share-email\][\s\S]*$/m, ''), 'utf8')
+      return () => fs.writeFileSync(root, original, 'utf8')
+    },
+    expect: 'no [functions.send-share-email] section',
+  },
+]
+
+for (const move of MOVES) {
+  let restore
+  try {
+    restore = move.make(dir)
+  } catch (error) {
+    console.log(`SKIP  ${move.label}\n      could not set it up: ${error.message}`)
+    continue
+  }
+  checked += 1
   try {
     try {
       run()
-      console.log('  the gateway config is gone\n      PASSED -- the test does NOT cover this')
+      console.log(`  ${move.label}\n      PASSED -- the test does NOT cover this`)
     } catch (error) {
       const out = String(error.stdout || '') + String(error.stderr || '')
-      const right = out.includes('there is no config.toml')
-      console.log(`  the gateway config is gone\n      ${right ? 'failed as it should' : 'FAILED, but not for this reason'}`)
+      const right = out.includes(move.expect)
+      console.log(`  ${move.label}\n      ${right ? 'failed as it should' : 'FAILED, but not for this reason'}`)
       if (right) caught += 1
+      else console.log(`      ${out.split('\n').find((l) => l.startsWith('FAIL')) || ''}`.slice(0, 200))
     }
   } finally {
-    fs.writeFileSync(config, original, 'utf8')
+    restore()
   }
-  checked += 1
 }
 
 console.log(`\n${caught} of ${checked} deliberate breaks were caught.`)
+
+/*
+ * A skip is not a pass, and this file exists to prove that tests can fail.
+ *
+ * A break whose text has moved reports SKIP, which in a wall of green looks exactly
+ * like a break that was caught -- and it is the state in which this guard is
+ * testing nothing while reporting that it tested everything. It happened here: an
+ * edit to the code invalidated a pattern, the break was skipped, and the run
+ * printed "12 of 12" and exited 0.
+ *
+ * So a skip is counted and turned into a failure, with the number said out loud.
+ * `scripts/test-share-email-guard-selfcheck.cjs` proves this branch is reachable by
+ * making a break un-attemptable and requiring a non-zero exit.
+ */
+if (skipped > 0) {
+  console.log(`${skipped} break(s) could not be attempted, so this run proves less than it looks.`)
+}
+
 console.log('every file restored.')
-process.exit(caught === checked && checked > 0 ? 0 : 1)
+process.exit(caught === checked && skipped === 0 && checked > 0 ? 0 : 1)

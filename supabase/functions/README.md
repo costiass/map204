@@ -129,16 +129,59 @@ the function authenticates every request itself and then checks that the caller
 
 | | |
 |---|---|
-| `npm run test:share-email` | the source: preflight, headers, allow-list, auth, template |
+| `npm run test:share-email` | the source: **that it parses**, preflight, headers, allow-list, auth, template |
 | `npm run test:share-email-guard` | breaks each of those in turn and expects a failure |
 | `npm run test:share-email-live` | **runs the function** in Supabase's edge runtime and makes real requests |
+| `npm run test:share-email-catch` | makes the handler throw, and checks the answer is readable |
+| `npm run test:share-email-catch-guard` | removes the catch-all and expects a failure |
 
-The live one is the one that earns its place. Every source-level check passed while
-the preflight was still broken, because the bug was `new Response('', {status: 204})`
-— correct-looking, and a runtime error in Deno:
+The live ones are the ones that earn their place. Every source-level check passed
+while the preflight was still broken, because the bug was
+`new Response('', {status: 204})` — correct-looking, and a runtime error in Deno:
 
 ```
 TypeError: Response with null body status cannot have body
 ```
+
+## Failures have to be readable too
+
+An uncaught throw in an edge function is answered by the **gateway**, not by the
+function. Its 502 is a fixed 60-byte body with `sb-error-code: EDGE_FUNCTION_ERROR`,
+naming neither the message nor the stack, and carrying none of the function's own
+CORS headers. That is the same failure as the 405 above, one layer up: the browser
+gets a status and no reason.
+
+So the handler is wrapped, and `test:share-email-catch` throws on its first line and
+inspects the answer. The message is logged in full and returned vaguely on purpose —
+this is a share notification, not a debugging channel, and it must not become a way
+to read the server's internals by asking it to fail.
+
+## The file is parsed before it is read
+
+The first check in `test:share-email` is that `index.ts` parses. Not decoration, and
+not a brace count — TypeScript's own parser, which reports syntax and nothing else.
+
+An edit that wrapped the handler in the try/catch above left the old `})` closing a
+callback that no longer existed. Every other check still passed: the preflight
+branch, the allow-list, the ownership test and the template import were all present
+and correct. The bundle uploaded, the deploy reported success, and the only symptom
+was `EDGE_FUNCTION_ERROR` with no file and no line.
+
+Braces inside strings, template literals and regular expressions make counting wrong
+in both directions, and a check that cries wolf gets deleted rather than fixed.
+
+## Two Docker lessons, both learned the hard way
+
+* **A stopped container still owns its name.** `docker run` fails if the name is
+  taken, and the cleanup meant to prevent that was swallowing the error — so one bad
+  run made every later run report `the edge runtime never started listening` while
+  the readiness probe was talking to a dead container. The removal is verified now,
+  and a failure to remove is reported rather than ignored.
+* **A bind mount does not reliably see a write made after the container started**, on
+  Windows across a Docker Desktop VM. The first version of the catch-all test
+  patched `index.ts` in place and got a clean `401` back — the *unpatched* function
+  refusing an unauthenticated request — which read exactly like the catch-all not
+  working. The test now copies the function to a scratch directory and mounts that,
+  so there is nothing that can be stale.
 
 It skips cleanly where Docker or the edge-runtime image is absent.

@@ -28,6 +28,19 @@
 //
 // What it catches is the realistic regression, which is somebody adding a new early
 // return with `Response.json` and forgetting that every response needs headers.
+//
+// ## The parse check is first, and it is not decoration
+//
+// A syntax error in this file cannot be caught by reading it, because reading it
+// does not parse it. It happened: an unbalanced brace from wrapping the handler in
+// a try/catch, which every check below still passed -- the preflight branch, the
+// allow-list, the ownership test, the template import were all still present and
+// correct. The bundle uploaded, the deploy reported success, and the only symptom
+// was a 60-byte `EDGE_FUNCTION_ERROR` from the gateway that named no file and no
+// line.
+//
+// So the file is parsed before it is read. Everything after this is only
+// meaningful if the thing being read is a program.
 
 const fs = require('fs')
 const path = require('path')
@@ -55,6 +68,129 @@ if (!fs.existsSync(fn)) {
 }
 
 const source = code(fn)
+
+/* -- 0. The settings the deploy depends on, in the file the CLI reads ------- */
+
+/*
+ * `verify_jwt = false` has to live in the ROOT supabase/config.toml, under
+ * `[functions.send-share-email]`. A copy inside the function's own directory is
+ * silently ignored by the CLI.
+ *
+ * It was ignored. The file sat next to the function through a deploy, the deploy
+ * reported success, and the gateway went on verifying the JWT -- so a request the
+ * browser was entitled to make was still answered 401 by the gateway before the
+ * function ever saw it. Nothing in this suite could have caught it: the edge
+ * runtime in a container has no gateway in front of it, so every local test passes
+ * whether this setting is honoured or not.
+ *
+ * That is the whole argument for checking the deployed URL in CI rather than
+ * trusting a file: a comment cannot fail, and neither can a setting in the wrong
+ * place.
+ */
+{
+  checked += 1
+  // `dir` is supabase/functions/send-share-email, so the root config the CLI reads
+  // is two levels up. It was one level up for a while, and the check reported
+  // "supabase/config.toml is missing" for a file that was sitting right there -- a
+  // check that cannot find the thing it is checking is worse than no check.
+  const rootConfig = path.join(dir, '..', '..', 'config.toml')
+
+  if (!fs.existsSync(rootConfig)) {
+    fail('supabase/config.toml is missing, so no per-function settings are read at all.')
+  } else {
+    const root = code(rootConfig)
+
+    /*
+     * Read the setting from *inside* the section, not from the file.
+     *
+     * A whole-file match was wrong, and wrong in the direction that hides bugs. Two
+     * comment lines above the setting read `verify_jwt = false`, so a break that
+     * changed the real line to `true` still matched -- the check passed on a
+     * configuration that had the gateway verifying the JWT again.
+     *
+     * `code()` strips `//` and `/* *\/` comments, which is right for TypeScript
+     * and wrong for TOML, where a comment is a `#`. Rather than teach a
+     * comment-stripper about a third syntax, the section is isolated: everything
+     * from its header to the next header, or to the end of the file. That is the
+     * only place the setting can legally be, so it is the only place worth reading.
+     */
+    const section = (root.match(/^\[functions\.send-share-email\][^\[]*/m) || [''])[0]
+
+    if (!/\[functions\.send-share-email\]/.test(root)) {
+      fail(
+        'supabase/config.toml has no [functions.send-share-email] section, so the ' +
+          'gateway keeps verifying the JWT and will answer 401 to a browser preflight ' +
+          'before this function ever runs.',
+      )
+    } else if (!/verify_jwt\s*=\s*false/.test(section)) {
+      fail(
+        'supabase/config.toml does not set verify_jwt = false for this function. The ' +
+          'gateway then checks the JWT before the function runs, which a CORS preflight ' +
+          'cannot satisfy -- it carries no Authorization header to check.',
+      )
+    }
+  }
+
+  const localConfig = path.join(dir, 'config.toml')
+  if (fs.existsSync(localConfig)) {
+    fail(
+      'this function has its own config.toml, which the CLI does not read. Every ' +
+        'setting in it is ignored, silently. Move it to [functions.send-share-email] ' +
+        'in supabase/config.toml.',
+    )
+  }
+}
+
+/* -- 0b. It parses ----------------------------------------------------------- */
+
+/*
+ * First, because every check below is reading a file, and a file that does not
+ * parse is not a program -- it is a string that happens to look like one. Each of
+ * the checks after this one will happily pass on a file with an unbalanced brace,
+ * because the branch it looks for is still in there, spelled correctly, in the
+ * right place. That is not a hypothetical: an edit that wrapped the handler in a
+ * try/catch left the old `})` closing a callback that no longer existed, and this
+ * test reported six green checks for a function that could not be bundled at all.
+ *
+ * The edge runtime then refused to start the worker -- "The module's source code
+ * could not be parsed" -- and the gateway answered the browser with a 60-byte
+ * `EDGE_FUNCTION_ERROR` naming no file and no line. A green test and a deploy
+ * that reported success, for code that could not run.
+ *
+ * TypeScript's own parser, not a brace count. Braces inside strings, template
+ * literals and regular expressions make counting wrong in both directions, and a
+ * check that cries wolf gets deleted rather than fixed. The compiler is already a
+ * dependency, and its parse diagnostics are exactly syntax -- no module
+ * resolution, so `Deno` and the `jsr:` import do not have to exist here.
+ */
+{
+  checked += 1
+  const ts = require('typescript')
+  const parsed = ts.createSourceFile(
+    fn,
+    fs.readFileSync(fn, 'utf8'),
+    ts.ScriptTarget.ESNext,
+    /* setParentNodes */ true,
+    ts.ScriptKind.TS,
+  )
+
+  if (parsed.parseDiagnostics.length > 0) {
+    const shown = parsed.parseDiagnostics.slice(0, 4).map((d) => {
+      const { line, character } = parsed.getLineAndCharacterOfPosition(d.start ?? 0)
+      return `line ${line + 1}, column ${character + 1}: ${ts.flattenDiagnosticMessageText(
+        d.messageText,
+        ' ',
+      )}`
+    })
+    const more = parsed.parseDiagnostics.length > 4 ? `\n  ...and ${parsed.parseDiagnostics.length - 4} more` : ''
+    fail(
+      `index.ts does not parse, so it cannot be bundled and the function cannot run. ` +
+        `The edge runtime reports this as a bare EDGE_FUNCTION_ERROR with no file and ` +
+        `no line, which is why it is checked here rather than left to the deploy:\n  ` +
+        `${shown.join('\n  ')}${more}`,
+    )
+  }
+}
 
 /* -- 1. The preflight is answered ------------------------------------------- */
 
@@ -269,30 +405,22 @@ const source = code(fn)
   }
 }
 
-/* -- 6. The deployed configuration lets the preflight through ---------------- */
-
-{
-  checked += 1
-  const config = path.join(dir, 'config.toml')
-  if (!fs.existsSync(config)) {
-    fail(
-      'there is no config.toml for this function, so the gateway verifies the JWT ' +
-        'before the function runs -- and a preflight carries no JWT, so it is ' +
-        'answered 401 and the browser never sends the POST.',
-    )
-  } else if (!/verify_jwt\s*=\s*false/.test(fs.readFileSync(config, 'utf8'))) {
-    fail(
-      'config.toml does not set verify_jwt = false. The gateway checks the JWT ' +
-        'before the function runs, and a CORS preflight has none to check.',
-    )
-  }
-}
+/*
+ * Check 6 used to live here and looked for `config.toml` *inside the function's
+ * directory*, which is not a file the CLI reads. It passed for as long as that file
+ * existed and the gateway went on ignoring it -- so the check was reporting on a
+ * setting that had no effect, and it was the only thing standing between a broken
+ * deployment and a green suite. Check 0 looks in the right place, and the
+ * `test:share-email-live` run in CI is what actually confirms the gateway
+ * behaviour, because only the gateway can.
+ */
 
 if (failures === 0) {
   console.log(
-    `share email: ${checked} checks -- the preflight is answered, every response ` +
-      'carries CORS, the origin is allow-listed, the authorisation is intact, and ' +
-      'the template is a file of its own.',
+    `share email: ${checked} checks -- the file parses, the gateway setting is in the ` +
+      'file the CLI reads, the preflight is answered, every response carries CORS, the ' +
+      'origin is allow-listed, the authorisation is intact, and the template is a file ' +
+      'of its own.',
   )
 } else {
   console.log(`\n${failures} check(s) failed.`)

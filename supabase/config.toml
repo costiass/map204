@@ -32,3 +32,26 @@ redirect_uri = "http://localhost:5173/auth/v1/callback"
 
 [realtime]
 enabled = true
+
+# ----------------------------------------------------------------
+# Edge functions
+# ----------------------------------------------------------------
+# Per-function settings live HERE, not in a config.toml inside the function's own
+# directory. The CLI reads one file, this one, and a per-function copy is silently
+# ignored -- which is exactly what happened: `verify_jwt = false` sat next to the
+# function for a deploy and had no effect, so the gateway was still verifying the
+# JWT and still answering a request the browser was entitled to make.
+#
+# It is verified in CI, by asking the deployed URL rather than by reading this file.
+# `test:share-email-live` cannot see the gateway, so nothing local can catch a
+# setting that is written in the wrong place; a comment cannot fail.
+#
+# `verify_jwt = false` on purpose, and it is not a hole. The gateway checks that a
+# token is *valid*; it does not check that the token's user owns the workspace being
+# named in an email. `index.ts` does that with the service role key on every call,
+# so a stronger check replaces the gateway's rather than nothing replacing it. A
+# viewer -- somebody lent the map -- is refused, which is the rule the RLS policies
+# already apply to writes. Without it this endpoint is an open relay: any signed-in
+# account could mail the contents of a map it was only lent to any address.
+[functions.send-share-email]
+verify_jwt = false

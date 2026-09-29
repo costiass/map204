@@ -106,6 +106,50 @@ jobs:
           done
 
       # ------------------------------------------------------------------
+      # The settings the deploy depends on, checked where the CLI reads them.
+      # ------------------------------------------------------------------
+      # `verify_jwt = false` has to be in the ROOT config.toml. A copy inside the
+      # function's own directory is silently ignored -- it sat there through a
+      # deploy and had no effect, so the gateway went on verifying the JWT and
+      # went on refusing requests the browser was entitled to make. Nothing local
+      # can catch that: the edge runtime in a container has no gateway in front of
+      # it, so the whole test suite passed while the setting did nothing.
+      - name: Check per-function settings are where the CLI reads them
+        run: |
+          set -euo pipefail
+
+          status=0
+          for dir in supabase/functions/*/; do
+            [ -d "$dir" ] || continue
+            name="$(basename "$dir")"
+            local_config="$dir/config.toml"
+
+            if [ -f "$local_config" ]; then
+              echo "::error::$name has a config.toml inside its own directory."
+              echo "::error::The CLI only reads supabase/config.toml, so every setting in"
+              echo "::error::that file is ignored. Move it to [functions.$name] at the root."
+              status=1
+              continue
+            fi
+
+            # A function that disables the gateway's JWT check must say so at the
+            # root, or the gateway answers 401 to a preflight.
+            if grep -q "verify_jwt *= *false" "$local_config" 2>/dev/null; then
+              echo "::error::$name disables the gateway JWT check in the wrong file."
+              status=1
+            fi
+          done
+
+          if ! grep -qE '^\[functions\.' supabase/config.toml 2>/dev/null; then
+            if ls -d supabase/functions/*/ >/dev/null 2>&1; then
+              echo "::warning::supabase/config.toml has no [functions.*] section."
+              echo "::warning::That is fine while every function keeps the gateway's JWT check."
+            fi
+          fi
+
+          exit $status
+
+      # ------------------------------------------------------------------
       # Prove the thing that is now serving answers a preflight.
       # ------------------------------------------------------------------
       # A successful `functions deploy` only means the bundle uploaded. The bug
