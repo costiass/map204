@@ -58,7 +58,52 @@ export function DevPanel({ onClose }: { onClose: () => void }) {
     }
   }, [])
 
+  /*
+   * Keep the server column live.
+   *
+   * It was only read when the button was pressed, so the panel said "writing...",
+   * went green, and then sat showing the value from before -- which is the exact
+   * situation the panel exists to rule out. A stale reading beside a fresh queue
+   * looks like a failed save, and the only way to tell it is stale was to notice the
+   * "read N ago" line and press the button.
+   *
+   * Two triggers, because they catch different things:
+   *
+   *   * a completed write, re-read a moment later so the row is visible to the read
+   *     path before it is read -- the columns converge on their own;
+   *   * a slow poll, which catches a write made in another tab, and a write that
+   *     succeeded while this panel was closed.
+   *
+   * Polling stops when the panel closes. There is no reason to read the database
+   * for a window nobody is looking at.
+   */
+  const writes = diag.state.writes
+  useEffect(() => {
+    if (writes === 0) return
+    // Not immediately: the write has only just resolved, and reading in the same
+    // tick races the row being visible.
+    const timer = window.setTimeout(() => void refresh(), 600)
+    return () => window.clearTimeout(timer)
+  }, [writes, refresh])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => void refresh(), 4000)
+    return () => window.clearInterval(timer)
+  }, [refresh])
+
   const { state } = diag
+
+  /*
+   * Whether the two columns can be compared at all.
+   *
+   * A reading older than the last write is not evidence of anything, and showing it
+   * beside a fresh queue is how a working save looks broken. This is the whole
+   * reason the panel has a timestamp on the reading.
+   */
+  const stale =
+    diag.fromServerAt !== null && state.lastSuccessAgeMs !== null
+      ? now - diag.fromServerAt > state.lastSuccessAgeMs
+      : false
 
   // The one thing the user is looking for, as a single word. Ordered so that the
   // worst explanation is never hidden behind a better-looking one: a pending write
@@ -69,7 +114,7 @@ export function DevPanel({ onClose }: { onClose: () => void }) {
     if (state.inFlight) return { tone: 'busy' as const, text: 'writing to the server…' }
     if (state.queued) return { tone: 'busy' as const, text: 'waiting to write (400ms)' }
     if (state.lastSuccessAgeMs === null) return { tone: 'idle' as const, text: 'nothing to save yet' }
-    return { tone: 'good' as const, text: `saved ${ago(state.lastSuccessAgeMs, now)}` }
+    return { tone: 'good' as const, text: `saved ${ago(state.lastSuccessAgeMs)}` }
   })()
 
   return (
@@ -142,13 +187,30 @@ export function DevPanel({ onClose }: { onClose: () => void }) {
             {refreshing ? 'Reading…' : 'Read from server'}
           </button>
           {diag.fromServerAt ? (
-            <span className="text-[10.5px] text-slate-400">
-              read {ago(now - diag.fromServerAt, now)} ago
+            <span
+              className="text-[10.5px]"
+              style={{ color: stale ? '#DC2626' : undefined }}
+              title={
+                stale
+                  ? 'This reading is older than the last write, so the two columns are not comparable yet.'
+                  : undefined
+              }
+            >
+              read {ago(now - diag.fromServerAt)} ago
+              {stale ? ' · older than the last write' : ''}
             </span>
           ) : (
             <span className="text-[10.5px] text-slate-400">not read yet</span>
           )}
         </div>
+
+        {stale ? (
+          <p className="mt-1.5 text-[10.5px] leading-snug text-danger">
+            The reading on the right is older than the last write, so a difference
+            between the two is expected for a moment. It refreshes on its own; press
+            the button if it does not.
+          </p>
+        ) : null}
 
         <p className="mt-1.5 text-[10.5px] leading-snug text-slate-400">
           Pan or zoom the canvas and watch the dot. A change is written 400ms after
@@ -204,11 +266,23 @@ function Json({
   )
 }
 
-function ago(ms: number, now: number): string {
-  const seconds = Math.max(0, Math.round((now - ms) / 1000))
+/**
+ * An age, in words.
+ *
+ * Takes the *duration*, not a timestamp. It took a `(ms, now)` pair and computed
+ * `now - ms`, which is right only for a timestamp -- and the queue already reports
+ * an age, so the two were subtracted twice. The panel claimed the last write was
+ * 497410 hours ago, which is about fifty-six years, and which is what subtracting a
+ * current timestamp from itself looks like. It read as obviously broken rather than
+ * as a small error worth chasing, which is the one mercy.
+ */
+function ago(ageMs: number): string {
+  const seconds = Math.max(0, Math.round(ageMs / 1000))
   if (seconds < 1) return 'just now'
   if (seconds < 60) return `${seconds}s ago`
   const minutes = Math.round(seconds / 60)
   if (minutes < 60) return `${minutes}m ago`
-  return `${Math.round(minutes / 60)}h ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  return `${Math.round(hours / 24)}d ago`
 }

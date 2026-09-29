@@ -505,9 +505,26 @@ export function installCameraSink(): void {
     const userId = useUserSettings.getState().userId
     if (!userId) return
 
+    /*
+     * Only a page that belongs to the open workspace.
+     *
+     * The store holds whichever document is loaded, and the tutorial swaps in a
+     * sample whose pages are `page_01` and `page_02` -- fixed ids from
+     * `src/data/sample.ts`. Nothing about the camera save knew that, so panning
+     * through the tutorial wrote the sample's page ids into the settings file of
+     * whatever workspace happened to be open, alongside the real ones. The file grew
+     * entries for pages that workspace has never had.
+     *
+     * The check is membership, not a pattern: the page has to be in the document
+     * currently loaded. A pattern would be a second rule to keep in step, and the
+     * sample's ids do not look like the app's.
+     */
+    const state = useCanvasStore.getState()
+    if (!state.doc.pages.some((page) => page.id === pageId)) return
+
     queueSettings(userId, documentId, {
       position: {
-        activePageId: useCanvasStore.getState().activePageId,
+        activePageId: state.activePageId,
         pages: { [pageId]: viewport },
       },
     })
